@@ -2,14 +2,14 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Providers;
 
-public sealed class RoutedLlmClient : ILLMClient
+public sealed class RoutedLlmClient : ILlmClient
 {
-    private readonly IReadOnlyDictionary<string, ILLMClient> _providers;
-    private readonly ILLMClient _fallback;
+    private readonly IReadOnlyDictionary<string, ILlmClient> _providers;
+    private readonly ILlmClient _fallback;
 
-    public RoutedLlmClient(IReadOnlyDictionary<string, ILLMClient> providers, ILLMClient fallback)
+    public RoutedLlmClient(IReadOnlyDictionary<string, ILlmClient> providers, ILlmClient fallback)
     {
-        _providers = new Dictionary<string, ILLMClient>(providers, StringComparer.OrdinalIgnoreCase);
+        _providers = new Dictionary<string, ILlmClient>(providers, StringComparer.OrdinalIgnoreCase);
         _fallback = fallback;
     }
 

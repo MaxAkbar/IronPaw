@@ -51,7 +51,7 @@ public sealed class ProvidersTests
     {
         var primary = new StubLlmClient(new AssistantTextDelta("primary"));
         var fallback = new StubLlmClient(new AssistantTextDelta("fallback"));
-        var routed = new RoutedLlmClient(new Dictionary<string, ILLMClient>
+        var routed = new RoutedLlmClient(new Dictionary<string, ILlmClient>
         {
             ["known"] = primary
         }, fallback);
@@ -81,31 +81,14 @@ public sealed class ProvidersTests
     [Fact]
     public async Task OpenAiLlmClient_ParsesAssistantTextToolCallAndUsage()
     {
-        const string responseBody = """
-{
-  "choices": [
-    {
-      "message": {
-        "content": "hello from openai",
-        "tool_calls": [
-          {
-            "id": "call_1",
-            "type": "function",
-            "function": {
-              "name": "write_file",
-              "arguments": "{\"path\":\"Plan.md\",\"content\":\"demo\"}"
-            }
-          }
-        ]
-      }
-    }
-  ],
-  "usage": {
-    "prompt_tokens": 12,
-    "completion_tokens": 7
-  }
-}
-""";
+        // SSE format: each line is "data: <json>" and terminated with "data: [DONE]"
+        const string responseBody =
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello from openai\"},\"finish_reason\":null}]}\n" +
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n" +
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\":\\\"Plan.md\\\",\\\"content\\\":\\\"demo\\\"}\"}}]},\"finish_reason\":null}]}\n" +
+            "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n" +
+            "data: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":7}}\n" +
+            "data: [DONE]\n";
 
         var client = new OpenAiLlmClient(
             new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, responseBody)),
@@ -128,18 +111,17 @@ public sealed class ProvidersTests
     [Fact]
     public async Task AnthropicLlmClient_ParsesTextAndToolUse()
     {
-        const string responseBody = """
-{
-  "content": [
-    { "type": "text", "text": "hello from anthropic" },
-    { "type": "tool_use", "id": "toolu_1", "name": "slugify", "input": { "text": "Hello Test" } }
-  ],
-  "usage": {
-    "input_tokens": 10,
-    "output_tokens": 3
-  }
-}
-""";
+        // SSE format matching Anthropic's event stream protocol
+        const string responseBody =
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n" +
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n" +
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello from anthropic\"}}\n" +
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n" +
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"slugify\"}}\n" +
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"text\\\":\\\"Hello Test\\\"}\"}}\n" +
+            "data: {\"type\":\"content_block_stop\",\"index\":1}\n" +
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":3}}\n" +
+            "data: {\"type\":\"message_stop\"}\n";
 
         var client = new AnthropicLlmClient(
             new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, responseBody)),
@@ -201,7 +183,7 @@ public sealed class ProvidersTests
         return output;
     }
 
-    private sealed class StubLlmClient : ILLMClient
+    private sealed class StubLlmClient : ILlmClient
     {
         private readonly IReadOnlyList<LlmDelta> _deltas;
 

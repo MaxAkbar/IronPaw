@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using IronPaw.AgentCore.Abstractions;
@@ -7,7 +8,10 @@ namespace IronPaw.AgentCore.Persistence;
 public sealed class JsonTranscriptStore : ITranscriptStore
 {
     private readonly string _sessionsDirectory;
-    private readonly SemaphoreSlim _gate = new(1, 1);
+
+    // One gate per session so concurrent operations on different sessions don't block each other.
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly JsonSerializerOptions _serializerOptions = new()
     {
         Converters =
@@ -30,7 +34,8 @@ public sealed class JsonTranscriptStore : ITranscriptStore
             return [];
         }
 
-        await _gate.WaitAsync(ct);
+        var gate = GetGate(key);
+        await gate.WaitAsync(ct);
         try
         {
             var messages = new List<ChatMessage>();
@@ -61,7 +66,7 @@ public sealed class JsonTranscriptStore : ITranscriptStore
         }
         finally
         {
-            _gate.Release();
+            gate.Release();
         }
     }
 
@@ -69,8 +74,9 @@ public sealed class JsonTranscriptStore : ITranscriptStore
     {
         var path = ResolvePath(key);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await _gate.WaitAsync(ct);
 
+        var gate = GetGate(key);
+        await gate.WaitAsync(ct);
         try
         {
             await using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
@@ -84,7 +90,7 @@ public sealed class JsonTranscriptStore : ITranscriptStore
         }
         finally
         {
-            _gate.Release();
+            gate.Release();
         }
     }
 
@@ -94,7 +100,8 @@ public sealed class JsonTranscriptStore : ITranscriptStore
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
 
-        await _gate.WaitAsync(ct);
+        var gate = GetGate(key);
+        await gate.WaitAsync(ct);
         try
         {
             await using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
@@ -119,9 +126,12 @@ public sealed class JsonTranscriptStore : ITranscriptStore
         }
         finally
         {
-            _gate.Release();
+            gate.Release();
         }
     }
+
+    private SemaphoreSlim GetGate(SessionKey key) =>
+        _gates.GetOrAdd(key.Value, _ => new SemaphoreSlim(1, 1));
 
     private string ResolvePath(SessionKey key)
     {

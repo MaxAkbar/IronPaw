@@ -4,7 +4,7 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Providers;
 
-public sealed class RuleBasedLlmClient : ILLMClient
+public sealed class RuleBasedLlmClient : ILlmClient
 {
     private static readonly Regex MarkdownFileRegex = new(
         pattern: @"\b([A-Za-z0-9._-]+\.md)\b",

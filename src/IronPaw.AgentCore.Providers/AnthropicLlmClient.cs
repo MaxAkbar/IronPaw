@@ -1,11 +1,12 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Providers;
 
-public sealed class AnthropicLlmClient : ILLMClient
+public sealed class AnthropicLlmClient : ILlmClient
 {
     private readonly HttpClient _httpClient;
     private readonly Func<string?> _apiKeyResolver;
@@ -34,40 +35,131 @@ public sealed class AnthropicLlmClient : ILLMClient
 
         var payload = BuildPayload(request);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _messagesEndpoint);
-        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         httpRequest.Headers.Add("x-api-key", apiKey);
         httpRequest.Headers.Add("anthropic-version", "2023-06-01");
         httpRequest.Content = JsonContent.Create(payload);
 
         using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
-        var rawBody = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
         {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
             yield return new LlmErrorDelta(
-                $"Anthropic request failed ({(int)response.StatusCode}): {ExtractErrorMessage(rawBody)}");
+                $"Anthropic request failed ({(int)response.StatusCode}): {ExtractErrorMessage(errorBody)}");
             yield break;
         }
 
-        using var document = JsonDocument.Parse(rawBody);
-        var root = document.RootElement;
+        // Track content blocks by their index; tool_use blocks accumulate partial JSON.
+        var contentBlocks = new Dictionary<int, ContentBlockState>();
+        long inputTokens = 0;
+        long outputTokens = 0;
 
-        if (root.TryGetProperty("content", out var contentElement) &&
-            contentElement.ValueKind is JsonValueKind.Array)
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+
+        await foreach (var dataLine in ReadSseDataLinesAsync(reader, ct))
         {
-            foreach (var block in contentElement.EnumerateArray())
+            JsonDocument doc;
+            try
             {
-                foreach (var delta in ParseContentBlock(block))
+                doc = JsonDocument.Parse(dataLine);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            using (doc)
+            {
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("type", out var typeEl)) continue;
+                var eventType = typeEl.GetString();
+
+                switch (eventType)
                 {
-                    yield return delta;
+                    case "message_start":
+                        if (root.TryGetProperty("message", out var msgEl) &&
+                            msgEl.TryGetProperty("usage", out var startUsageEl))
+                        {
+                            inputTokens = TryReadLong(startUsageEl, "input_tokens") ?? 0;
+                        }
+
+                        break;
+
+                    case "content_block_start":
+                    {
+                        var index = root.TryGetProperty("index", out var idxEl) ? idxEl.GetInt32() : -1;
+                        if (index < 0) break;
+
+                        if (!root.TryGetProperty("content_block", out var blockEl)) break;
+                        var blockType = blockEl.TryGetProperty("type", out var btEl) ? btEl.GetString() : null;
+
+                        var state = new ContentBlockState { Type = blockType ?? string.Empty };
+                        if (blockType == "tool_use")
+                        {
+                            state.ToolId = blockEl.TryGetProperty("id", out var tidEl) ? tidEl.GetString() : null;
+                            state.ToolName = blockEl.TryGetProperty("name", out var tnEl) ? tnEl.GetString() : null;
+                        }
+
+                        contentBlocks[index] = state;
+                        break;
+                    }
+
+                    case "content_block_delta":
+                    {
+                        var index = root.TryGetProperty("index", out var idxEl) ? idxEl.GetInt32() : -1;
+                        if (index < 0 || !contentBlocks.TryGetValue(index, out var state)) break;
+                        if (!root.TryGetProperty("delta", out var deltaEl)) break;
+
+                        var deltaType = deltaEl.TryGetProperty("type", out var dtEl) ? dtEl.GetString() : null;
+
+                        if (deltaType == "text_delta" &&
+                            deltaEl.TryGetProperty("text", out var textEl))
+                        {
+                            var text = textEl.GetString();
+                            if (!string.IsNullOrEmpty(text))
+                            {
+                                yield return new AssistantTextDelta(text);
+                            }
+                        }
+                        else if (deltaType == "input_json_delta" &&
+                                 deltaEl.TryGetProperty("partial_json", out var jsonEl))
+                        {
+                            state.AccumulatedJson.Append(jsonEl.GetString());
+                        }
+
+                        break;
+                    }
+
+                    case "content_block_stop":
+                    {
+                        var index = root.TryGetProperty("index", out var idxEl) ? idxEl.GetInt32() : -1;
+                        if (index >= 0 && contentBlocks.TryGetValue(index, out var state) &&
+                            state.Type == "tool_use")
+                        {
+                            var id = state.ToolId ?? Guid.NewGuid().ToString("n");
+                            var name = state.ToolName ?? "unknown_tool";
+                            var args = ParseJsonArguments(state.AccumulatedJson.ToString());
+                            yield return new ToolCallDelta(id, name, args);
+                        }
+
+                        break;
+                    }
+
+                    case "message_delta":
+                        if (root.TryGetProperty("usage", out var deltaUsageEl))
+                        {
+                            outputTokens = TryReadLong(deltaUsageEl, "output_tokens") ?? 0;
+                        }
+
+                        yield return new UsageDelta(inputTokens, outputTokens, CacheReadTokens: null, CacheWriteTokens: null);
+                        break;
+
+                    case "message_stop":
+                        yield return new CompletedDelta();
+                        yield break;
                 }
             }
-        }
-
-        if (root.TryGetProperty("usage", out var usage))
-        {
-            var inputTokens = TryReadLong(usage, "input_tokens");
-            var outputTokens = TryReadLong(usage, "output_tokens");
-            yield return new UsageDelta(inputTokens, outputTokens, CacheReadTokens: null, CacheWriteTokens: null);
         }
 
         yield return new CompletedDelta();
@@ -87,9 +179,10 @@ public sealed class AnthropicLlmClient : ILLMClient
         {
             ["model"] = request.Model,
             ["system"] = request.SystemPrompt,
-            ["max_tokens"] = 2_048,
+            ["max_tokens"] = request.MaxOutputTokens,
             ["messages"] = BuildMessages(request.Messages),
-            ["tools"] = tools
+            ["tools"] = tools,
+            ["stream"] = true
         };
     }
 
@@ -155,37 +248,37 @@ public sealed class AnthropicLlmClient : ILLMClient
         return messages;
     }
 
-    private static IEnumerable<LlmDelta> ParseContentBlock(JsonElement block)
+    private static async IAsyncEnumerable<string> ReadSseDataLinesAsync(
+        StreamReader reader,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
-        if (!block.TryGetProperty("type", out var typeElement) || typeElement.ValueKind is not JsonValueKind.String)
+        while (true)
         {
-            yield break;
-        }
-
-        var type = typeElement.GetString();
-        if (type == "text" && block.TryGetProperty("text", out var textElement))
-        {
-            var text = textElement.GetString();
-            if (!string.IsNullOrWhiteSpace(text))
+            ct.ThrowIfCancellationRequested();
+            var line = await reader.ReadLineAsync(ct);
+            if (line is null) yield break;
+            if (line.StartsWith("data:", StringComparison.Ordinal))
             {
-                yield return new AssistantTextDelta(text);
+                yield return line["data:".Length..].Trim();
             }
+        }
+    }
 
-            yield break;
+    private static JsonElement ParseJsonArguments(string rawArguments)
+    {
+        if (string.IsNullOrWhiteSpace(rawArguments))
+        {
+            return JsonSerializer.SerializeToElement(new Dictionary<string, object?>());
         }
 
-        if (type == "tool_use")
+        try
         {
-            var id = block.TryGetProperty("id", out var idElement)
-                ? idElement.GetString() ?? Guid.NewGuid().ToString("n")
-                : Guid.NewGuid().ToString("n");
-            var name = block.TryGetProperty("name", out var nameElement)
-                ? nameElement.GetString() ?? "unknown_tool"
-                : "unknown_tool";
-            var input = block.TryGetProperty("input", out var inputElement)
-                ? inputElement.Clone()
-                : JsonSerializer.SerializeToElement(new Dictionary<string, object?>());
-            yield return new ToolCallDelta(id, name, input);
+            using var document = JsonDocument.Parse(rawArguments);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["raw"] = rawArguments });
         }
     }
 
@@ -198,30 +291,17 @@ public sealed class AnthropicLlmClient : ILLMClient
         }
         catch (JsonException)
         {
-            return new Dictionary<string, object?>
-            {
-                ["raw"] = content
-            };
+            return new Dictionary<string, object?> { ["raw"] = content };
         }
     }
 
-    private static object? ToUntypedObject(JsonElement element)
-    {
-        return JsonSerializer.Deserialize<object>(element.GetRawText());
-    }
+    private static object? ToUntypedObject(JsonElement element) =>
+        JsonSerializer.Deserialize<object>(element.GetRawText());
 
     private static long? TryReadLong(JsonElement element, string property)
     {
-        if (!element.TryGetProperty(property, out var value))
-        {
-            return null;
-        }
-
-        return value.ValueKind switch
-        {
-            JsonValueKind.Number => value.GetInt64(),
-            _ => null
-        };
+        if (!element.TryGetProperty(property, out var value)) return null;
+        return value.ValueKind is JsonValueKind.Number ? value.GetInt64() : null;
     }
 
     private static string ExtractErrorMessage(string rawBody)
@@ -229,19 +309,22 @@ public sealed class AnthropicLlmClient : ILLMClient
         try
         {
             using var document = JsonDocument.Parse(rawBody);
-            if (document.RootElement.TryGetProperty("error", out var errorElement))
+            if (document.RootElement.TryGetProperty("error", out var errorElement) &&
+                errorElement.TryGetProperty("message", out var messageElement))
             {
-                if (errorElement.TryGetProperty("message", out var messageElement))
-                {
-                    return messageElement.GetString() ?? "Unknown Anthropic error.";
-                }
+                return messageElement.GetString() ?? "Unknown Anthropic error.";
             }
         }
-        catch (JsonException)
-        {
-            // Fall through to raw body output.
-        }
+        catch (JsonException) { }
 
         return rawBody.Length > 400 ? rawBody[..400] : rawBody;
+    }
+
+    private sealed class ContentBlockState
+    {
+        public string Type { get; init; } = string.Empty;
+        public string? ToolId { get; set; }
+        public string? ToolName { get; set; }
+        public StringBuilder AccumulatedJson { get; } = new();
     }
 }

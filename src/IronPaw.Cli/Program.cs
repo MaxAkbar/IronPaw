@@ -468,7 +468,7 @@ static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult) B
     return (orchestrator, skillLoadResult);
 }
 
-static ILLMClient BuildLlmRouter()
+static ILlmClient BuildLlmRouter()
 {
     var sharedHttpClient = new HttpClient
     {
@@ -495,7 +495,7 @@ static ILLMClient BuildLlmRouter()
         sharedHttpClient,
         () => Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"));
 
-    var providers = new Dictionary<string, ILLMClient>(StringComparer.OrdinalIgnoreCase)
+    var providers = new Dictionary<string, ILlmClient>(StringComparer.OrdinalIgnoreCase)
     {
         ["local"] = local,
         ["openai"] = openAi,
@@ -848,15 +848,15 @@ internal sealed record CliOptions(
             .AddColumn("[bold]Option[/]")
             .AddColumn("[bold]Description[/]");
 
-        table.AddRow("`-h, --help`", "Show help");
-        table.AddRow("`-p, --provider <name>`", "Provider: `local` | `openai` | `ollama` | `lmstudio` | `anthropic` (default: `local`)");
-        table.AddRow("`-m, --model <id>`", "Model id (provider-specific default if omitted)");
-        table.AddRow("`-s, --session <key>`", "Session key (default: `default`)");
-        table.AddRow("`--prompt <text>`", "Prompt text");
-        table.AddRow("`--prompt-file <path>`", "Read prompt from file");
-        table.AddRow("`--profile <name>`", "Tool profile: `Minimal` | `Coding` | `Messaging` | `Full`");
-        table.AddRow("`--list-skills`", "List discovered add-in skills and exit");
-        table.AddRow("`--no-events`", "Hide event stream logs");
+        table.AddRow("-h, --help", "Show help");
+        table.AddRow("-p, --provider <name>", "Provider: local | openai | ollama | lmstudio | anthropic (default: local)");
+        table.AddRow("-m, --model <id>", "Model id (provider-specific default if omitted)");
+        table.AddRow("-s, --session <key>", "Session key (default: default)");
+        table.AddRow("--prompt <text>", "Prompt text");
+        table.AddRow("--prompt-file <path>", "Read prompt from file");
+        table.AddRow("--profile <name>", "Tool profile: Minimal | Coding | Messaging | Full");
+        table.AddRow("--list-skills", "List discovered add-in skills and exit");
+        table.AddRow("--no-events", "Hide event stream logs");
 
         AnsiConsole.Write(new Rule("[bold deepskyblue1]IronPaw CLI[/]").LeftJustified());
         AnsiConsole.MarkupLine("[bold]Usage[/]");

@@ -183,7 +183,7 @@ public partial class MainWindow : Window
         return (orchestrator, skillLoadResult);
     }
 
-    private static ILLMClient BuildLlmRouter()
+    private static ILlmClient BuildLlmRouter()
     {
         var local = new RuleBasedLlmClient();
         var openAi = new OpenAiLlmClient(
@@ -205,7 +205,7 @@ public partial class MainWindow : Window
             SharedHttpClient,
             () => Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"));
 
-        var providers = new Dictionary<string, ILLMClient>(StringComparer.OrdinalIgnoreCase)
+        var providers = new Dictionary<string, ILlmClient>(StringComparer.OrdinalIgnoreCase)
         {
             ["local"] = local,
             ["openai"] = openAi,

@@ -1,6 +1,5 @@
 using System.Text;
 using IronPaw.AgentCore.Abstractions;
-using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore;
 
@@ -10,9 +9,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private readonly ISessionStore _sessionStore;
     private readonly ITranscriptStore _transcriptStore;
     private readonly IToolRegistry _toolRegistry;
-    private readonly ToolExecutor _toolExecutor;
-    private readonly ToolSchemaNormalizer _schemaNormalizer;
-    private readonly ILLMClient _llmClient;
+    private readonly IToolExecutor _toolExecutor;
+    private readonly IToolSchemaNormalizer _schemaNormalizer;
+    private readonly ILlmClient _llmClient;
     private readonly ITranscriptSanitizer _transcriptSanitizer;
     private readonly IToolResultTruncator _toolResultTruncator;
     private readonly ISystemPromptBuilder _promptBuilder;
@@ -22,9 +21,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         ISessionStore sessionStore,
         ITranscriptStore transcriptStore,
         IToolRegistry toolRegistry,
-        ToolExecutor toolExecutor,
-        ToolSchemaNormalizer schemaNormalizer,
-        ILLMClient llmClient,
+        IToolExecutor toolExecutor,
+        IToolSchemaNormalizer schemaNormalizer,
+        ILlmClient llmClient,
         ITranscriptSanitizer transcriptSanitizer,
         IToolResultTruncator toolResultTruncator,
         ISystemPromptBuilder promptBuilder)
@@ -92,11 +91,14 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     ("toolCount", tools.Count))),
             ct);
 
-        const int maxRounds = 6;
+        var maxRounds = request.MaxRounds;
+        var savedInLastIteration = false;
+
         while (rounds < maxRounds)
         {
             ct.ThrowIfCancellationRequested();
             rounds++;
+            savedInLastIteration = false;
 
             var toolDefinitions = tools.Select(tool => _schemaNormalizer.ToDefinition(tool, request.Provider)).ToArray();
             var llmRequest = new LlmRequest(
@@ -107,7 +109,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 systemPrompt,
                 transcript,
                 toolDefinitions,
-                Timeout: TimeSpan.FromMinutes(2));
+                Timeout: TimeSpan.FromMinutes(2),
+                MaxOutputTokens: request.MaxOutputTokens);
 
             var assistantBuffer = new StringBuilder();
             var pendingToolCalls = new List<ToolCall>();
@@ -142,8 +145,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         break;
 
                     case ToolCallDelta toolCall:
+                        // Collect tool calls; do NOT add to transcript here — text must come first.
                         pendingToolCalls.Add(new ToolCall(toolCall.ToolCallId, toolCall.ToolName, toolCall.Arguments.Clone()));
-                        transcript.Add(new ChatMessage(ChatRole.Assistant, toolCall.Arguments.GetRawText(), toolCall.ToolCallId, toolCall.ToolName));
                         await PublishAsync(
                             sink,
                             new AgentEvent(
@@ -163,12 +166,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         aggregatedOutput += usage.OutputTokens ?? 0;
                         if (usage.CacheReadTokens.HasValue)
                         {
-                            lastCacheRead = usage.CacheReadTokens.Value;
+                            lastCacheRead += usage.CacheReadTokens.Value;
                         }
 
                         if (usage.CacheWriteTokens.HasValue)
                         {
-                            lastCacheWrite = usage.CacheWriteTokens.Value;
+                            lastCacheWrite += usage.CacheWriteTokens.Value;
                         }
 
                         break;
@@ -178,10 +181,17 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
             }
 
+            // Add text first, then tool-call messages, so the transcript never has two
+            // consecutive assistant messages from the same response (text before tool calls).
             var assistantText = assistantBuffer.ToString().Trim();
             if (!string.IsNullOrWhiteSpace(assistantText))
             {
                 transcript.Add(new ChatMessage(ChatRole.Assistant, assistantText));
+            }
+
+            foreach (var toolCall in pendingToolCalls)
+            {
+                transcript.Add(new ChatMessage(ChatRole.Assistant, toolCall.Arguments.GetRawText(), toolCall.ToolCallId, toolCall.ToolName));
             }
 
             if (pendingToolCalls.Count == 0)
@@ -228,6 +238,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             transcript = _toolResultTruncator.Truncate(transcript, request.ContextWindowChars).ToList();
             transcript = _transcriptSanitizer.Repair(transcript).ToList();
             await _transcriptStore.ReplaceAsync(request.SessionKey, transcript, ct);
+            savedInLastIteration = true;
         }
 
         if (string.IsNullOrWhiteSpace(finalAssistantMessage))
@@ -237,7 +248,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 ?.Content ?? "Run completed with no assistant output.";
         }
 
-        await _transcriptStore.ReplaceAsync(request.SessionKey, transcript, ct);
+        // Only save when the loop exited cleanly (no tool calls in last round).
+        // When tool calls occurred in the last round, the transcript was already saved inside the loop.
+        if (!savedInLastIteration)
+        {
+            await _transcriptStore.ReplaceAsync(request.SessionKey, transcript, ct);
+        }
 
         var totalTokens = aggregatedInput + aggregatedOutput + lastCacheRead + lastCacheWrite;
         await _sessionStore.UpsertAsync(

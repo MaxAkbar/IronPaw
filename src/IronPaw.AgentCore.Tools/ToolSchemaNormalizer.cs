@@ -3,7 +3,7 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tools;
 
-public sealed class ToolSchemaNormalizer
+public sealed class ToolSchemaNormalizer : IToolSchemaNormalizer
 {
     public LlmToolDefinition ToDefinition(ITool tool, string provider)
     {

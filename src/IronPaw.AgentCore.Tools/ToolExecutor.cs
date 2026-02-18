@@ -2,7 +2,7 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tools;
 
-public sealed class ToolExecutor
+public sealed class ToolExecutor : IToolExecutor
 {
     private readonly IToolHookRunner _hooks;
 

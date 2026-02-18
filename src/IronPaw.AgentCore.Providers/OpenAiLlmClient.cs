@@ -1,11 +1,12 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Providers;
 
-public sealed class OpenAiLlmClient : ILLMClient
+public sealed class OpenAiLlmClient : ILlmClient
 {
     private readonly HttpClient _httpClient;
     private readonly Func<string?> _apiKeyResolver;
@@ -32,37 +33,133 @@ public sealed class OpenAiLlmClient : ILLMClient
         var payload = BuildPayload(request);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _chatCompletionsEndpoint);
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         httpRequest.Content = JsonContent.Create(payload);
 
         using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
-        var rawBody = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
         {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
             yield return new LlmErrorDelta(
-                $"OpenAI request failed ({(int)response.StatusCode}): {ExtractErrorMessage(rawBody)}");
+                $"OpenAI request failed ({(int)response.StatusCode}): {ExtractErrorMessage(errorBody)}");
             yield break;
         }
 
-        using var document = JsonDocument.Parse(rawBody);
-        var root = document.RootElement;
-        if (!root.TryGetProperty("choices", out var choicesElement) || choicesElement.GetArrayLength() == 0)
+        // Accumulate tool-call argument fragments per index; emit complete calls at finish.
+        var toolCallBuilders = new Dictionary<int, ToolCallBuilder>();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+
+        await foreach (var dataLine in ReadSseDataLinesAsync(reader, ct))
         {
-            yield return new LlmErrorDelta("OpenAI response did not include choices.");
-            yield break;
+            if (dataLine == "[DONE]") break;
+
+            JsonDocument doc;
+            try
+            {
+                doc = JsonDocument.Parse(dataLine);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            using (doc)
+            {
+                var root = doc.RootElement;
+
+                // Usage-only chunk emitted by stream_options: include_usage
+                if (!root.TryGetProperty("choices", out var choicesEl) || choicesEl.GetArrayLength() == 0)
+                {
+                    if (root.TryGetProperty("usage", out var topUsageEl))
+                    {
+                        yield return new UsageDelta(
+                            TryReadLong(topUsageEl, "prompt_tokens"),
+                            TryReadLong(topUsageEl, "completion_tokens"),
+                            CacheReadTokens: null,
+                            CacheWriteTokens: null);
+                    }
+
+                    continue;
+                }
+
+                var choice = choicesEl[0];
+                if (!choice.TryGetProperty("delta", out var delta)) continue;
+
+                // Text content — emit immediately for real-time streaming
+                if (delta.TryGetProperty("content", out var contentEl) &&
+                    contentEl.ValueKind is JsonValueKind.String)
+                {
+                    var text = contentEl.GetString();
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        yield return new AssistantTextDelta(text);
+                    }
+                }
+
+                // Tool-call fragments — accumulate until finish
+                if (delta.TryGetProperty("tool_calls", out var toolCallsEl) &&
+                    toolCallsEl.ValueKind is JsonValueKind.Array)
+                {
+                    foreach (var tcEl in toolCallsEl.EnumerateArray())
+                    {
+                        if (!tcEl.TryGetProperty("index", out var indexEl)) continue;
+                        var index = indexEl.GetInt32();
+
+                        if (!toolCallBuilders.TryGetValue(index, out var builder))
+                        {
+                            builder = new ToolCallBuilder(index);
+                            toolCallBuilders[index] = builder;
+                        }
+
+                        if (tcEl.TryGetProperty("id", out var idEl))
+                        {
+                            builder.Id = idEl.GetString() ?? builder.Id;
+                        }
+
+                        if (tcEl.TryGetProperty("function", out var funcEl))
+                        {
+                            if (funcEl.TryGetProperty("name", out var nameEl))
+                            {
+                                builder.Name = nameEl.GetString() ?? builder.Name;
+                            }
+
+                            if (funcEl.TryGetProperty("arguments", out var argsEl) &&
+                                argsEl.ValueKind is JsonValueKind.String)
+                            {
+                                builder.Arguments.Append(argsEl.GetString());
+                            }
+                        }
+                    }
+                }
+
+                // On finish, emit any accumulated tool calls
+                if (choice.TryGetProperty("finish_reason", out var finishEl) &&
+                    finishEl.ValueKind is JsonValueKind.String &&
+                    finishEl.GetString() is { } finishReason &&
+                    finishReason is "tool_calls" or "stop")
+                {
+                    foreach (var builder in toolCallBuilders.Values.OrderBy(b => b.Index))
+                    {
+                        yield return new ToolCallDelta(
+                            builder.Id ?? Guid.NewGuid().ToString("n"),
+                            builder.Name ?? "unknown_tool",
+                            ParseJsonArguments(builder.Arguments.ToString()));
+                    }
+
+                    toolCallBuilders.Clear();
+                }
+            }
         }
 
-        var message = choicesElement[0].GetProperty("message");
-        foreach (var delta in ParseMessage(message))
+        // Emit any remaining tool calls (some local models omit a finish_reason chunk)
+        foreach (var builder in toolCallBuilders.Values.OrderBy(b => b.Index))
         {
-            yield return delta;
-        }
-
-        if (root.TryGetProperty("usage", out var usage))
-        {
-            var inputTokens = TryReadLong(usage, "prompt_tokens");
-            var outputTokens = TryReadLong(usage, "completion_tokens");
-            yield return new UsageDelta(inputTokens, outputTokens, CacheReadTokens: null, CacheWriteTokens: null);
+            yield return new ToolCallDelta(
+                builder.Id ?? Guid.NewGuid().ToString("n"),
+                builder.Name ?? "unknown_tool",
+                ParseJsonArguments(builder.Arguments.ToString()));
         }
 
         yield return new CompletedDelta();
@@ -87,7 +184,10 @@ public sealed class OpenAiLlmClient : ILLMClient
             ["model"] = request.Model,
             ["messages"] = BuildMessages(request),
             ["tools"] = tools,
-            ["tool_choice"] = "auto"
+            ["tool_choice"] = "auto",
+            ["max_tokens"] = request.MaxOutputTokens,
+            ["stream"] = true,
+            ["stream_options"] = new Dictionary<string, object?> { ["include_usage"] = true }
         };
     }
 
@@ -158,58 +258,29 @@ public sealed class OpenAiLlmClient : ILLMClient
         return messages;
     }
 
-    private static IEnumerable<LlmDelta> ParseMessage(JsonElement message)
+    private static async IAsyncEnumerable<string> ReadSseDataLinesAsync(
+        StreamReader reader,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
-        if (message.TryGetProperty("content", out var contentElement))
+        while (true)
         {
-            if (contentElement.ValueKind is JsonValueKind.String)
+            ct.ThrowIfCancellationRequested();
+            var line = await reader.ReadLineAsync(ct);
+            if (line is null) yield break;
+            if (line.StartsWith("data:", StringComparison.Ordinal))
             {
-                var text = contentElement.GetString();
-                if (!string.IsNullOrWhiteSpace(text))
-                {
-                    yield return new AssistantTextDelta(text);
-                }
-            }
-            else if (contentElement.ValueKind is JsonValueKind.Array)
-            {
-                foreach (var item in contentElement.EnumerateArray())
-                {
-                    if (item.ValueKind is JsonValueKind.Object &&
-                        item.TryGetProperty("type", out var typeElement) &&
-                        typeElement.ValueKind is JsonValueKind.String &&
-                        typeElement.GetString() == "text" &&
-                        item.TryGetProperty("text", out var textElement))
-                    {
-                        var text = textElement.GetString();
-                        if (!string.IsNullOrWhiteSpace(text))
-                        {
-                            yield return new AssistantTextDelta(text);
-                        }
-                    }
-                }
-            }
-        }
-
-        if (message.TryGetProperty("tool_calls", out var toolCallsElement) &&
-            toolCallsElement.ValueKind is JsonValueKind.Array)
-        {
-            foreach (var toolCallElement in toolCallsElement.EnumerateArray())
-            {
-                var toolCallId = toolCallElement.GetProperty("id").GetString() ?? Guid.NewGuid().ToString("n");
-                var function = toolCallElement.GetProperty("function");
-                var toolName = function.GetProperty("name").GetString() ?? "unknown_tool";
-                var rawArguments = function.TryGetProperty("arguments", out var argsElement)
-                    ? argsElement.GetString() ?? "{}"
-                    : "{}";
-                var arguments = ParseJsonArguments(rawArguments);
-
-                yield return new ToolCallDelta(toolCallId, toolName, arguments);
+                yield return line["data:".Length..].Trim();
             }
         }
     }
 
     private static JsonElement ParseJsonArguments(string rawArguments)
     {
+        if (string.IsNullOrWhiteSpace(rawArguments))
+        {
+            return JsonSerializer.SerializeToElement(new Dictionary<string, object?>());
+        }
+
         try
         {
             using var document = JsonDocument.Parse(rawArguments);
@@ -217,20 +288,13 @@ public sealed class OpenAiLlmClient : ILLMClient
         }
         catch (JsonException)
         {
-            return JsonSerializer.SerializeToElement(
-                new Dictionary<string, object?>
-                {
-                    ["raw"] = rawArguments
-                });
+            return JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["raw"] = rawArguments });
         }
     }
 
     private static string CoerceJsonString(string content)
     {
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return "{}";
-        }
+        if (string.IsNullOrWhiteSpace(content)) return "{}";
 
         try
         {
@@ -239,31 +303,17 @@ public sealed class OpenAiLlmClient : ILLMClient
         }
         catch (JsonException)
         {
-            return JsonSerializer.Serialize(
-                new Dictionary<string, object?>
-                {
-                    ["raw"] = content
-                });
+            return JsonSerializer.Serialize(new Dictionary<string, object?> { ["raw"] = content });
         }
     }
 
-    private static object? ToUntypedObject(JsonElement element)
-    {
-        return JsonSerializer.Deserialize<object>(element.GetRawText());
-    }
+    private static object? ToUntypedObject(JsonElement element) =>
+        JsonSerializer.Deserialize<object>(element.GetRawText());
 
     private static long? TryReadLong(JsonElement element, string property)
     {
-        if (!element.TryGetProperty(property, out var value))
-        {
-            return null;
-        }
-
-        return value.ValueKind switch
-        {
-            JsonValueKind.Number => value.GetInt64(),
-            _ => null
-        };
+        if (!element.TryGetProperty(property, out var value)) return null;
+        return value.ValueKind is JsonValueKind.Number ? value.GetInt64() : null;
     }
 
     private static string ExtractErrorMessage(string rawBody)
@@ -271,19 +321,22 @@ public sealed class OpenAiLlmClient : ILLMClient
         try
         {
             using var document = JsonDocument.Parse(rawBody);
-            if (document.RootElement.TryGetProperty("error", out var errorElement))
+            if (document.RootElement.TryGetProperty("error", out var errorElement) &&
+                errorElement.TryGetProperty("message", out var messageElement))
             {
-                if (errorElement.TryGetProperty("message", out var messageElement))
-                {
-                    return messageElement.GetString() ?? "Unknown OpenAI error.";
-                }
+                return messageElement.GetString() ?? "Unknown OpenAI error.";
             }
         }
-        catch (JsonException)
-        {
-            // Fall through to truncated raw body.
-        }
+        catch (JsonException) { }
 
         return rawBody.Length > 400 ? rawBody[..400] : rawBody;
+    }
+
+    private sealed class ToolCallBuilder(int index)
+    {
+        public int Index { get; } = index;
+        public string? Id { get; set; }
+        public string? Name { get; set; }
+        public StringBuilder Arguments { get; } = new();
     }
 }

@@ -145,6 +145,16 @@ public interface IToolRegistry
     IReadOnlyList<ITool> ResolveTools(ToolSelectionPolicy policy);
 }
 
+public interface IToolExecutor
+{
+    Task<ToolResult> ExecuteAsync(ITool tool, ToolCall call, ToolExecutionContext context, CancellationToken ct);
+}
+
+public interface IToolSchemaNormalizer
+{
+    LlmToolDefinition ToDefinition(ITool tool, string provider);
+}
+
 public sealed record SkillDescriptor(
     string Name,
     string Description,
@@ -259,7 +269,8 @@ public sealed record LlmRequest(
     string SystemPrompt,
     IReadOnlyList<ChatMessage> Messages,
     IReadOnlyList<LlmToolDefinition> Tools,
-    TimeSpan Timeout);
+    TimeSpan Timeout,
+    int MaxOutputTokens = 4096);
 
 public abstract record LlmDelta;
 
@@ -280,7 +291,7 @@ public sealed record CompletedDelta : LlmDelta;
 
 public sealed record LlmErrorDelta(string Error) : LlmDelta;
 
-public interface ILLMClient
+public interface ILlmClient
 {
     IAsyncEnumerable<LlmDelta> StreamAsync(LlmRequest request, CancellationToken ct);
 }
@@ -343,7 +354,9 @@ public sealed record AgentRunRequest(
     string Model,
     ToolSelectionPolicy ToolPolicy,
     int ContextWindowChars = 32_768,
-    string? SystemPromptOverride = null);
+    string? SystemPromptOverride = null,
+    int MaxOutputTokens = 4096,
+    int MaxRounds = 6);
 
 public sealed record AgentRunResult(
     RunId RunId,
