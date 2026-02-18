@@ -1,0 +1,372 @@
+using System.Collections.ObjectModel;
+using System.Text.Json;
+
+namespace IronPaw.AgentCore.Abstractions;
+
+public readonly record struct SessionKey
+{
+    public SessionKey(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("Session key cannot be null or empty.", nameof(value));
+        }
+
+        Value = value.Trim();
+    }
+
+    public string Value { get; }
+
+    public static SessionKey New() => new(Guid.NewGuid().ToString("n"));
+
+    public override string ToString() => Value;
+}
+
+public readonly record struct RunId
+{
+    public RunId(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("Run id cannot be null or empty.", nameof(value));
+        }
+
+        Value = value.Trim();
+    }
+
+    public string Value { get; }
+
+    public static RunId New() => new(Guid.NewGuid().ToString("n"));
+
+    public override string ToString() => Value;
+}
+
+public enum AgentEventStream
+{
+    Lifecycle,
+    Assistant,
+    Reasoning,
+    Tool,
+    Compaction,
+    Diagnostics
+}
+
+public enum AgentEventSeverity
+{
+    Info,
+    Warning,
+    Error
+}
+
+public sealed record AgentEvent(
+    RunId RunId,
+    SessionKey SessionKey,
+    AgentEventStream Stream,
+    string Type,
+    DateTimeOffset Timestamp,
+    IReadOnlyDictionary<string, object?> Data,
+    AgentEventSeverity Severity = AgentEventSeverity.Info);
+
+public interface IAgentEventSink
+{
+    ValueTask PublishAsync(AgentEvent evt, CancellationToken ct);
+}
+
+public sealed class NullAgentEventSink : IAgentEventSink
+{
+    public static readonly NullAgentEventSink Instance = new();
+
+    private NullAgentEventSink()
+    {
+    }
+
+    public ValueTask PublishAsync(AgentEvent evt, CancellationToken ct) => ValueTask.CompletedTask;
+}
+
+public enum ToolProfile
+{
+    Minimal,
+    Coding,
+    Messaging,
+    Full
+}
+
+public sealed record ToolSelectionPolicy(
+    ToolProfile Profile,
+    bool SenderIsOwner,
+    IReadOnlyCollection<string>? AllowList = null,
+    IReadOnlyCollection<string>? DenyList = null,
+    IReadOnlyCollection<string>? AllowedGroups = null,
+    int SubagentDepth = 0);
+
+public sealed record ToolDescriptor(
+    string Name,
+    string Description,
+    JsonElement ParametersSchema,
+    string Group,
+    bool OwnerOnly = false);
+
+public sealed record ToolCall(
+    string ToolCallId,
+    string ToolName,
+    JsonElement Arguments);
+
+public sealed record ToolExecutionContext(
+    RunId RunId,
+    SessionKey SessionKey,
+    string Provider,
+    string Model);
+
+public sealed record ToolResult(
+    bool IsError,
+    string Content,
+    IReadOnlyDictionary<string, object?>? Details = null)
+{
+    public static ToolResult Success(string content, IReadOnlyDictionary<string, object?>? details = null)
+    {
+        return new ToolResult(false, content, details);
+    }
+
+    public static ToolResult Error(string message, IReadOnlyDictionary<string, object?>? details = null)
+    {
+        return new ToolResult(true, message, details);
+    }
+}
+
+public interface ITool
+{
+    ToolDescriptor Descriptor { get; }
+
+    Task<ToolResult> ExecuteAsync(ToolCall call, ToolExecutionContext context, CancellationToken ct);
+}
+
+public interface IToolRegistry
+{
+    IReadOnlyList<ITool> ResolveTools(ToolSelectionPolicy policy);
+}
+
+public sealed record SkillDescriptor(
+    string Name,
+    string Description,
+    JsonElement InputSchema);
+
+public sealed record SkillCall(
+    string SkillCallId,
+    string SkillName,
+    JsonElement Arguments);
+
+public sealed record SkillExecutionContext(
+    RunId RunId,
+    SessionKey SessionKey,
+    string Provider,
+    string Model);
+
+public sealed record SkillResult(
+    bool IsError,
+    string Content,
+    IReadOnlyDictionary<string, object?>? Details = null)
+{
+    public static SkillResult Success(string content, IReadOnlyDictionary<string, object?>? details = null)
+    {
+        return new SkillResult(false, content, details);
+    }
+
+    public static SkillResult Error(string message, IReadOnlyDictionary<string, object?>? details = null)
+    {
+        return new SkillResult(true, message, details);
+    }
+}
+
+public interface ISkill
+{
+    SkillDescriptor Descriptor { get; }
+
+    Task<SkillResult> ExecuteAsync(SkillCall call, SkillExecutionContext context, CancellationToken ct);
+}
+
+public interface ISkillAddin
+{
+    string AddinId { get; }
+
+    string Description { get; }
+
+    IReadOnlyList<ISkill> CreateSkills();
+}
+
+public sealed record ToolMiddlewareContext(
+    ToolCall Call,
+    ToolExecutionContext ExecutionContext,
+    ITool Tool);
+
+public interface IToolHookRunner
+{
+    ValueTask<ToolCall> BeforeToolCallAsync(ToolMiddlewareContext context, CancellationToken ct);
+
+    ValueTask AfterToolCallAsync(
+        ToolMiddlewareContext context,
+        ToolResult? result,
+        Exception? error,
+        CancellationToken ct);
+}
+
+public sealed class NullToolHookRunner : IToolHookRunner
+{
+    public static readonly NullToolHookRunner Instance = new();
+
+    private NullToolHookRunner()
+    {
+    }
+
+    public ValueTask<ToolCall> BeforeToolCallAsync(ToolMiddlewareContext context, CancellationToken ct)
+    {
+        return ValueTask.FromResult(context.Call);
+    }
+
+    public ValueTask AfterToolCallAsync(
+        ToolMiddlewareContext context,
+        ToolResult? result,
+        Exception? error,
+        CancellationToken ct)
+    {
+        return ValueTask.CompletedTask;
+    }
+}
+
+public sealed record ChatMessage(
+    ChatRole Role,
+    string Content,
+    string? ToolCallId = null,
+    string? ToolName = null);
+
+public enum ChatRole
+{
+    System,
+    User,
+    Assistant,
+    Tool
+}
+
+public sealed record LlmToolDefinition(
+    string Name,
+    string Description,
+    JsonElement ParametersSchema);
+
+public sealed record LlmRequest(
+    RunId RunId,
+    SessionKey SessionKey,
+    string Provider,
+    string Model,
+    string SystemPrompt,
+    IReadOnlyList<ChatMessage> Messages,
+    IReadOnlyList<LlmToolDefinition> Tools,
+    TimeSpan Timeout);
+
+public abstract record LlmDelta;
+
+public sealed record AssistantTextDelta(string Text) : LlmDelta;
+
+public sealed record ToolCallDelta(
+    string ToolCallId,
+    string ToolName,
+    JsonElement Arguments) : LlmDelta;
+
+public sealed record UsageDelta(
+    long? InputTokens,
+    long? OutputTokens,
+    long? CacheReadTokens,
+    long? CacheWriteTokens) : LlmDelta;
+
+public sealed record CompletedDelta : LlmDelta;
+
+public sealed record LlmErrorDelta(string Error) : LlmDelta;
+
+public interface ILLMClient
+{
+    IAsyncEnumerable<LlmDelta> StreamAsync(LlmRequest request, CancellationToken ct);
+}
+
+public interface ISystemPromptBuilder
+{
+    string BuildPrompt(AgentRunRequest request, IReadOnlyList<ITool> tools);
+}
+
+public interface ISessionLaneScheduler
+{
+    Task<T> EnqueueAsync<T>(SessionKey sessionKey, Func<CancellationToken, Task<T>> work, CancellationToken ct);
+}
+
+public interface ITranscriptSanitizer
+{
+    IReadOnlyList<ChatMessage> Repair(IReadOnlyList<ChatMessage> messages);
+}
+
+public interface IToolResultTruncator
+{
+    IReadOnlyList<ChatMessage> Truncate(IReadOnlyList<ChatMessage> messages, int contextWindowChars);
+}
+
+public sealed record SessionEntry(
+    string SessionId,
+    DateTimeOffset UpdatedAt,
+    string? TranscriptPath = null,
+    string? ProviderOverride = null,
+    string? ModelOverride = null,
+    int CompactionCount = 0,
+    long InputTokens = 0,
+    long OutputTokens = 0,
+    long TotalTokens = 0,
+    bool TotalTokensFresh = true,
+    IReadOnlyDictionary<string, object?>? Diagnostics = null);
+
+public interface ISessionStore
+{
+    Task<SessionEntry?> GetAsync(SessionKey key, CancellationToken ct);
+
+    Task UpsertAsync(SessionKey key, Func<SessionEntry?, SessionEntry> mutate, CancellationToken ct);
+
+    Task<IReadOnlyDictionary<SessionKey, SessionEntry>> LoadAllAsync(CancellationToken ct);
+}
+
+public interface ITranscriptStore
+{
+    Task<IReadOnlyList<ChatMessage>> LoadAsync(SessionKey key, CancellationToken ct);
+
+    Task AppendAsync(SessionKey key, IEnumerable<ChatMessage> messages, CancellationToken ct);
+
+    Task ReplaceAsync(SessionKey key, IEnumerable<ChatMessage> messages, CancellationToken ct);
+}
+
+public sealed record AgentRunRequest(
+    SessionKey SessionKey,
+    string UserInput,
+    string Provider,
+    string Model,
+    ToolSelectionPolicy ToolPolicy,
+    int ContextWindowChars = 32_768,
+    string? SystemPromptOverride = null);
+
+public sealed record AgentRunResult(
+    RunId RunId,
+    SessionKey SessionKey,
+    string FinalAssistantMessage,
+    IReadOnlyList<ChatMessage> Transcript,
+    IReadOnlyDictionary<string, object?> Metadata);
+
+public interface IAgentOrchestrator
+{
+    Task<AgentRunResult> RunAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct);
+}
+
+public static class EventData
+{
+    public static IReadOnlyDictionary<string, object?> Of(params (string Key, object? Value)[] values)
+    {
+        var dict = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (key, value) in values)
+        {
+            dict[key] = value;
+        }
+
+        return new ReadOnlyDictionary<string, object?>(dict);
+    }
+}
