@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Tools\IronPaw.AgentCore.Tools.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Abstractions\IronPaw.AgentCore.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\IronPaw.AgentCore.Persistence\IronPaw.AgentCore.Persistence.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.Skills.ExampleAddin\IronPaw.Skills.ExampleAddin.csproj" />
   </ItemGroup>
 

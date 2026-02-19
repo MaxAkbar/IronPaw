@@ -131,7 +131,9 @@ try
                 ref sessionKey,
                 options.Profile,
                 options.NoEvents,
-                bootstrap.SkillLoadResult.SkillsLoaded))
+                bootstrap.SkillLoadResult.SkillsLoaded,
+                bootstrap.MemoryStore,
+                bootstrap.RunHistoryStore))
         {
             continue;
         }
@@ -304,7 +306,9 @@ static bool TryHandleInteractiveCommand(
     ref SessionKey sessionKey,
     ToolProfile profile,
     bool noEvents,
-    int skillsLoaded)
+    int skillsLoaded,
+    IMemoryStore memoryStore,
+    IRunHistoryStore runHistoryStore)
 {
     var command = promptOrCommand.Trim();
     if (!command.StartsWith("/", StringComparison.Ordinal))
@@ -376,6 +380,110 @@ static bool TryHandleInteractiveCommand(
             return true;
         }
 
+        case "/remember":
+        {
+            var content = AnsiConsole.Prompt(
+                new TextPrompt<string>("What should I remember?")
+                    .AllowEmpty());
+
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                ConsoleUi.RenderWarning("Memory content cannot be empty.");
+                return true;
+            }
+
+            var entry = new MemoryEntry(
+                Id: Guid.NewGuid().ToString("n"),
+                Content: content.Trim(),
+                Scope: MemoryScope.Global,
+                CreatedAt: DateTimeOffset.UtcNow,
+                Source: "user");
+
+            memoryStore.AddAsync(entry, CancellationToken.None).GetAwaiter().GetResult();
+            ConsoleUi.RenderSuccess($"Remembered: {content.Trim()}");
+            return true;
+        }
+
+        case "/forget":
+        {
+            var globalMemories = memoryStore.LoadGlobalAsync(CancellationToken.None).GetAwaiter().GetResult();
+            var sessionMemories = memoryStore.LoadSessionAsync(sessionKey, CancellationToken.None).GetAwaiter().GetResult();
+            var allMemories = globalMemories.Concat(sessionMemories).ToList();
+
+            if (allMemories.Count == 0)
+            {
+                ConsoleUi.RenderWarning("No memories to forget.");
+                return true;
+            }
+
+            ConsoleUi.RenderMemoryList(globalMemories, sessionMemories, sessionKey.Value);
+
+            var idToForget = AnsiConsole.Prompt(
+                new TextPrompt<string>("Enter memory ID to forget (or 'cancel'):")
+                    .AllowEmpty());
+
+            if (string.IsNullOrWhiteSpace(idToForget) ||
+                idToForget.Equals("cancel", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var removed = memoryStore.RemoveAsync(idToForget.Trim(), CancellationToken.None).GetAwaiter().GetResult();
+            if (removed)
+            {
+                ConsoleUi.RenderSuccess("Memory forgotten.");
+            }
+            else
+            {
+                ConsoleUi.RenderWarning("Memory not found.");
+            }
+
+            return true;
+        }
+
+        case "/memories":
+        {
+            var globalMemories = memoryStore.LoadGlobalAsync(CancellationToken.None).GetAwaiter().GetResult();
+            var sessionMemories = memoryStore.LoadSessionAsync(sessionKey, CancellationToken.None).GetAwaiter().GetResult();
+            ConsoleUi.RenderMemoryList(globalMemories, sessionMemories, sessionKey.Value);
+            return true;
+        }
+
+        case "/tasks":
+        {
+            var runs = runHistoryStore.LoadAllAsync(CancellationToken.None).GetAwaiter().GetResult();
+            var recent = runs
+                .OrderByDescending(r => r.StartedAt)
+                .Take(20)
+                .ToList();
+
+            ConsoleUi.RenderRunHistory(recent);
+            return true;
+        }
+
+        case "/review":
+        {
+            var runId = AnsiConsole.Prompt(
+                new TextPrompt<string>("Run ID to review:")
+                    .AllowEmpty());
+
+            if (string.IsNullOrWhiteSpace(runId))
+            {
+                ConsoleUi.RenderWarning("Run ID cannot be empty.");
+                return true;
+            }
+
+            var detail = runHistoryStore.GetAsync(runId.Trim(), CancellationToken.None).GetAwaiter().GetResult();
+            if (detail is null)
+            {
+                ConsoleUi.RenderWarning("Run not found.");
+                return true;
+            }
+
+            ConsoleUi.RenderRunDetail(detail);
+            return true;
+        }
+
         default:
             ConsoleUi.RenderWarning($"Unknown command '{command}'. Type /help for commands.");
             return true;
@@ -421,7 +529,7 @@ static async Task<int> RunSingleAsync(
     }
 }
 
-static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult) BuildOrchestrator()
+static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult, IMemoryStore MemoryStore, IRunHistoryStore RunHistoryStore) BuildOrchestrator()
 {
     var workspaceRoot = Directory.GetCurrentDirectory();
     var appData = Path.Combine(
@@ -434,12 +542,17 @@ static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult) B
     Directory.CreateDirectory(stateRoot);
     Directory.CreateDirectory(sessionsDirectory);
 
+    var memoryStore = new FileMemoryStore(new FileMemoryStoreOptions(
+        GlobalMemoryPath: Path.Combine(stateRoot, "memories.json"),
+        SessionMemoriesDirectory: sessionsDirectory));
+    var runHistoryStore = new JsonRunHistoryStore(Path.Combine(stateRoot, "run-history.jsonl"));
+
     var skillLoadResult = SkillAddinLoader.LoadFromDirectories(
     [
         Path.Combine(workspaceRoot, "addins", "skills"),
         Path.Combine(appData, "skills")
     ]);
-    var tools = BuiltInToolFactory.CreateDefault(workspaceRoot, skillLoadResult.SkillTools);
+    var tools = BuiltInToolFactory.CreateDefault(workspaceRoot, skillLoadResult.SkillTools, memoryStore, runHistoryStore);
     var toolRegistry = new InMemoryToolRegistry(tools);
     toolRegistry.RegisterTools([new CreateSkillTool(toolRegistry)]);
     var sessionStore = new FileSessionStore(new FileSessionStoreOptions(
@@ -464,9 +577,11 @@ static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult) B
         llmClient,
         sanitizer,
         truncator,
-        promptBuilder);
+        promptBuilder,
+        memoryStore,
+        runHistoryStore);
 
-    return (orchestrator, skillLoadResult);
+    return (orchestrator, skillLoadResult, memoryStore, runHistoryStore);
 }
 
 static ILlmClient BuildLlmRouter()
@@ -611,12 +726,17 @@ internal static class ConsoleUi
     public static void RenderInteractiveHelp()
     {
         AnsiConsole.MarkupLine("[bold]Interactive commands[/]");
-        AnsiConsole.MarkupLine("  [white]/help[/]      Show this command list");
-        AnsiConsole.MarkupLine("  [white]/settings[/]  Show current run settings");
-        AnsiConsole.MarkupLine("  [white]/provider[/]  Change provider");
-        AnsiConsole.MarkupLine("  [white]/model[/]     Change model");
-        AnsiConsole.MarkupLine("  [white]/session[/]   Change session key");
-        AnsiConsole.MarkupLine("  [white]quit[/]       Exit the app");
+        AnsiConsole.MarkupLine("  [white]/help[/]       Show this command list");
+        AnsiConsole.MarkupLine("  [white]/settings[/]   Show current run settings");
+        AnsiConsole.MarkupLine("  [white]/provider[/]   Change provider");
+        AnsiConsole.MarkupLine("  [white]/model[/]      Change model");
+        AnsiConsole.MarkupLine("  [white]/session[/]    Change session key");
+        AnsiConsole.MarkupLine("  [white]/remember[/]   Save a memory");
+        AnsiConsole.MarkupLine("  [white]/forget[/]     Remove a memory");
+        AnsiConsole.MarkupLine("  [white]/memories[/]   List all memories");
+        AnsiConsole.MarkupLine("  [white]/tasks[/]      List recent task runs");
+        AnsiConsole.MarkupLine("  [white]/review[/]     Review a specific task run");
+        AnsiConsole.MarkupLine("  [white]quit[/]        Exit the app");
         AnsiConsole.WriteLine();
     }
 
@@ -701,6 +821,142 @@ internal static class ConsoleUi
 
         AnsiConsole.MarkupLine(
             $"[grey70]run_id[/]: [deepskyblue1]{Markup.Escape(result.RunId.Value)}[/]");
+    }
+
+    public static void RenderMemoryList(
+        IReadOnlyList<MemoryEntry> globalMemories,
+        IReadOnlyList<MemoryEntry> sessionMemories,
+        string sessionId)
+    {
+        AnsiConsole.Write(new Rule("[grey]Memories[/]").LeftJustified());
+
+        if (globalMemories.Count == 0 && sessionMemories.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No memories saved yet.[/]");
+            return;
+        }
+
+        if (globalMemories.Count > 0)
+        {
+            AnsiConsole.MarkupLine("[bold]Global Memories[/]");
+            var table = new Table()
+                .RoundedBorder()
+                .AddColumn("[bold]ID[/]")
+                .AddColumn("[bold]Content[/]")
+                .AddColumn("[bold]Category[/]")
+                .AddColumn("[bold]Source[/]")
+                .AddColumn("[bold]Created[/]");
+
+            foreach (var m in globalMemories)
+            {
+                table.AddRow(
+                    $"[grey70]{Markup.Escape(m.Id[..Math.Min(8, m.Id.Length)])}[/]",
+                    $"[white]{Markup.Escape(m.Content)}[/]",
+                    $"[grey70]{Markup.Escape(m.Category ?? "-")}[/]",
+                    $"[grey70]{Markup.Escape(m.Source ?? "-")}[/]",
+                    $"[grey70]{Markup.Escape(m.CreatedAt.ToLocalTime().ToString("g"))}[/]");
+            }
+
+            AnsiConsole.Write(table);
+        }
+
+        if (sessionMemories.Count > 0)
+        {
+            AnsiConsole.MarkupLine($"[bold]Session Memories[/] [grey70](session={Markup.Escape(sessionId)})[/]");
+            var table = new Table()
+                .RoundedBorder()
+                .AddColumn("[bold]ID[/]")
+                .AddColumn("[bold]Content[/]")
+                .AddColumn("[bold]Category[/]")
+                .AddColumn("[bold]Source[/]")
+                .AddColumn("[bold]Created[/]");
+
+            foreach (var m in sessionMemories)
+            {
+                table.AddRow(
+                    $"[grey70]{Markup.Escape(m.Id[..Math.Min(8, m.Id.Length)])}[/]",
+                    $"[white]{Markup.Escape(m.Content)}[/]",
+                    $"[grey70]{Markup.Escape(m.Category ?? "-")}[/]",
+                    $"[grey70]{Markup.Escape(m.Source ?? "-")}[/]",
+                    $"[grey70]{Markup.Escape(m.CreatedAt.ToLocalTime().ToString("g"))}[/]");
+            }
+
+            AnsiConsole.Write(table);
+        }
+    }
+
+    public static void RenderRunHistory(IReadOnlyList<RunSummary> runs)
+    {
+        AnsiConsole.Write(new Rule("[grey]Task History[/]").LeftJustified());
+
+        if (runs.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No task runs recorded yet.[/]");
+            return;
+        }
+
+        var table = new Table()
+            .RoundedBorder()
+            .AddColumn("[bold]Run ID[/]")
+            .AddColumn("[bold]Session[/]")
+            .AddColumn("[bold]When[/]")
+            .AddColumn("[bold]Prompt[/]")
+            .AddColumn("[bold]Rounds[/]")
+            .AddColumn("[bold]Tokens[/]");
+
+        foreach (var r in runs)
+        {
+            var promptTruncated = r.UserPrompt.Length > 60
+                ? r.UserPrompt[..60] + "..."
+                : r.UserPrompt;
+
+            table.AddRow(
+                $"[deepskyblue1]{Markup.Escape(r.RunId[..Math.Min(8, r.RunId.Length)])}[/]",
+                $"[white]{Markup.Escape(r.SessionId)}[/]",
+                $"[grey70]{Markup.Escape(r.StartedAt.ToLocalTime().ToString("g"))}[/]",
+                $"[white]{Markup.Escape(promptTruncated)}[/]",
+                $"[white]{r.Rounds}[/]",
+                $"[white]{r.TotalTokens}[/]");
+        }
+
+        AnsiConsole.Write(table);
+    }
+
+    public static void RenderRunDetail(RunSummary summary)
+    {
+        AnsiConsole.Write(new Rule("[grey]Run Detail[/]").LeftJustified());
+
+        var infoTable = new Table()
+            .RoundedBorder()
+            .AddColumn("[bold]Field[/]")
+            .AddColumn("[bold]Value[/]");
+
+        infoTable.AddRow("Run ID", $"[deepskyblue1]{Markup.Escape(summary.RunId)}[/]");
+        infoTable.AddRow("Session", $"[white]{Markup.Escape(summary.SessionId)}[/]");
+        infoTable.AddRow("Started", $"[white]{Markup.Escape(summary.StartedAt.ToLocalTime().ToString("O"))}[/]");
+        infoTable.AddRow("Completed", $"[white]{Markup.Escape(summary.CompletedAt.ToLocalTime().ToString("O"))}[/]");
+        infoTable.AddRow("Rounds", $"[white]{summary.Rounds}[/]");
+        infoTable.AddRow("Total Tokens", $"[white]{summary.TotalTokens}[/]");
+        infoTable.AddRow("Tools Used", $"[white]{Markup.Escape(string.Join(", ", summary.ToolsUsed))}[/]");
+
+        AnsiConsole.Write(infoTable);
+
+        var promptPanel = new Panel(new Text(summary.UserPrompt))
+            .Header("[bold]User Prompt[/]")
+            .RoundedBorder()
+            .BorderColor(Color.Grey70);
+        AnsiConsole.Write(promptPanel);
+
+        var responsePanel = new Panel(new Text(summary.FinalAssistantMessage))
+            .Header("[bold green3_1]Final Response[/]")
+            .RoundedBorder()
+            .BorderColor(Color.Green3_1);
+        AnsiConsole.Write(responsePanel);
+    }
+
+    public static void RenderSuccess(string message)
+    {
+        AnsiConsole.MarkupLine($"[green]{Markup.Escape(message)}[/]");
     }
 
     public static void RenderWarning(string message)
@@ -875,7 +1131,8 @@ internal sealed record CliOptions(
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[bold]Interactive Mode[/]");
         AnsiConsole.MarkupLine("  Launch without --prompt/--prompt-file to keep running until you type [white]quit[/].");
-        AnsiConsole.MarkupLine("  Commands: [white]/help[/], [white]/settings[/], [white]/provider[/], [white]/model[/], [white]/session[/]");
+        AnsiConsole.MarkupLine("  Commands: [white]/help[/], [white]/settings[/], [white]/provider[/], [white]/model[/], [white]/session[/],");
+        AnsiConsole.MarkupLine("           [white]/remember[/], [white]/forget[/], [white]/memories[/], [white]/tasks[/], [white]/review[/]");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[bold]Add-in Skill Directories[/]");
         AnsiConsole.MarkupLine("  [white].\\addins\\skills[/]");

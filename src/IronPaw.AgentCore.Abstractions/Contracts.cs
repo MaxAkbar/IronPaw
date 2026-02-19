@@ -361,7 +361,8 @@ public sealed record AgentRunRequest(
     int ContextWindowChars = 32_768,
     string? SystemPromptOverride = null,
     int MaxOutputTokens = 4096,
-    int MaxRounds = 6);
+    int MaxRounds = 6,
+    IReadOnlyList<MemoryEntry>? ActiveMemories = null);
 
 public sealed record AgentRunResult(
     RunId RunId,
@@ -373,6 +374,60 @@ public sealed record AgentRunResult(
 public interface IAgentOrchestrator
 {
     Task<AgentRunResult> RunAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct);
+}
+
+public enum MemoryScope
+{
+    Global,
+    Session
+}
+
+public sealed record MemoryEntry(
+    string Id,
+    string Content,
+    MemoryScope Scope,
+    DateTimeOffset CreatedAt,
+    string? SessionId = null,
+    string? Category = null,
+    string? Source = null);
+
+public interface IMemoryStore
+{
+    Task<IReadOnlyList<MemoryEntry>> LoadGlobalAsync(CancellationToken ct);
+
+    Task<IReadOnlyList<MemoryEntry>> LoadSessionAsync(SessionKey sessionKey, CancellationToken ct);
+
+    Task<MemoryEntry> AddAsync(MemoryEntry entry, CancellationToken ct);
+
+    Task<bool> RemoveAsync(string memoryId, CancellationToken ct);
+
+    Task<IReadOnlyList<MemoryEntry>> SearchAsync(
+        string query,
+        MemoryScope? scope,
+        SessionKey? sessionKey,
+        CancellationToken ct);
+}
+
+public sealed record RunSummary(
+    string RunId,
+    string SessionId,
+    DateTimeOffset StartedAt,
+    DateTimeOffset CompletedAt,
+    string UserPrompt,
+    string FinalAssistantMessage,
+    int Rounds,
+    long TotalTokens,
+    IReadOnlyList<string> ToolsUsed);
+
+public interface IRunHistoryStore
+{
+    Task RecordAsync(RunSummary summary, CancellationToken ct);
+
+    Task<IReadOnlyList<RunSummary>> LoadAllAsync(CancellationToken ct);
+
+    Task<IReadOnlyList<RunSummary>> LoadBySessionAsync(SessionKey sessionKey, CancellationToken ct);
+
+    Task<RunSummary?> GetAsync(string runId, CancellationToken ct);
 }
 
 public static class EventData

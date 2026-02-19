@@ -4,6 +4,13 @@ namespace IronPaw.AgentCore;
 
 public sealed class DefaultSystemPromptBuilder : ISystemPromptBuilder
 {
+    private readonly int _memoryBudgetChars;
+
+    public DefaultSystemPromptBuilder(int memoryBudgetChars = 2000)
+    {
+        _memoryBudgetChars = memoryBudgetChars;
+    }
+
     public string BuildPrompt(AgentRunRequest request, IReadOnlyList<ITool> tools)
     {
         var lines = new List<string>
@@ -36,7 +43,83 @@ public sealed class DefaultSystemPromptBuilder : ISystemPromptBuilder
             AppendCreateSkillGuidance(lines);
         }
 
+        if (tools.Any(t => t.Descriptor.Name == "save_memory"))
+        {
+            AppendMemoryGuidance(lines);
+        }
+
+        AppendMemorySection(lines, request.ActiveMemories, _memoryBudgetChars);
+
         return request.SystemPromptOverride ?? string.Join(Environment.NewLine, lines);
+    }
+
+    private static void AppendMemorySection(List<string> lines, IReadOnlyList<MemoryEntry>? memories, int budgetChars)
+    {
+        if (memories is null || memories.Count == 0)
+        {
+            return;
+        }
+
+        lines.Add("");
+        lines.Add("## Persistent memory");
+        lines.Add("");
+        lines.Add("The following facts and preferences were saved from prior interactions.");
+        lines.Add("Treat them as context for this conversation.");
+        lines.Add("");
+
+        var sessionMemories = memories.Where(m => m.Scope == MemoryScope.Session).ToList();
+        var globalMemories = memories.Where(m => m.Scope == MemoryScope.Global).ToList();
+
+        var sessionBudget = Math.Min(500, budgetChars / 4);
+        var globalBudget = budgetChars - sessionBudget;
+
+        var usedChars = 0;
+        foreach (var entry in sessionMemories)
+        {
+            var line = $"- [session] {entry.Content}";
+            if (usedChars + line.Length > sessionBudget)
+            {
+                break;
+            }
+
+            lines.Add(line);
+            usedChars += line.Length;
+        }
+
+        var globalUsed = 0;
+        foreach (var entry in globalMemories)
+        {
+            var line = $"- [global] {entry.Content}";
+            if (globalUsed + line.Length > globalBudget)
+            {
+                break;
+            }
+
+            lines.Add(line);
+            globalUsed += line.Length;
+        }
+    }
+
+    private static void AppendMemoryGuidance(List<string> lines)
+    {
+        lines.Add("");
+        lines.Add("## Memory management");
+        lines.Add("");
+        lines.Add("You have persistent memory tools. Use them to remember important facts:");
+        lines.Add("- save_memory: Store facts, preferences, or context that should persist.");
+        lines.Add("  Use scope \"global\" for cross-session facts. Use scope \"session\" for current-task context.");
+        lines.Add("- recall_memory: Search your memories by keyword.");
+        lines.Add("- forget_memory: Remove outdated memories.");
+        lines.Add("");
+        lines.Add("When to save a memory:");
+        lines.Add("- The user states a preference or project convention.");
+        lines.Add("- You discover important context about the codebase or task.");
+        lines.Add("- The user explicitly asks you to remember something.");
+        lines.Add("");
+        lines.Add("When NOT to save a memory:");
+        lines.Add("- Transient information that is only useful right now.");
+        lines.Add("- Information already present in your memories.");
+        lines.Add("- Large code blocks (memory has a 500-char limit per entry).");
     }
 
     private static void AppendCreateSkillGuidance(List<string> lines)

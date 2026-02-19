@@ -15,6 +15,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private readonly ITranscriptSanitizer _transcriptSanitizer;
     private readonly IToolResultTruncator _toolResultTruncator;
     private readonly ISystemPromptBuilder _promptBuilder;
+    private readonly IMemoryStore? _memoryStore;
+    private readonly IRunHistoryStore? _runHistoryStore;
 
     public AgentOrchestrator(
         ISessionLaneScheduler laneScheduler,
@@ -26,7 +28,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         ILlmClient llmClient,
         ITranscriptSanitizer transcriptSanitizer,
         IToolResultTruncator toolResultTruncator,
-        ISystemPromptBuilder promptBuilder)
+        ISystemPromptBuilder promptBuilder,
+        IMemoryStore? memoryStore = null,
+        IRunHistoryStore? runHistoryStore = null)
     {
         _laneScheduler = laneScheduler;
         _sessionStore = sessionStore;
@@ -38,6 +42,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _transcriptSanitizer = transcriptSanitizer;
         _toolResultTruncator = toolResultTruncator;
         _promptBuilder = promptBuilder;
+        _memoryStore = memoryStore;
+        _runHistoryStore = runHistoryStore;
     }
 
     public Task<AgentRunResult> RunAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct)
@@ -49,41 +55,53 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private async Task<AgentRunResult> RunInLaneAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct)
     {
         var runId = RunId.New();
+        var startedAt = DateTimeOffset.UtcNow;
         var rounds = 0;
         long aggregatedInput = 0;
         long aggregatedOutput = 0;
         long lastCacheRead = 0;
         long lastCacheWrite = 0;
         var finalAssistantMessage = string.Empty;
+        var toolsUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Pre-load memories and enrich the request.
+        var effectiveRequest = request;
+        if (_memoryStore is not null)
+        {
+            var globalMemories = await _memoryStore.LoadGlobalAsync(ct);
+            var sessionMemories = await _memoryStore.LoadSessionAsync(request.SessionKey, ct);
+            var activeMemories = globalMemories.Concat(sessionMemories).ToList();
+            effectiveRequest = request with { ActiveMemories = activeMemories };
+        }
 
         await PublishAsync(
             sink,
             new AgentEvent(
                 runId,
-                request.SessionKey,
+                effectiveRequest.SessionKey,
                 AgentEventStream.Lifecycle,
                 Type: "run_started",
                 Timestamp: DateTimeOffset.UtcNow,
                 Data: EventData.Of(
-                    ("provider", request.Provider),
-                    ("model", request.Model))),
+                    ("provider", effectiveRequest.Provider),
+                    ("model", effectiveRequest.Model))),
             ct);
 
-        var loadedTranscript = await _transcriptStore.LoadAsync(request.SessionKey, ct);
+        var loadedTranscript = await _transcriptStore.LoadAsync(effectiveRequest.SessionKey, ct);
         var repairedTranscript = _transcriptSanitizer.Repair(loadedTranscript);
         var transcript = repairedTranscript.ToList();
 
-        transcript.Add(new ChatMessage(ChatRole.User, request.UserInput));
+        transcript.Add(new ChatMessage(ChatRole.User, effectiveRequest.UserInput));
 
         // Initial resolution for the diagnostic event only.
-        var initialTools = _toolRegistry.ResolveTools(request.ToolPolicy);
-        var initialPrompt = _promptBuilder.BuildPrompt(request, initialTools);
+        var initialTools = _toolRegistry.ResolveTools(effectiveRequest.ToolPolicy);
+        var initialPrompt = _promptBuilder.BuildPrompt(effectiveRequest, initialTools);
 
         await PublishAsync(
             sink,
             new AgentEvent(
                 runId,
-                request.SessionKey,
+                effectiveRequest.SessionKey,
                 AgentEventStream.Diagnostics,
                 Type: "prompt_built",
                 Timestamp: DateTimeOffset.UtcNow,
@@ -92,7 +110,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     ("toolCount", initialTools.Count))),
             ct);
 
-        var maxRounds = request.MaxRounds;
+        var maxRounds = effectiveRequest.MaxRounds;
         var savedInLastIteration = false;
         var lastToolCount = initialTools.Count;
         var lastSystemPromptLength = initialPrompt.Length;
@@ -104,24 +122,24 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             savedInLastIteration = false;
 
             // Re-resolve tools every round so dynamically registered tools become visible.
-            var tools = _toolRegistry.ResolveTools(request.ToolPolicy);
+            var tools = _toolRegistry.ResolveTools(effectiveRequest.ToolPolicy);
             var toolMap = tools.ToDictionary(tool => tool.Descriptor.Name, StringComparer.OrdinalIgnoreCase);
-            var systemPrompt = _promptBuilder.BuildPrompt(request, tools);
+            var systemPrompt = _promptBuilder.BuildPrompt(effectiveRequest, tools);
 
             lastToolCount = tools.Count;
             lastSystemPromptLength = systemPrompt.Length;
 
-            var toolDefinitions = tools.Select(tool => _schemaNormalizer.ToDefinition(tool, request.Provider)).ToArray();
+            var toolDefinitions = tools.Select(tool => _schemaNormalizer.ToDefinition(tool, effectiveRequest.Provider)).ToArray();
             var llmRequest = new LlmRequest(
                 runId,
-                request.SessionKey,
-                request.Provider,
-                request.Model,
+                effectiveRequest.SessionKey,
+                effectiveRequest.Provider,
+                effectiveRequest.Model,
                 systemPrompt,
                 transcript,
                 toolDefinitions,
                 Timeout: TimeSpan.FromMinutes(2),
-                MaxOutputTokens: request.MaxOutputTokens);
+                MaxOutputTokens: effectiveRequest.MaxOutputTokens);
 
             var assistantBuffer = new StringBuilder();
             var pendingToolCalls = new List<ToolCall>();
@@ -130,7 +148,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 sink,
                 new AgentEvent(
                     runId,
-                    request.SessionKey,
+                    effectiveRequest.SessionKey,
                     AgentEventStream.Lifecycle,
                     Type: "llm_round_started",
                     Timestamp: DateTimeOffset.UtcNow,
@@ -147,7 +165,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                             sink,
                             new AgentEvent(
                                 runId,
-                                request.SessionKey,
+                                effectiveRequest.SessionKey,
                                 AgentEventStream.Assistant,
                                 Type: "assistant_delta",
                                 Timestamp: DateTimeOffset.UtcNow,
@@ -162,7 +180,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                             sink,
                             new AgentEvent(
                                 runId,
-                                request.SessionKey,
+                                effectiveRequest.SessionKey,
                                 AgentEventStream.Tool,
                                 Type: "tool_call",
                                 Timestamp: DateTimeOffset.UtcNow,
@@ -217,6 +235,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
             foreach (var toolCall in pendingToolCalls)
             {
+                toolsUsed.Add(toolCall.ToolName);
+
                 ToolResult result;
                 if (!toolMap.TryGetValue(toolCall.ToolName, out var tool))
                 {
@@ -224,7 +244,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
                 else
                 {
-                    var execContext = new ToolExecutionContext(runId, request.SessionKey, request.Provider, request.Model);
+                    var execContext = new ToolExecutionContext(runId, effectiveRequest.SessionKey, effectiveRequest.Provider, effectiveRequest.Model);
                     result = await _toolExecutor.ExecuteAsync(tool, toolCall, execContext, ct);
                 }
 
@@ -233,7 +253,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     sink,
                     new AgentEvent(
                         runId,
-                        request.SessionKey,
+                        effectiveRequest.SessionKey,
                         AgentEventStream.Tool,
                         Type: "tool_result",
                         Timestamp: DateTimeOffset.UtcNow,
@@ -246,9 +266,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     ct);
             }
 
-            transcript = _toolResultTruncator.Truncate(transcript, request.ContextWindowChars).ToList();
+            transcript = _toolResultTruncator.Truncate(transcript, effectiveRequest.ContextWindowChars).ToList();
             transcript = _transcriptSanitizer.Repair(transcript).ToList();
-            await _transcriptStore.ReplaceAsync(request.SessionKey, transcript, ct);
+            await _transcriptStore.ReplaceAsync(effectiveRequest.SessionKey, transcript, ct);
             savedInLastIteration = true;
         }
 
@@ -263,24 +283,24 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         // When tool calls occurred in the last round, the transcript was already saved inside the loop.
         if (!savedInLastIteration)
         {
-            await _transcriptStore.ReplaceAsync(request.SessionKey, transcript, ct);
+            await _transcriptStore.ReplaceAsync(effectiveRequest.SessionKey, transcript, ct);
         }
 
         var totalTokens = aggregatedInput + aggregatedOutput + lastCacheRead + lastCacheWrite;
         await _sessionStore.UpsertAsync(
-            request.SessionKey,
+            effectiveRequest.SessionKey,
             existing =>
             {
                 var previous = existing ?? new SessionEntry(
-                    SessionId: request.SessionKey.Value,
+                    SessionId: effectiveRequest.SessionKey.Value,
                     UpdatedAt: DateTimeOffset.UtcNow);
 
                 return previous with
                 {
-                    SessionId = request.SessionKey.Value,
+                    SessionId = effectiveRequest.SessionKey.Value,
                     UpdatedAt = DateTimeOffset.UtcNow,
-                    ProviderOverride = request.Provider,
-                    ModelOverride = request.Model,
+                    ProviderOverride = effectiveRequest.Provider,
+                    ModelOverride = effectiveRequest.Model,
                     InputTokens = previous.InputTokens + aggregatedInput,
                     OutputTokens = previous.OutputTokens + aggregatedOutput,
                     TotalTokens = previous.TotalTokens + totalTokens,
@@ -295,11 +315,28 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             },
             ct);
 
+        // Record run history.
+        if (_runHistoryStore is not null)
+        {
+            var summary = new RunSummary(
+                RunId: runId.Value,
+                SessionId: effectiveRequest.SessionKey.Value,
+                StartedAt: startedAt,
+                CompletedAt: DateTimeOffset.UtcNow,
+                UserPrompt: effectiveRequest.UserInput,
+                FinalAssistantMessage: finalAssistantMessage,
+                Rounds: rounds,
+                TotalTokens: totalTokens,
+                ToolsUsed: toolsUsed.ToList());
+
+            await _runHistoryStore.RecordAsync(summary, ct);
+        }
+
         await PublishAsync(
             sink,
             new AgentEvent(
                 runId,
-                request.SessionKey,
+                effectiveRequest.SessionKey,
                 AgentEventStream.Lifecycle,
                 Type: "run_completed",
                 Timestamp: DateTimeOffset.UtcNow,
@@ -313,7 +350,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         return new AgentRunResult(
             runId,
-            request.SessionKey,
+            effectiveRequest.SessionKey,
             finalAssistantMessage,
             transcript,
             new Dictionary<string, object?>

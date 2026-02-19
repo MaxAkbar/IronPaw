@@ -78,7 +78,31 @@ sequenceDiagram
   Host-->>User: Render final response + event stream
 ```
 
-## Project README Index
+## Documentation
+
+**Start here:** [Getting Started](docs/getting-started.md)
+
+### Tutorials
+
+| Tutorial | Description |
+|----------|-------------|
+| [Interactive Mode](docs/tutorials/interactive-mode.md) | CLI REPL, slash commands, sessions |
+| [Using Providers](docs/tutorials/using-providers.md) | OpenAI, Anthropic, Ollama, LM Studio setup |
+| [Memory & Review](docs/tutorials/memory-and-review.md) | Persistent memory and task history |
+| [Creating a Skill Add-in](docs/tutorials/creating-a-skill-addin.md) | Build your own tools |
+| [Embedding IronPaw](docs/tutorials/embedding-ironpaw.md) | Use IronPaw as a library in your app |
+
+### Examples
+
+| Example | Description |
+|---------|-------------|
+| [Weather Skill](docs/examples/weather-skill.md) | Complete worked example of a custom skill |
+
+### Reference
+
+- [Skills Add-ins](docs/skills-addins.md)
+
+### Project README Index
 
 - [src/IronPaw.AgentCore.Abstractions/README.md](src/IronPaw.AgentCore.Abstractions/README.md)
 - [src/IronPaw.AgentCore/README.md](src/IronPaw.AgentCore/README.md)
