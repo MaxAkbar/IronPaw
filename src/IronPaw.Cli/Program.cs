@@ -441,6 +441,7 @@ static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult) B
     ]);
     var tools = BuiltInToolFactory.CreateDefault(workspaceRoot, skillLoadResult.SkillTools);
     var toolRegistry = new InMemoryToolRegistry(tools);
+    toolRegistry.RegisterTools([new CreateSkillTool(toolRegistry)]);
     var sessionStore = new FileSessionStore(new FileSessionStoreOptions(
         StoreFilePath: sessionStorePath,
         CacheTtl: TimeSpan.FromSeconds(5)));

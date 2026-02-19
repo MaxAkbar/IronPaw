@@ -74,9 +74,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         var transcript = repairedTranscript.ToList();
 
         transcript.Add(new ChatMessage(ChatRole.User, request.UserInput));
-        var tools = _toolRegistry.ResolveTools(request.ToolPolicy);
-        var toolMap = tools.ToDictionary(tool => tool.Descriptor.Name, StringComparer.OrdinalIgnoreCase);
-        var systemPrompt = _promptBuilder.BuildPrompt(request, tools);
+
+        // Initial resolution for the diagnostic event only.
+        var initialTools = _toolRegistry.ResolveTools(request.ToolPolicy);
+        var initialPrompt = _promptBuilder.BuildPrompt(request, initialTools);
 
         await PublishAsync(
             sink,
@@ -87,18 +88,28 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 Type: "prompt_built",
                 Timestamp: DateTimeOffset.UtcNow,
                 Data: EventData.Of(
-                    ("systemPromptChars", systemPrompt.Length),
-                    ("toolCount", tools.Count))),
+                    ("systemPromptChars", initialPrompt.Length),
+                    ("toolCount", initialTools.Count))),
             ct);
 
         var maxRounds = request.MaxRounds;
         var savedInLastIteration = false;
+        var lastToolCount = initialTools.Count;
+        var lastSystemPromptLength = initialPrompt.Length;
 
         while (rounds < maxRounds)
         {
             ct.ThrowIfCancellationRequested();
             rounds++;
             savedInLastIteration = false;
+
+            // Re-resolve tools every round so dynamically registered tools become visible.
+            var tools = _toolRegistry.ResolveTools(request.ToolPolicy);
+            var toolMap = tools.ToDictionary(tool => tool.Descriptor.Name, StringComparer.OrdinalIgnoreCase);
+            var systemPrompt = _promptBuilder.BuildPrompt(request, tools);
+
+            lastToolCount = tools.Count;
+            lastSystemPromptLength = systemPrompt.Length;
 
             var toolDefinitions = tools.Select(tool => _schemaNormalizer.ToDefinition(tool, request.Provider)).ToArray();
             var llmRequest = new LlmRequest(
@@ -276,8 +287,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     TotalTokensFresh = true,
                     Diagnostics = new Dictionary<string, object?>
                     {
-                        ["toolCount"] = tools.Count,
-                        ["systemPromptChars"] = systemPrompt.Length,
+                        ["toolCount"] = lastToolCount,
+                        ["systemPromptChars"] = lastSystemPromptLength,
                         ["rounds"] = rounds
                     }
                 };
@@ -308,7 +319,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             new Dictionary<string, object?>
             {
                 ["rounds"] = rounds,
-                ["toolCount"] = tools.Count,
+                ["toolCount"] = lastToolCount,
                 ["totalTokens"] = totalTokens
             });
     }

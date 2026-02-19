@@ -145,6 +145,11 @@ public interface IToolRegistry
     IReadOnlyList<ITool> ResolveTools(ToolSelectionPolicy policy);
 }
 
+public interface IToolRegistrar
+{
+    void RegisterTools(IEnumerable<ITool> tools);
+}
+
 public interface IToolExecutor
 {
     Task<ToolResult> ExecuteAsync(ITool tool, ToolCall call, ToolExecutionContext context, CancellationToken ct);
