@@ -12,6 +12,7 @@ public sealed class CliOptionsTests
             "--session", "s-1",
             "--prompt", "hello",
             "--profile", "Full",
+            "--auto-create-skills",
             "--list-skills",
             "--no-events"
         ]);
@@ -21,6 +22,7 @@ public sealed class CliOptionsTests
         Assert.Equal("s-1", options.Session);
         Assert.Equal("hello", options.Prompt);
         Assert.Equal(global::IronPaw.AgentCore.Abstractions.ToolProfile.Full, options.Profile);
+        Assert.True(options.AutoCreateSkills);
         Assert.True(options.ListSkills);
         Assert.True(options.NoEvents);
     }
@@ -41,6 +43,7 @@ public sealed class CliOptionsTests
             Prompt: "inline",
             PromptFile: "prompt.txt",
             Profile: global::IronPaw.AgentCore.Abstractions.ToolProfile.Coding,
+            AutoCreateSkills: false,
             ListSkills: false,
             NoEvents: false,
             ShowHelp: false);
@@ -61,6 +64,7 @@ public sealed class CliOptionsTests
             Prompt: "  hello world  ",
             PromptFile: null,
             Profile: global::IronPaw.AgentCore.Abstractions.ToolProfile.Coding,
+            AutoCreateSkills: false,
             ListSkills: false,
             NoEvents: false,
             ShowHelp: false);

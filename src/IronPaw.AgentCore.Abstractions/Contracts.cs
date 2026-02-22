@@ -358,6 +358,7 @@ public sealed record AgentRunRequest(
     string Provider,
     string Model,
     ToolSelectionPolicy ToolPolicy,
+    bool AutoCreateSkills = false,
     int ContextWindowChars = 32_768,
     string? SystemPromptOverride = null,
     int MaxOutputTokens = 4096,

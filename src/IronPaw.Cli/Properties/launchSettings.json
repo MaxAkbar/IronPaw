@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "IronPaw.Cli": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "OPENAI_API_KEY": "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",
+        "ANTHROPIC_API_KEY": "set-me"
+      }
+    }
+  }
+}

@@ -97,6 +97,7 @@ try
             provider,
             model,
             options.Profile,
+            options.AutoCreateSkills,
             prompt,
             cancellation.Token);
 
@@ -151,6 +152,7 @@ try
             provider,
             model,
             options.Profile,
+            options.AutoCreateSkills,
             promptOrCommand,
             cancellation.Token);
 
@@ -497,6 +499,7 @@ static async Task<int> RunSingleAsync(
     string provider,
     string model,
     ToolProfile profile,
+    bool autoCreateSkills,
     string prompt,
     CancellationToken ct)
 {
@@ -511,7 +514,8 @@ static async Task<int> RunSingleAsync(
             Model: model,
             ToolPolicy: new ToolSelectionPolicy(
                 Profile: profile,
-                SenderIsOwner: true));
+                SenderIsOwner: true),
+            AutoCreateSkills: autoCreateSkills);
 
         var result = await orchestrator.RunAsync(request, eventSink, ct);
         ConsoleUi.RenderFinal(result);
@@ -977,6 +981,7 @@ internal sealed record CliOptions(
     string? Prompt,
     string? PromptFile,
     ToolProfile Profile,
+    bool AutoCreateSkills,
     bool ListSkills,
     bool NoEvents,
     bool ShowHelp)
@@ -989,6 +994,7 @@ internal sealed record CliOptions(
         string? prompt = null;
         string? promptFile = null;
         var profile = ToolProfile.Coding;
+        var autoCreateSkills = false;
         var listSkills = false;
         var noEvents = false;
         var showHelp = false;
@@ -1035,6 +1041,10 @@ internal sealed record CliOptions(
 
                     break;
 
+                case "--auto-create-skills":
+                    autoCreateSkills = true;
+                    break;
+
                 case "--no-events":
                     noEvents = true;
                     break;
@@ -1056,7 +1066,7 @@ internal sealed record CliOptions(
             }
         }
 
-        return new CliOptions(provider, model, session, prompt, promptFile, profile, listSkills, noEvents, showHelp);
+        return new CliOptions(provider, model, session, prompt, promptFile, profile, autoCreateSkills, listSkills, noEvents, showHelp);
     }
 
     public bool TryValidate(out string? error)
@@ -1070,6 +1080,12 @@ internal sealed record CliOptions(
         if (string.IsNullOrWhiteSpace(Provider))
         {
             error = "--provider cannot be empty.";
+            return false;
+        }
+
+        if (AutoCreateSkills && Profile != ToolProfile.Full)
+        {
+            error = "--auto-create-skills requires --profile Full.";
             return false;
         }
 
@@ -1112,6 +1128,7 @@ internal sealed record CliOptions(
         table.AddRow("--prompt <text>", "Prompt text");
         table.AddRow("--prompt-file <path>", "Read prompt from file");
         table.AddRow("--profile <name>", "Tool profile: Minimal | Coding | Messaging | Full");
+        table.AddRow("--auto-create-skills", "Automatically create runtime tools when needed (requires Full profile)");
         table.AddRow("--list-skills", "List discovered add-in skills and exit");
         table.AddRow("--no-events", "Hide event stream logs");
 

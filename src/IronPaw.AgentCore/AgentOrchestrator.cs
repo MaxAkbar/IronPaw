@@ -93,6 +93,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         transcript.Add(new ChatMessage(ChatRole.User, effectiveRequest.UserInput));
 
+        if (effectiveRequest.AutoCreateSkills)
+        {
+            await TryAutoCreateSkillsAsync(effectiveRequest, transcript, sink, runId, toolsUsed, ct);
+        }
+
         // Initial resolution for the diagnostic event only.
         var initialTools = _toolRegistry.ResolveTools(effectiveRequest.ToolPolicy);
         var initialPrompt = _promptBuilder.BuildPrompt(effectiveRequest, initialTools);
@@ -364,5 +369,132 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private static ValueTask PublishAsync(IAgentEventSink sink, AgentEvent evt, CancellationToken ct)
     {
         return sink.PublishAsync(evt, ct);
+    }
+
+    private async Task<bool> TryAutoCreateSkillsAsync(
+        AgentRunRequest request,
+        List<ChatMessage> transcript,
+        IAgentEventSink sink,
+        RunId runId,
+        HashSet<string> toolsUsed,
+        CancellationToken ct)
+    {
+        var tools = _toolRegistry.ResolveTools(request.ToolPolicy);
+        var createSkillTool = tools.FirstOrDefault(tool =>
+            tool.Descriptor.Name.Equals("create_skill", StringComparison.OrdinalIgnoreCase));
+
+        if (createSkillTool is null)
+        {
+            return false;
+        }
+
+        var systemPrompt = BuildAutoSkillPrompt(request, tools);
+        var toolDefinitions = new[] { _schemaNormalizer.ToDefinition(createSkillTool, request.Provider) };
+        var llmRequest = new LlmRequest(
+            runId,
+            request.SessionKey,
+            request.Provider,
+            request.Model,
+            systemPrompt,
+            transcript,
+            toolDefinitions,
+            Timeout: TimeSpan.FromMinutes(1),
+            MaxOutputTokens: 1024);
+
+        var pendingToolCalls = new List<ToolCall>();
+
+        await foreach (var delta in _llmClient.StreamAsync(llmRequest, ct))
+        {
+            switch (delta)
+            {
+                case ToolCallDelta toolCall when toolCall.ToolName.Equals("create_skill", StringComparison.OrdinalIgnoreCase):
+                    pendingToolCalls.Add(new ToolCall(toolCall.ToolCallId, toolCall.ToolName, toolCall.Arguments.Clone()));
+                    await PublishAsync(
+                        sink,
+                        new AgentEvent(
+                            runId,
+                            request.SessionKey,
+                            AgentEventStream.Tool,
+                            Type: "tool_call",
+                            Timestamp: DateTimeOffset.UtcNow,
+                            Data: EventData.Of(
+                                ("toolName", toolCall.ToolName),
+                                ("toolCallId", toolCall.ToolCallId))),
+                        ct);
+                    break;
+
+                case LlmErrorDelta error:
+                    throw new InvalidOperationException($"LLM returned an error: {error.Error}");
+            }
+        }
+
+        if (pendingToolCalls.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var toolCall in pendingToolCalls)
+        {
+            toolsUsed.Add(toolCall.ToolName);
+            transcript.Add(new ChatMessage(ChatRole.Assistant, toolCall.Arguments.GetRawText(), toolCall.ToolCallId, toolCall.ToolName));
+
+            var execContext = new ToolExecutionContext(runId, request.SessionKey, request.Provider, request.Model);
+            var result = await _toolExecutor.ExecuteAsync(createSkillTool, toolCall, execContext, ct);
+
+            transcript.Add(new ChatMessage(ChatRole.Tool, result.Content, toolCall.ToolCallId, toolCall.ToolName));
+            await PublishAsync(
+                sink,
+                new AgentEvent(
+                    runId,
+                    request.SessionKey,
+                    AgentEventStream.Tool,
+                    Type: "tool_result",
+                    Timestamp: DateTimeOffset.UtcNow,
+                    Data: EventData.Of(
+                        ("toolName", toolCall.ToolName),
+                        ("toolCallId", toolCall.ToolCallId),
+                        ("isError", result.IsError),
+                        ("contentChars", result.Content.Length)),
+                    Severity: result.IsError ? AgentEventSeverity.Warning : AgentEventSeverity.Info),
+                ct);
+        }
+
+        return true;
+    }
+
+    private static string BuildAutoSkillPrompt(AgentRunRequest request, IReadOnlyList<ITool> tools)
+    {
+        var lines = new List<string>
+        {
+            "You are a tool planner.",
+            "Decide whether a new runtime skill is required to satisfy the user request.",
+            "If existing tools can satisfy the request, respond with exactly: NO_SKILL_NEEDED",
+            "Otherwise, call create_skill with complete C# source code implementing ISkillAddin.",
+            "Do not answer the user directly."
+        };
+
+        lines.Add("");
+        lines.Add("User request:");
+        lines.Add(request.UserInput);
+        lines.Add("");
+        lines.Add("Available tools:");
+
+        var availableTools = tools
+            .Where(tool => !tool.Descriptor.Name.Equals("create_skill", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (availableTools.Count == 0)
+        {
+            lines.Add("- none");
+        }
+        else
+        {
+            foreach (var tool in availableTools)
+            {
+                lines.Add($"- {tool.Descriptor.Name}: {tool.Descriptor.Description}");
+            }
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 }

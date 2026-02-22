@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.0.31903.59
+# Visual Studio Version 18
+VisualStudioVersion = 18.4.11513.90 insiders
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
@@ -34,6 +34,32 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.Skills.ExampleAddin.Tests", "tests\IronPaw.Skills.ExampleAddin.Tests\IronPaw.Skills.ExampleAddin.Tests.csproj", "{01251A42-9832-4121-BC34-8A16F5CEDF21}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.Cli.Tests", "tests\IronPaw.Cli.Tests\IronPaw.Cli.Tests.csproj", "{E0C3A28A-41D7-4DFB-8159-8F5D031204D2}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{CEE8093E-3698-4EEF-8B15-507A2171213C}"
+	ProjectSection(SolutionItems) = preProject
+		deep-research-report.md = deep-research-report.md
+		README.md = README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{433773FE-1B62-472F-AD2A-78EC253EF362}"
+	ProjectSection(SolutionItems) = preProject
+		docs\getting-started.md = docs\getting-started.md
+		docs\skills-addins.md = docs\skills-addins.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Examples", "Examples", "{7E3FD429-7D58-420C-8855-4D4E80DDF344}"
+	ProjectSection(SolutionItems) = preProject
+		docs\examples\weather-skill.md = docs\examples\weather-skill.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tutorials", "Tutorials", "{9CC8B6FE-275A-4189-BE19-AD47BDBF7F2A}"
+	ProjectSection(SolutionItems) = preProject
+		docs\tutorials\creating-a-skill-addin.md = docs\tutorials\creating-a-skill-addin.md
+		docs\tutorials\embedding-ironpaw.md = docs\tutorials\embedding-ironpaw.md
+		docs\tutorials\interactive-mode.md = docs\tutorials\interactive-mode.md
+		docs\tutorials\memory-and-review.md = docs\tutorials\memory-and-review.md
+		docs\tutorials\using-providers.md = docs\tutorials\using-providers.md
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -232,5 +258,10 @@ Global
 		{1FA97911-C09A-4E7A-80DD-EBE3BA85C179} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{01251A42-9832-4121-BC34-8A16F5CEDF21} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{E0C3A28A-41D7-4DFB-8159-8F5D031204D2} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{7E3FD429-7D58-420C-8855-4D4E80DDF344} = {433773FE-1B62-472F-AD2A-78EC253EF362}
+		{9CC8B6FE-275A-4189-BE19-AD47BDBF7F2A} = {433773FE-1B62-472F-AD2A-78EC253EF362}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {2D55FA87-39C6-41A0-B5E6-CBDC31BE77C5}
 	EndGlobalSection
 EndGlobal
