@@ -470,6 +470,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             "Decide whether a new runtime skill is required to satisfy the user request.",
             "If existing tools can satisfy the request, respond with exactly: NO_SKILL_NEEDED",
             "Otherwise, call create_skill with complete C# source code implementing ISkillAddin.",
+            "The create_skill arguments MUST be: { \"source_code\": \"<complete C# file>\" }.",
             "Do not answer the user directly."
         };
 
@@ -494,6 +495,40 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 lines.Add($"- {tool.Descriptor.Name}: {tool.Descriptor.Description}");
             }
         }
+
+        lines.Add("");
+        lines.Add("Use this template for source_code:");
+        lines.Add("using System;");
+        lines.Add("using System.Collections.Generic;");
+        lines.Add("using System.Text.Json;");
+        lines.Add("using System.Threading;");
+        lines.Add("using System.Threading.Tasks;");
+        lines.Add("using IronPaw.AgentCore.Abstractions;");
+        lines.Add("");
+        lines.Add("public sealed class MyAddin : ISkillAddin");
+        lines.Add("{");
+        lines.Add("    public string AddinId => \"my.addin\";");
+        lines.Add("    public string Description => \"Short description.\";");
+        lines.Add("    public IReadOnlyList<ISkill> CreateSkills() => [new MySkill()];");
+        lines.Add("}");
+        lines.Add("");
+        lines.Add("internal sealed class MySkill : ISkill");
+        lines.Add("{");
+        lines.Add("    public SkillDescriptor Descriptor { get; } = new(");
+        lines.Add("        Name: \"my_skill\",");
+        lines.Add("        Description: \"What this skill does.\",");
+        lines.Add("        InputSchema: JsonSerializer.SerializeToElement(new");
+        lines.Add("        {");
+        lines.Add("            type = \"object\",");
+        lines.Add("            properties = new { },");
+        lines.Add("            required = Array.Empty<string>()");
+        lines.Add("        }));");
+        lines.Add("");
+        lines.Add("    public Task<SkillResult> ExecuteAsync(SkillCall call, SkillExecutionContext ctx, CancellationToken ct)");
+        lines.Add("    {");
+        lines.Add("        return Task.FromResult(SkillResult.Success(\"ok\"));");
+        lines.Add("    }");
+        lines.Add("}");
 
         return string.Join(Environment.NewLine, lines);
     }

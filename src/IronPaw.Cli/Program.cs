@@ -539,12 +539,14 @@ static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult, I
     var appData = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "IronPaw");
+    var appSkillsDirectory = Path.Combine(appData, "skills");
     var stateRoot = Path.Combine(appData, "state");
     var sessionsDirectory = Path.Combine(stateRoot, "sessions");
     var sessionStorePath = Path.Combine(stateRoot, "session-store.json");
 
     Directory.CreateDirectory(stateRoot);
     Directory.CreateDirectory(sessionsDirectory);
+    Directory.CreateDirectory(appSkillsDirectory);
 
     var memoryStore = new FileMemoryStore(new FileMemoryStoreOptions(
         GlobalMemoryPath: Path.Combine(stateRoot, "memories.json"),
@@ -554,11 +556,11 @@ static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult, I
     var skillLoadResult = SkillAddinLoader.LoadFromDirectories(
     [
         Path.Combine(workspaceRoot, "addins", "skills"),
-        Path.Combine(appData, "skills")
+        appSkillsDirectory
     ]);
     var tools = BuiltInToolFactory.CreateDefault(workspaceRoot, skillLoadResult.SkillTools, memoryStore, runHistoryStore);
     var toolRegistry = new InMemoryToolRegistry(tools);
-    toolRegistry.RegisterTools([new CreateSkillTool(toolRegistry)]);
+    toolRegistry.RegisterTools([new CreateSkillTool(toolRegistry, appSkillsDirectory)]);
     var sessionStore = new FileSessionStore(new FileSessionStoreOptions(
         StoreFilePath: sessionStorePath,
         CacheTtl: TimeSpan.FromSeconds(5)));

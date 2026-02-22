@@ -17,11 +17,48 @@ internal sealed class RoslynSkillCompiler
 
     public RoslynCompilationResult Compile(string sourceCode, string assemblyName)
     {
+        var compilation = CreateCompilation(sourceCode, assemblyName);
+        using var ms = new MemoryStream();
+        var emitResult = compilation.Emit(ms);
+
+        if (!emitResult.Success)
+        {
+            return RoslynCompilationResult.Failure(GetErrors(emitResult.Diagnostics));
+        }
+
+        ms.Seek(0, SeekOrigin.Begin);
+        var assembly = AssemblyLoadContext.Default.LoadFromStream(ms);
+        return RoslynCompilationResult.Success(assembly);
+    }
+
+    public RoslynCompilationResult CompileToFile(string sourceCode, string assemblyPath)
+    {
+        var assemblyName = Path.GetFileNameWithoutExtension(assemblyPath);
+        var compilation = CreateCompilation(sourceCode, assemblyName);
+
+        var directory = Path.GetDirectoryName(assemblyPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var emitResult = compilation.Emit(assemblyPath);
+        if (!emitResult.Success)
+        {
+            return RoslynCompilationResult.Failure(GetErrors(emitResult.Diagnostics));
+        }
+
+        var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(assemblyPath));
+        return RoslynCompilationResult.Success(assembly);
+    }
+
+    private CSharpCompilation CreateCompilation(string sourceCode, string assemblyName)
+    {
         var syntaxTree = CSharpSyntaxTree.ParseText(
             sourceCode,
             new CSharpParseOptions(LanguageVersion.Latest));
 
-        var compilation = CSharpCompilation.Create(
+        return CSharpCompilation.Create(
             assemblyName,
             syntaxTrees: [syntaxTree],
             references: _baseReferences,
@@ -29,22 +66,14 @@ internal sealed class RoslynSkillCompiler
                 OutputKind.DynamicallyLinkedLibrary,
                 optimizationLevel: OptimizationLevel.Release,
                 allowUnsafe: false));
+    }
 
-        using var ms = new MemoryStream();
-        var emitResult = compilation.Emit(ms);
-
-        if (!emitResult.Success)
-        {
-            var errors = emitResult.Diagnostics
-                .Where(d => d.Severity == DiagnosticSeverity.Error)
-                .Select(d => d.ToString())
-                .ToArray();
-            return RoslynCompilationResult.Failure(errors);
-        }
-
-        ms.Seek(0, SeekOrigin.Begin);
-        var assembly = AssemblyLoadContext.Default.LoadFromStream(ms);
-        return RoslynCompilationResult.Success(assembly);
+    private static IReadOnlyList<string> GetErrors(IEnumerable<Diagnostic> diagnostics)
+    {
+        return diagnostics
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .Select(d => d.ToString())
+            .ToArray();
     }
 
     private static List<MetadataReference> BuildBaseReferences()

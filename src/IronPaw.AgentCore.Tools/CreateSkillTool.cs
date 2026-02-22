@@ -7,14 +7,16 @@ public sealed class CreateSkillTool : ITool
 {
     private readonly IToolRegistrar _registrar;
     private readonly RoslynSkillCompiler _compiler;
+    private readonly string? _persistDirectory;
     private readonly HashSet<string> _usedToolNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
     private int _compilationCounter;
 
-    public CreateSkillTool(IToolRegistrar registrar)
+    public CreateSkillTool(IToolRegistrar registrar, string? persistDirectory = null)
     {
         _registrar = registrar;
         _compiler = new RoslynSkillCompiler();
+        _persistDirectory = string.IsNullOrWhiteSpace(persistDirectory) ? null : persistDirectory;
         Descriptor = new ToolDescriptor(
             Name: "create_skill",
             Description:
@@ -36,13 +38,11 @@ public sealed class CreateSkillTool : ITool
 
     public Task<ToolResult> ExecuteAsync(ToolCall call, ToolExecutionContext context, CancellationToken ct)
     {
-        if (!call.Arguments.TryGetProperty("source_code", out var sourceElement) ||
-            sourceElement.ValueKind != JsonValueKind.String)
+        if (!TryGetSourceCode(call.Arguments, out var sourceCode))
         {
             return Task.FromResult(ToolResult.Error("Missing required string argument: source_code"));
         }
 
-        var sourceCode = sourceElement.GetString()!;
         if (string.IsNullOrWhiteSpace(sourceCode))
         {
             return Task.FromResult(ToolResult.Error("source_code cannot be empty."));
@@ -55,10 +55,26 @@ public sealed class CreateSkillTool : ITool
         }
 
         var assemblyName = $"IronPaw.DynamicSkill_{compilationId}_{Guid.NewGuid():N}";
-        var compilationResult = _compiler.Compile(sourceCode, assemblyName);
+        var persistedAssemblyPath = string.Empty;
+
+        RoslynCompilationResult compilationResult;
+        if (_persistDirectory is not null)
+        {
+            persistedAssemblyPath = Path.Combine(_persistDirectory, $"{assemblyName}.dll");
+            compilationResult = _compiler.CompileToFile(sourceCode, persistedAssemblyPath);
+        }
+        else
+        {
+            compilationResult = _compiler.Compile(sourceCode, assemblyName);
+        }
 
         if (!compilationResult.IsSuccess)
         {
+            if (!string.IsNullOrWhiteSpace(persistedAssemblyPath) && File.Exists(persistedAssemblyPath))
+            {
+                File.Delete(persistedAssemblyPath);
+            }
+
             var errorPayload = JsonSerializer.Serialize(new
             {
                 success = false,
@@ -82,6 +98,11 @@ public sealed class CreateSkillTool : ITool
         var registeredToolNames = new List<string>();
         var diagnostics = new List<string>();
         var newTools = new List<ITool>();
+
+        if (!string.IsNullOrWhiteSpace(persistedAssemblyPath))
+        {
+            diagnostics.Add($"Saved skill add-in to '{persistedAssemblyPath}'.");
+        }
 
         foreach (var addinType in addinTypes)
         {
@@ -135,6 +156,57 @@ public sealed class CreateSkillTool : ITool
         });
 
         return Task.FromResult(ToolResult.Success(successPayload));
+    }
+
+    private static bool TryGetSourceCode(JsonElement arguments, out string? sourceCode)
+    {
+        sourceCode = null;
+        if (arguments.TryGetProperty("source_code", out var sourceElement) &&
+            sourceElement.ValueKind == JsonValueKind.String)
+        {
+            sourceCode = sourceElement.GetString();
+            return true;
+        }
+
+        if (arguments.TryGetProperty("raw", out var rawElement) &&
+            rawElement.ValueKind == JsonValueKind.String)
+        {
+            var raw = rawElement.GetString();
+            if (!string.IsNullOrWhiteSpace(raw) &&
+                TryExtractSourceCode(raw, out var extracted))
+            {
+                sourceCode = extracted;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryExtractSourceCode(string raw, out string? sourceCode)
+    {
+        sourceCode = null;
+        if (!raw.TrimStart().StartsWith("{", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            if (doc.RootElement.TryGetProperty("source_code", out var sourceElement) &&
+                sourceElement.ValueKind == JsonValueKind.String)
+            {
+                sourceCode = sourceElement.GetString();
+                return true;
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        return false;
     }
 
     private string EnsureUniqueToolName(string baseName)
