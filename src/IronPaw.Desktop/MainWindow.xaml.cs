@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Net.Http;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,21 +13,6 @@ namespace IronPaw.Desktop;
 
 public partial class MainWindow : Window
 {
-    private static readonly HttpClient SharedHttpClient = new()
-    {
-        Timeout = TimeSpan.FromMinutes(5)
-    };
-
-    private static readonly IReadOnlyDictionary<string, string> ProviderDefaultModels =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["local"] = "rule-based-v1",
-            ["openai"] = "gpt-4o-mini",
-            ["ollama"] = "llama3.2",
-            ["lmstudio"] = "local-model",
-            ["anthropic"] = "claude-3-5-haiku-latest"
-        };
-
     private readonly IAgentOrchestrator _orchestrator;
     private CancellationTokenSource? _runCancellationTokenSource;
 
@@ -65,7 +49,7 @@ public partial class MainWindow : Window
             : new SessionKey(sessionRaw);
         var provider = GetSelectedProvider();
         var model = string.IsNullOrWhiteSpace(ModelTextBox.Text)
-            ? ProviderDefaultModels[provider]
+            ? ProviderDefaults.DefaultModels[provider]
             : ModelTextBox.Text.Trim();
 
         Events.Clear();
@@ -123,13 +107,13 @@ public partial class MainWindow : Window
         }
 
         var provider = GetSelectedProvider();
-        if (!ProviderDefaultModels.TryGetValue(provider, out var recommendedModel))
+        if (!ProviderDefaults.DefaultModels.TryGetValue(provider, out var recommendedModel))
         {
             return;
         }
 
         var current = ModelTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(current) || IsDefaultModel(current))
+        if (string.IsNullOrWhiteSpace(current) || ProviderDefaults.DefaultModels.Values.Contains(current, StringComparer.OrdinalIgnoreCase))
         {
             ModelTextBox.Text = recommendedModel;
         }
@@ -163,7 +147,7 @@ public partial class MainWindow : Window
         var laneScheduler = new SessionLaneScheduler();
         var toolExecutor = new ToolExecutor();
         var schemaNormalizer = new ToolSchemaNormalizer();
-        var llmClient = BuildLlmRouter();
+        var llmClient = LlmClientFactory.Build();
         var sanitizer = new TranscriptSanitizer();
         var truncator = new ToolResultTruncator();
         var promptBuilder = new DefaultSystemPromptBuilder();
@@ -183,61 +167,6 @@ public partial class MainWindow : Window
         return (orchestrator, skillLoadResult);
     }
 
-    private static ILlmClient BuildLlmRouter()
-    {
-        var local = new RuleBasedLlmClient();
-        var openAi = new OpenAiLlmClient(
-            SharedHttpClient,
-            () => Environment.GetEnvironmentVariable("OPENAI_API_KEY"));
-        var ollama = new OpenAiLlmClient(
-            SharedHttpClient,
-            () => ResolveApiKey("OLLAMA_API_KEY", "ollama"),
-            ResolveOpenAiCompatibleBaseUrl(
-                Environment.GetEnvironmentVariable("OLLAMA_BASE_URL"),
-                "http://localhost:11434"));
-        var lmStudio = new OpenAiLlmClient(
-            SharedHttpClient,
-            () => ResolveApiKey("LMSTUDIO_API_KEY", "lm-studio"),
-            ResolveOpenAiCompatibleBaseUrl(
-                Environment.GetEnvironmentVariable("LMSTUDIO_BASE_URL"),
-                "http://localhost:1234"));
-        var anthropic = new AnthropicLlmClient(
-            SharedHttpClient,
-            () => Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"));
-
-        var providers = new Dictionary<string, ILlmClient>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["local"] = local,
-            ["openai"] = openAi,
-            ["ollama"] = ollama,
-            ["lmstudio"] = lmStudio,
-            ["anthropic"] = anthropic
-        };
-
-        return new RoutedLlmClient(providers, local);
-    }
-
-    private static string ResolveApiKey(string environmentVariableName, string fallback)
-    {
-        var configured = Environment.GetEnvironmentVariable(environmentVariableName);
-        return string.IsNullOrWhiteSpace(configured) ? fallback : configured.Trim();
-    }
-
-    private static string ResolveOpenAiCompatibleBaseUrl(string? configured, string fallbackBaseUrl)
-    {
-        var baseUrl = string.IsNullOrWhiteSpace(configured)
-            ? fallbackBaseUrl
-            : configured.Trim();
-
-        baseUrl = baseUrl.TrimEnd('/');
-        if (baseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
-        {
-            baseUrl = baseUrl[..^3];
-        }
-
-        return baseUrl;
-    }
-
     private string GetSelectedProvider()
     {
         if (ProviderComboBox.SelectedItem is ComboBoxItem comboBoxItem &&
@@ -248,11 +177,6 @@ public partial class MainWindow : Window
         }
 
         return "local";
-    }
-
-    private static bool IsDefaultModel(string currentModel)
-    {
-        return ProviderDefaultModels.Values.Contains(currentModel, StringComparer.OrdinalIgnoreCase);
     }
 
     private void AppendEvent(AgentEvent evt)
@@ -297,21 +221,5 @@ public partial class MainWindow : Window
         return string.Join(
             ", ",
             data.Select(pair => $"{pair.Key}={pair.Value}"));
-    }
-
-    private sealed class UiEventSink : IAgentEventSink
-    {
-        private readonly Action<AgentEvent> _callback;
-
-        public UiEventSink(Action<AgentEvent> callback)
-        {
-            _callback = callback;
-        }
-
-        public ValueTask PublishAsync(AgentEvent evt, CancellationToken ct)
-        {
-            _callback(evt);
-            return ValueTask.CompletedTask;
-        }
     }
 }

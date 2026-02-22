@@ -1,9 +1,8 @@
 using IronPaw.AgentCore.Abstractions;
-using IronPaw.AgentCore.Providers;
 
-namespace IronPaw.Cli;
+namespace IronPaw.AgentCore.Providers;
 
-internal static class LlmClientFactory
+public static class LlmClientFactory
 {
     public static ILlmClient Build()
     {
@@ -44,13 +43,13 @@ internal static class LlmClientFactory
         return new RoutedLlmClient(providers, local);
     }
 
-    internal static string ResolveApiKey(string environmentVariableName, string fallback)
+    public static string ResolveApiKey(string environmentVariableName, string fallback)
     {
         var configured = Environment.GetEnvironmentVariable(environmentVariableName);
         return string.IsNullOrWhiteSpace(configured) ? fallback : configured.Trim();
     }
 
-    internal static string ResolveOpenAiCompatibleBaseUrl(string? configured, string fallbackBaseUrl)
+    public static string ResolveOpenAiCompatibleBaseUrl(string? configured, string fallbackBaseUrl)
     {
         var baseUrl = string.IsNullOrWhiteSpace(configured)
             ? fallbackBaseUrl

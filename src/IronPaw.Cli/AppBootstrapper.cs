@@ -1,6 +1,7 @@
 using IronPaw.AgentCore;
 using IronPaw.AgentCore.Abstractions;
 using IronPaw.AgentCore.Persistence;
+using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.Cli;
