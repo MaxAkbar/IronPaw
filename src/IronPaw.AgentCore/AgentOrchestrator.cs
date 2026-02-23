@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore;
@@ -107,6 +108,19 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         // Initial resolution for the diagnostic event only.
         var initialTools = _toolRegistry.ResolveTools(effectiveRequest.ToolPolicy);
+        var routeResult = await TryRouteWithDelegatesAsync(
+            effectiveRequest,
+            transcript,
+            initialTools,
+            sink,
+            runId,
+            toolsUsed,
+            ct);
+        aggregatedInput += routeResult.InputTokens;
+        aggregatedOutput += routeResult.OutputTokens;
+        lastCacheRead += routeResult.CacheReadTokens;
+        lastCacheWrite += routeResult.CacheWriteTokens;
+
         var initialPrompt = _promptBuilder.BuildPrompt(effectiveRequest, initialTools);
 
         await PublishAsync(
@@ -123,7 +137,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 AgentId: effectiveRequest.AgentId),
             ct);
 
-        var maxRounds = effectiveRequest.MaxRounds;
+        var maxRounds = routeResult.HaltAfterClarification ? 0 : effectiveRequest.MaxRounds;
         var savedInLastIteration = false;
         var lastToolCount = initialTools.Count;
         var lastSystemPromptLength = initialPrompt.Length;
@@ -385,6 +399,213 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         return sink.PublishAsync(evt, ct);
     }
 
+    private async Task<RoutePlanExecutionResult> TryRouteWithDelegatesAsync(
+        AgentRunRequest request,
+        List<ChatMessage> transcript,
+        IReadOnlyList<ITool> tools,
+        IAgentEventSink sink,
+        RunId runId,
+        HashSet<string> toolsUsed,
+        CancellationToken ct)
+    {
+        if (request.ParentRunId is not null)
+        {
+            return RoutePlanExecutionResult.None;
+        }
+
+        var invokeAgentTool = tools.FirstOrDefault(tool =>
+            tool.Descriptor.Name.Equals("invoke_agent", StringComparison.OrdinalIgnoreCase));
+        var listAgentsTool = tools.FirstOrDefault(tool =>
+            tool.Descriptor.Name.Equals("list_agents", StringComparison.OrdinalIgnoreCase));
+        if (invokeAgentTool is null || listAgentsTool is null)
+        {
+            return RoutePlanExecutionResult.None;
+        }
+
+        var emptyArgs = JsonSerializer.SerializeToElement(new { });
+        var listCall = new ToolCall(
+            ToolCallId: $"plan_list_agents_{Guid.NewGuid():N}",
+            ToolName: listAgentsTool.Descriptor.Name,
+            Arguments: emptyArgs);
+        var execContext = new ToolExecutionContext(
+            runId,
+            request.SessionKey,
+            request.Provider,
+            request.Model,
+            request.Caller,
+            SubagentDepth: request.ToolPolicy.SubagentDepth);
+
+        var listResult = await _toolExecutor.ExecuteAsync(listAgentsTool, listCall, execContext, ct);
+        if (listResult.IsError)
+        {
+            return RoutePlanExecutionResult.None;
+        }
+
+        var availableAgents = ParseAgentCatalog(listResult.Content);
+        if (availableAgents.Count == 0)
+        {
+            return RoutePlanExecutionResult.None;
+        }
+
+        await PublishAsync(
+            sink,
+            new AgentEvent(
+                runId,
+                request.SessionKey,
+                AgentEventStream.Diagnostics,
+                Type: "route_planning_started",
+                Timestamp: DateTimeOffset.UtcNow,
+                Data: EventData.Of(("agentCount", availableAgents.Count)),
+                AgentId: request.AgentId),
+            ct);
+
+        var plannerPrompt = BuildRoutePlanPrompt(request, availableAgents);
+        var plannerRequest = new LlmRequest(
+            runId,
+            request.SessionKey,
+            request.Provider,
+            request.Model,
+            plannerPrompt,
+            transcript,
+            Array.Empty<LlmToolDefinition>(),
+            Timeout: TimeSpan.FromMinutes(1),
+            MaxOutputTokens: 1024);
+
+        var plannerBuffer = new StringBuilder();
+        long inputTokens = 0;
+        long outputTokens = 0;
+        long cacheReadTokens = 0;
+        long cacheWriteTokens = 0;
+
+        await foreach (var delta in _llmClient.StreamAsync(plannerRequest, ct))
+        {
+            switch (delta)
+            {
+                case AssistantTextDelta text:
+                    plannerBuffer.Append(text.Text);
+                    break;
+
+                case UsageDelta usage:
+                    inputTokens += usage.InputTokens ?? 0;
+                    outputTokens += usage.OutputTokens ?? 0;
+                    if (usage.CacheReadTokens.HasValue)
+                    {
+                        cacheReadTokens += usage.CacheReadTokens.Value;
+                    }
+
+                    if (usage.CacheWriteTokens.HasValue)
+                    {
+                        cacheWriteTokens += usage.CacheWriteTokens.Value;
+                    }
+
+                    break;
+
+                case LlmErrorDelta error:
+                    throw new InvalidOperationException($"LLM returned an error: {error.Error}");
+            }
+        }
+
+        var plan = ParseRoutePlan(plannerBuffer.ToString(), availableAgents);
+        if (plan is null)
+        {
+            return new RoutePlanExecutionResult(
+                HaltAfterClarification: false,
+                InputTokens: inputTokens,
+                OutputTokens: outputTokens,
+                CacheReadTokens: cacheReadTokens,
+                CacheWriteTokens: cacheWriteTokens);
+        }
+
+        await PublishAsync(
+            sink,
+            new AgentEvent(
+                runId,
+                request.SessionKey,
+                AgentEventStream.Diagnostics,
+                Type: "route_planning_completed",
+                Timestamp: DateTimeOffset.UtcNow,
+                Data: EventData.Of(
+                    ("needsClarification", plan.NeedsClarification),
+                    ("delegationCount", plan.Delegations.Count)),
+                AgentId: request.AgentId),
+            ct);
+
+        if (plan.NeedsClarification)
+        {
+            transcript.Add(new ChatMessage(ChatRole.Assistant, BuildClarificationMessage(plan.ClarificationQuestions)));
+            return new RoutePlanExecutionResult(
+                HaltAfterClarification: true,
+                InputTokens: inputTokens,
+                OutputTokens: outputTokens,
+                CacheReadTokens: cacheReadTokens,
+                CacheWriteTokens: cacheWriteTokens);
+        }
+
+        foreach (var delegation in plan.Delegations)
+        {
+            var args = JsonSerializer.SerializeToElement(new
+            {
+                agent_id = delegation.AgentId,
+                task = delegation.Task
+            });
+            var toolCallId = $"plan_delegate_{Guid.NewGuid():N}";
+            var toolCall = new ToolCall(toolCallId, invokeAgentTool.Descriptor.Name, args);
+
+            transcript.Add(new ChatMessage(ChatRole.Assistant, args.GetRawText(), toolCall.ToolCallId, toolCall.ToolName));
+            toolsUsed.Add(toolCall.ToolName);
+
+            await PublishAsync(
+                sink,
+                new AgentEvent(
+                    runId,
+                    request.SessionKey,
+                    AgentEventStream.Tool,
+                    Type: "tool_call",
+                    Timestamp: DateTimeOffset.UtcNow,
+                    Data: EventData.Of(
+                        ("toolName", toolCall.ToolName),
+                        ("toolCallId", toolCall.ToolCallId)),
+                    AgentId: request.AgentId),
+                ct);
+
+            var result = await _toolExecutor.ExecuteAsync(invokeAgentTool, toolCall, execContext, ct);
+            var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);
+            transcript.Add(new ChatMessage(ChatRole.Tool, fencedContent, toolCall.ToolCallId, toolCall.ToolName));
+
+            await PublishAsync(
+                sink,
+                new AgentEvent(
+                    runId,
+                    request.SessionKey,
+                    AgentEventStream.Tool,
+                    Type: "tool_result",
+                    Timestamp: DateTimeOffset.UtcNow,
+                    Data: EventData.Of(
+                        ("toolName", toolCall.ToolName),
+                        ("toolCallId", toolCall.ToolCallId),
+                        ("isError", result.IsError),
+                        ("contentChars", result.Content.Length)),
+                    Severity: result.IsError ? AgentEventSeverity.Warning : AgentEventSeverity.Info,
+                    AgentId: request.AgentId),
+                ct);
+        }
+
+        if (plan.Delegations.Count > 0)
+        {
+            var truncated = _toolResultTruncator.Truncate(transcript, request.ContextWindowChars);
+            var repaired = _transcriptSanitizer.Repair(truncated);
+            transcript.Clear();
+            transcript.AddRange(repaired);
+        }
+
+        return new RoutePlanExecutionResult(
+            HaltAfterClarification: false,
+            InputTokens: inputTokens,
+            OutputTokens: outputTokens,
+            CacheReadTokens: cacheReadTokens,
+            CacheWriteTokens: cacheWriteTokens);
+    }
+
     private async Task<bool> TryAutoCreateSkillsAsync(
         AgentRunRequest request,
         List<ChatMessage> transcript,
@@ -548,5 +769,253 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         lines.Add("}");
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string BuildRoutePlanPrompt(AgentRunRequest request, IReadOnlyList<AgentCatalogEntry> agents)
+    {
+        var lines = new List<string>
+        {
+            "You are a routing planner for a coding assistant.",
+            "Decide whether the request needs clarification before execution.",
+            "If clarification is needed, ask up to 3 concise questions and do not delegate.",
+            "If clarification is not needed, break work into minimal delegated tasks for available specialist agents.",
+            "Return JSON only. No prose, no markdown."
+        };
+
+        lines.Add("");
+        lines.Add("Available agents:");
+        foreach (var agent in agents)
+        {
+            lines.Add($"- {agent.AgentId}: {agent.DisplayName} — {agent.Description}");
+        }
+
+        lines.Add("");
+        lines.Add("Output schema:");
+        lines.Add("{");
+        lines.Add("  \"needs_clarification\": boolean,");
+        lines.Add("  \"clarification_questions\": string[],");
+        lines.Add("  \"delegations\": [{ \"agent_id\": string, \"task\": string }]");
+        lines.Add("}");
+        lines.Add("");
+        lines.Add("Rules:");
+        lines.Add("- If needs_clarification=true, delegations must be an empty array.");
+        lines.Add("- If needs_clarification=false, clarification_questions must be an empty array.");
+        lines.Add("- Use only listed agent_id values.");
+        lines.Add("- Keep delegation count minimal and avoid overlap.");
+        lines.Add("");
+        lines.Add("User request:");
+        lines.Add(request.UserInput);
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static RoutePlan? ParseRoutePlan(string raw, IReadOnlyList<AgentCatalogEntry> agents)
+    {
+        var json = TryExtractJsonObject(raw);
+        if (json is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind is not JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var knownAgents = new HashSet<string>(agents.Select(agent => agent.AgentId), StringComparer.OrdinalIgnoreCase);
+
+            var needsClarification = root.TryGetProperty("needs_clarification", out var needsNode) &&
+                                     needsNode.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+                                     needsNode.GetBoolean();
+
+            var questions = new List<string>();
+            if (root.TryGetProperty("clarification_questions", out var questionsNode) &&
+                questionsNode.ValueKind is JsonValueKind.Array)
+            {
+                foreach (var item in questionsNode.EnumerateArray())
+                {
+                    if (item.ValueKind is not JsonValueKind.String)
+                    {
+                        continue;
+                    }
+
+                    var question = item.GetString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(question))
+                    {
+                        questions.Add(question);
+                    }
+                }
+            }
+
+            var delegations = new List<DelegationPlanEntry>();
+            if (root.TryGetProperty("delegations", out var delegationsNode) &&
+                delegationsNode.ValueKind is JsonValueKind.Array)
+            {
+                foreach (var item in delegationsNode.EnumerateArray())
+                {
+                    if (item.ValueKind is not JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+
+                    if (!item.TryGetProperty("agent_id", out var agentNode) ||
+                        agentNode.ValueKind is not JsonValueKind.String)
+                    {
+                        continue;
+                    }
+
+                    if (!item.TryGetProperty("task", out var taskNode) ||
+                        taskNode.ValueKind is not JsonValueKind.String)
+                    {
+                        continue;
+                    }
+
+                    var agentId = agentNode.GetString()?.Trim();
+                    var task = taskNode.GetString()?.Trim();
+                    if (string.IsNullOrWhiteSpace(agentId) ||
+                        string.IsNullOrWhiteSpace(task) ||
+                        !knownAgents.Contains(agentId))
+                    {
+                        continue;
+                    }
+
+                    delegations.Add(new DelegationPlanEntry(agentId, task));
+                }
+            }
+
+            if (needsClarification)
+            {
+                delegations.Clear();
+                questions = questions.Take(3).ToList();
+                if (questions.Count == 0)
+                {
+                    questions.Add("Could you clarify the expected outcome and constraints?");
+                }
+            }
+            else
+            {
+                questions.Clear();
+                delegations = delegations
+                    .DistinctBy(d => $"{d.AgentId}:{d.Task}", StringComparer.OrdinalIgnoreCase)
+                    .Take(4)
+                    .ToList();
+            }
+
+            return new RoutePlan(needsClarification, questions, delegations);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TryExtractJsonObject(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var start = raw.IndexOf('{');
+        var end = raw.LastIndexOf('}');
+        if (start < 0 || end <= start)
+        {
+            return null;
+        }
+
+        return raw[start..(end + 1)];
+    }
+
+    private static IReadOnlyList<AgentCatalogEntry> ParseAgentCatalog(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return Array.Empty<AgentCatalogEntry>();
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            if (doc.RootElement.ValueKind is not JsonValueKind.Array)
+            {
+                return Array.Empty<AgentCatalogEntry>();
+            }
+
+            var agents = new List<AgentCatalogEntry>();
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                if (item.ValueKind is not JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var agentId = item.TryGetProperty("agent_id", out var idNode) && idNode.ValueKind is JsonValueKind.String
+                    ? idNode.GetString()?.Trim()
+                    : null;
+                if (string.IsNullOrWhiteSpace(agentId))
+                {
+                    continue;
+                }
+
+                var displayName = item.TryGetProperty("display_name", out var displayNode) && displayNode.ValueKind is JsonValueKind.String
+                    ? displayNode.GetString()?.Trim()
+                    : agentId;
+                var description = item.TryGetProperty("description", out var descriptionNode) && descriptionNode.ValueKind is JsonValueKind.String
+                    ? descriptionNode.GetString()?.Trim()
+                    : "No description provided.";
+
+                agents.Add(new AgentCatalogEntry(agentId, displayName ?? agentId, description ?? "No description provided."));
+            }
+
+            return agents;
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<AgentCatalogEntry>();
+        }
+    }
+
+    private static string BuildClarificationMessage(IReadOnlyList<string> questions)
+    {
+        var lines = new List<string>
+        {
+            "I need a bit more detail before I proceed:"
+        };
+
+        for (var i = 0; i < questions.Count; i++)
+        {
+            lines.Add($"{i + 1}. {questions[i]}");
+        }
+
+        lines.Add("Reply with answers and I will continue.");
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private sealed record AgentCatalogEntry(string AgentId, string DisplayName, string Description);
+
+    private sealed record DelegationPlanEntry(string AgentId, string Task);
+
+    private sealed record RoutePlan(
+        bool NeedsClarification,
+        IReadOnlyList<string> ClarificationQuestions,
+        IReadOnlyList<DelegationPlanEntry> Delegations);
+
+    private sealed record RoutePlanExecutionResult(
+        bool HaltAfterClarification,
+        long InputTokens,
+        long OutputTokens,
+        long CacheReadTokens,
+        long CacheWriteTokens)
+    {
+        public static RoutePlanExecutionResult None { get; } = new(
+            HaltAfterClarification: false,
+            InputTokens: 0,
+            OutputTokens: 0,
+            CacheReadTokens: 0,
+            CacheWriteTokens: 0);
     }
 }

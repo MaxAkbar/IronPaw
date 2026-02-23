@@ -16,7 +16,7 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 - Interactive REPL with slash commands for memory, sessions, and task review
 - Runtime skill add-in discovery and dynamic skill creation
 - Skill catalog listing (`--list-skills`)
-- Multi-agent delegation support (Full profile) with `@agentId` event attribution
+- Multi-agent delegation support (Coding/Full profiles) with `@agentId` event attribution
 
 ## Main files
 
@@ -100,3 +100,17 @@ If required provider settings are missing (for example `OPENAI_API_KEY` or `ANTH
 - `OLLAMA_API_KEY` (optional; default `ollama`)
 - `LMSTUDIO_BASE_URL` (default: `http://localhost:1234`)
 - `LMSTUDIO_API_KEY` (optional; default `lm-studio`)
+- `IRONPAW_CODEGEN_PROVIDER` (optional; override provider for the `codegen` specialist)
+- `IRONPAW_CODEGEN_MODEL` (optional; override model for the `codegen` specialist)
+- `IRONPAW_REVIEWER_PROVIDER` (optional; override provider for the `reviewer` specialist)
+- `IRONPAW_REVIEWER_MODEL` (optional; override model for the `reviewer` specialist)
+
+Example split-model setup (PowerShell):
+
+```powershell
+$env:IRONPAW_CODEGEN_PROVIDER="openai"
+$env:IRONPAW_CODEGEN_MODEL="gpt-4.1"
+$env:IRONPAW_REVIEWER_PROVIDER="anthropic"
+$env:IRONPAW_REVIEWER_MODEL="claude-3-5-sonnet-latest"
+dotnet run --project src/IronPaw.Cli -- --provider openai --model gpt-4o-mini --prompt "Implement and review a new parser"
+```

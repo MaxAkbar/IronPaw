@@ -58,6 +58,7 @@ internal static class AppBootstrapper
             runHistoryStore);
 
         var agentRegistry = new InMemoryAgentRegistry();
+        RegisterDefaultAgents(agentRegistry);
         toolRegistry.RegisterTools([
             new InvokeAgentTool(agentRegistry, orchestrator),
             new ListAgentsTool(agentRegistry)
@@ -96,5 +97,55 @@ internal static class AppBootstrapper
         ITranscriptStore transcriptStore = new SqliteTranscriptStore(options);
 
         return (memoryStore, runHistoryStore, sessionStore, transcriptStore);
+    }
+
+    private static void RegisterDefaultAgents(IAgentRegistry registry)
+    {
+        var codegenProvider = ReadOptionalEnv("IRONPAW_CODEGEN_PROVIDER");
+        var codegenModel = ReadOptionalEnv("IRONPAW_CODEGEN_MODEL");
+        var reviewerProvider = ReadOptionalEnv("IRONPAW_REVIEWER_PROVIDER");
+        var reviewerModel = ReadOptionalEnv("IRONPAW_REVIEWER_MODEL");
+
+        registry.Register(new AgentDefinition(
+            AgentId: "codegen",
+            DisplayName: "Code Generator",
+            Description: "Implements requested code changes with concise implementation notes.",
+            SystemPrompt: """
+                          You are a specialist coding agent.
+                          Implement the delegated task directly in the workspace using available tools.
+                          Prefer minimal, correct changes and keep explanations short.
+                          If requirements are ambiguous, state assumptions briefly in the final answer.
+                          """,
+            ToolPolicy: new ToolSelectionPolicy(
+                Profile: ToolProfile.Coding,
+                DenyList: new[] { "invoke_agent", "list_agents" }),
+            Provider: codegenProvider,
+            Model: codegenModel,
+            MaxRounds: 6,
+            MaxOutputTokens: 4096));
+
+        registry.Register(new AgentDefinition(
+            AgentId: "reviewer",
+            DisplayName: "Code Reviewer",
+            Description: "Reviews changes for correctness, regressions, and missing tests.",
+            SystemPrompt: """
+                          You are a specialist code review agent.
+                          Focus on bugs, behavioral regressions, risks, and missing tests.
+                          Report findings first, ordered by severity, with file references.
+                          If no issues are found, say so explicitly and note residual risks.
+                          """,
+            ToolPolicy: new ToolSelectionPolicy(
+                Profile: ToolProfile.Coding,
+                DenyList: new[] { "invoke_agent", "list_agents" }),
+            Provider: reviewerProvider,
+            Model: reviewerModel,
+            MaxRounds: 4,
+            MaxOutputTokens: 3072));
+    }
+
+    private static string? ReadOptionalEnv(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 }

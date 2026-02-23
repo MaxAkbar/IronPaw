@@ -4,7 +4,11 @@
       "commandName": "Project",
       "environmentVariables": {
         "OPENAI_API_KEY": "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",
-        "ANTHROPIC_API_KEY": "set-me"
+        "ANTHROPIC_API_KEY": "set-me",
+        "IRONPAW_CODEGEN_PROVIDER": "openai",
+        "IRONPAW_CODEGEN_MODEL": "gpt-4.1",
+        "IRONPAW_REVIEWER_PROVIDER": "anthropic",
+        "IRONPAW_REVIEWER_MODEL": "claude-3-5-sonnet-latest"
       }
     }
   }

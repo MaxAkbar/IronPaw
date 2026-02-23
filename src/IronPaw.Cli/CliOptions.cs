@@ -186,6 +186,10 @@ internal sealed record CliOptions(
         AnsiConsole.MarkupLine("  [white]OLLAMA_API_KEY[/] (optional, default: ollama)");
         AnsiConsole.MarkupLine("  [white]LMSTUDIO_BASE_URL[/] (default: http://localhost:1234)");
         AnsiConsole.MarkupLine("  [white]LMSTUDIO_API_KEY[/] (optional, default: lm-studio)");
+        AnsiConsole.MarkupLine("  [white]IRONPAW_CODEGEN_PROVIDER[/] (optional; specialist override)");
+        AnsiConsole.MarkupLine("  [white]IRONPAW_CODEGEN_MODEL[/] (optional; specialist override)");
+        AnsiConsole.MarkupLine("  [white]IRONPAW_REVIEWER_PROVIDER[/] (optional; specialist override)");
+        AnsiConsole.MarkupLine("  [white]IRONPAW_REVIEWER_MODEL[/] (optional; specialist override)");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[bold]Interactive Mode[/]");
         AnsiConsole.MarkupLine("  Launch without --prompt/--prompt-file to keep running until you type [white]quit[/].");

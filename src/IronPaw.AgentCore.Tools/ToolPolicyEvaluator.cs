@@ -15,7 +15,8 @@ public static class ToolPolicyEvaluator
             {
                 "group:fs",
                 "group:system",
-                "group:skills"
+                "group:skills",
+                "group:agents"
             },
             [ToolProfile.Messaging] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
