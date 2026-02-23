@@ -80,7 +80,8 @@ public sealed record AgentEvent(
     string Type,
     DateTimeOffset Timestamp,
     IReadOnlyDictionary<string, object?> Data,
-    AgentEventSeverity Severity = AgentEventSeverity.Info);
+    AgentEventSeverity Severity = AgentEventSeverity.Info,
+    string? AgentId = null);
 
 public interface IAgentEventSink
 {
@@ -131,7 +132,8 @@ public sealed record ToolExecutionContext(
     SessionKey SessionKey,
     string Provider,
     string Model,
-    CallerIdentity Caller);
+    CallerIdentity Caller,
+    int SubagentDepth = 0);
 
 public enum ContentTrust
 {
@@ -391,7 +393,9 @@ public sealed record AgentRunRequest(
     string? SystemPromptOverride = null,
     int MaxOutputTokens = 4096,
     int MaxRounds = 6,
-    IReadOnlyList<MemoryEntry>? ActiveMemories = null);
+    IReadOnlyList<MemoryEntry>? ActiveMemories = null,
+    string? AgentId = null,
+    RunId? ParentRunId = null);
 
 public sealed record AgentRunResult(
     RunId RunId,
@@ -463,6 +467,26 @@ public enum StoreBackend
 {
     Json,
     Sqlite
+}
+
+public sealed record AgentDefinition(
+    string AgentId,
+    string DisplayName,
+    string Description,
+    string SystemPrompt,
+    ToolSelectionPolicy ToolPolicy,
+    string? Provider = null,
+    string? Model = null,
+    int MaxRounds = 6,
+    int MaxOutputTokens = 4096);
+
+public interface IAgentRegistry
+{
+    IReadOnlyList<AgentDefinition> GetAll();
+
+    AgentDefinition? Get(string agentId);
+
+    void Register(AgentDefinition definition);
 }
 
 public static class EventData

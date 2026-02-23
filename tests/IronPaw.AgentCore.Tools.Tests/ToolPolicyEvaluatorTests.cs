@@ -94,6 +94,40 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.Contains("read_file", names);
     }
 
+    [Fact]
+    public void Apply_FullProfile_IncludesAgentGroup()
+    {
+        var tools = new ITool[]
+        {
+            new StubTool("invoke_agent", "group:agents"),
+            new StubTool("list_agents", "group:agents"),
+            new StubTool("system", "group:system")
+        };
+
+        var result = ToolPolicyEvaluator.Apply(tools, new ToolSelectionPolicy(ToolProfile.Full, SenderIsOwner: true));
+        var names = result.Select(t => t.Descriptor.Name).ToArray();
+
+        Assert.Contains("invoke_agent", names);
+        Assert.Contains("list_agents", names);
+        Assert.Contains("system", names);
+    }
+
+    [Fact]
+    public void Apply_CodingProfile_ExcludesAgentGroup()
+    {
+        var tools = new ITool[]
+        {
+            new StubTool("invoke_agent", "group:agents"),
+            new StubTool("system", "group:system")
+        };
+
+        var result = ToolPolicyEvaluator.Apply(tools, new ToolSelectionPolicy(ToolProfile.Coding, SenderIsOwner: true));
+        var names = result.Select(t => t.Descriptor.Name).ToArray();
+
+        Assert.DoesNotContain("invoke_agent", names);
+        Assert.Contains("system", names);
+    }
+
     private sealed class StubTool : ITool
     {
         public StubTool(string name, string group, bool ownerOnly = false)

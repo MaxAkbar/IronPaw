@@ -48,6 +48,11 @@ public sealed class DefaultSystemPromptBuilder : ISystemPromptBuilder
             AppendMemoryGuidance(lines);
         }
 
+        if (tools.Any(t => t.Descriptor.Name == "invoke_agent"))
+        {
+            AppendAgentDelegationGuidance(lines);
+        }
+
         AppendContentTrustGuidance(lines);
         AppendMemorySection(lines, request.ActiveMemories, _memoryBudgetChars);
 
@@ -136,6 +141,28 @@ public sealed class DefaultSystemPromptBuilder : ISystemPromptBuilder
         lines.Add("- Transient information that is only useful right now.");
         lines.Add("- Information already present in your memories.");
         lines.Add("- Large code blocks (memory has a 500-char limit per entry).");
+    }
+
+    private static void AppendAgentDelegationGuidance(List<string> lines)
+    {
+        lines.Add("");
+        lines.Add("## Agent delegation");
+        lines.Add("");
+        lines.Add("You can delegate tasks to specialist agents using `invoke_agent`.");
+        lines.Add("Use `list_agents` to discover available agents and their capabilities.");
+        lines.Add("");
+        lines.Add("When to delegate:");
+        lines.Add("- The task falls within a specialist agent's area of expertise.");
+        lines.Add("- You need focused, domain-specific work done as a sub-task.");
+        lines.Add("");
+        lines.Add("When NOT to delegate:");
+        lines.Add("- You can handle the task directly with your own tools.");
+        lines.Add("- The task is simple enough that delegation adds unnecessary overhead.");
+        lines.Add("");
+        lines.Add("Guidelines:");
+        lines.Add("- Provide clear, self-contained task descriptions when delegating.");
+        lines.Add("- The sub-agent cannot see your conversation history — include all necessary context in the task.");
+        lines.Add("- Synthesize sub-agent results into your final response to the user.");
     }
 
     private static void AppendCreateSkillGuidance(List<string> lines)

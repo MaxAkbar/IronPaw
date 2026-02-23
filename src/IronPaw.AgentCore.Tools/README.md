@@ -42,6 +42,19 @@ Key files: `CreateSkillTool.cs`, `RoslynSkillCompiler.cs`, `JsonSchemaBuilder.cs
 
 All skill add-in tools are registered with the `skill_<name>` prefix and placed in this group.
 
+### Agents (`group:agents`)
+
+- `invoke_agent` — delegates a task to a specialist agent (Full profile only)
+- `list_agents` — returns all registered agent definitions as JSON
+
+Key files: `InvokeAgentTool.cs`, `ListAgentsTool.cs`, `AgentPrefixedEventSink.cs`, `InMemoryAgentRegistry.cs`
+
+`InvokeAgentTool` constructs a child `AgentRunRequest` with an ephemeral `SessionKey` for transcript isolation, increments `SubagentDepth`, and recursively calls `IAgentOrchestrator.RunAsync`. The child agent's `FinalAssistantMessage` is returned as a `ToolResult` to the parent.
+
+`AgentPrefixedEventSink` is a decorator that stamps `AgentId` on every event emitted by a sub-agent, enabling per-agent attribution in the event stream.
+
+`InMemoryAgentRegistry` implements `IAgentRegistry` — a thread-safe, dictionary-backed store for `AgentDefinition` records used by both tools.
+
 ## Tool policy and registration
 
 - `InMemoryToolRegistry.cs`
@@ -49,7 +62,7 @@ All skill add-in tools are registered with the `skill_<name>` prefix and placed 
 - `ToolPolicyEvaluator.cs`
   - profile and allow/deny filtering
   - profiles: `Minimal`, `Coding`, `Messaging`, `Full`
-  - groups: `group:fs`, `group:system`, `group:messaging`, `group:runtime`, `group:skills`
+  - groups: `group:fs`, `group:system`, `group:messaging`, `group:runtime`, `group:skills`, `group:agents`
 
 ## Execution and schema
 

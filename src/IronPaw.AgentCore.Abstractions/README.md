@@ -41,6 +41,8 @@ All abstractions currently live in this file.
 - **Agent orchestration**
   - `IAgentOrchestrator`
   - `AgentRunRequest`, `AgentRunResult`
+- **Multi-agent**
+  - `AgentDefinition`, `IAgentRegistry`
 - **Persistence**
   - `ISessionStore`, `SessionEntry`
   - `ITranscriptStore`

@@ -9,7 +9,7 @@ namespace IronPaw.Cli;
 
 internal static class AppBootstrapper
 {
-    public static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult, IMemoryStore MemoryStore, IRunHistoryStore RunHistoryStore, ISessionStore SessionStore, ITranscriptStore TranscriptStore) Build(StoreBackend storeBackend = StoreBackend.Json)
+    public static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult, IMemoryStore MemoryStore, IRunHistoryStore RunHistoryStore, ISessionStore SessionStore, ITranscriptStore TranscriptStore, IAgentRegistry AgentRegistry) Build(StoreBackend storeBackend = StoreBackend.Json)
     {
         var workspaceRoot = Directory.GetCurrentDirectory();
         var appData = Path.Combine(
@@ -57,7 +57,13 @@ internal static class AppBootstrapper
             memoryStore,
             runHistoryStore);
 
-        return (orchestrator, skillLoadResult, memoryStore, runHistoryStore, sessionStore, transcriptStore);
+        var agentRegistry = new InMemoryAgentRegistry();
+        toolRegistry.RegisterTools([
+            new InvokeAgentTool(agentRegistry, orchestrator),
+            new ListAgentsTool(agentRegistry)
+        ]);
+
+        return (orchestrator, skillLoadResult, memoryStore, runHistoryStore, sessionStore, transcriptStore, agentRegistry);
     }
 
     private static (IMemoryStore, IRunHistoryStore, ISessionStore, ITranscriptStore) BuildJsonStores(string stateRoot)

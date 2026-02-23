@@ -16,14 +16,15 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 - Interactive REPL with slash commands for memory, sessions, and task review
 - Runtime skill add-in discovery and dynamic skill creation
 - Skill catalog listing (`--list-skills`)
+- Multi-agent delegation support (Full profile) with `@agentId` event attribution
 
 ## Main files
 
 - `Program.cs` — entry point, interactive REPL loop, single-run execution
 - `CliOptions.cs` — argument parsing and validation (`Parse`, `TryValidate`, `ResolvePromptAsync`, `PrintHelp`)
-- `AppBootstrapper.cs` — composition root wiring all dependencies
+- `AppBootstrapper.cs` — composition root wiring all dependencies (including `IAgentRegistry` and agent tools)
 - `ConsoleUi.cs` — Spectre.Console rendering for banners, settings, diagnostics, results, memory, and run history
-- `AnsiConsoleEventSink.cs` — `IAgentEventSink` that formats agent events with Spectre.Console markup
+- `AnsiConsoleEventSink.cs` — `IAgentEventSink` that formats agent events with Spectre.Console markup (displays `@agentId` prefix for sub-agent events)
 - `InteractiveCommandHandler.cs` — slash command dispatch (`/help`, `/settings`, `/provider`, `/model`, `/session`, `/remember`, `/forget`, `/memories`, `/tasks`, `/review`)
 - `ProviderResolver.cs` — provider selection and API key prompting
 - `CliDefaults.cs` — CLI-specific constants (delegates to `ProviderDefaults` for shared config)

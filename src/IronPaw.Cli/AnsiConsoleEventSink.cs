@@ -29,9 +29,13 @@ internal sealed class AnsiConsoleEventSink : IAgentEventSink
         var dataPart = string.IsNullOrWhiteSpace(data)
             ? string.Empty
             : $" [silver]{Markup.Escape(data)}[/]";
+        var agentPrefix = evt.AgentId is not null
+            ? $"[cyan]@{Markup.Escape(evt.AgentId)}[/] "
+            : string.Empty;
 
         AnsiConsole.MarkupLine(
             $"[{severityStyle}]{Markup.Escape(time)}[/] " +
+            agentPrefix +
             $"[{streamStyle}]{Markup.Escape(evt.Stream.ToString())}[/]/" +
             $"[{streamStyle}]{Markup.Escape(evt.Type)}[/]{dataPart}");
 

@@ -64,9 +64,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         var finalAssistantMessage = string.Empty;
         var toolsUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Pre-load memories and enrich the request.
+        // Pre-load memories and enrich the request (skip for sub-agents — they start fresh).
         var effectiveRequest = request;
-        if (_memoryStore is not null)
+        if (_memoryStore is not null && request.ParentRunId is null)
         {
             var globalMemories = await _memoryStore.LoadGlobalAsync(ct);
             var sessionMemories = await _memoryStore.LoadSessionAsync(request.SessionKey, ct);
@@ -90,7 +90,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 Timestamp: DateTimeOffset.UtcNow,
                 Data: EventData.Of(
                     ("provider", effectiveRequest.Provider),
-                    ("model", effectiveRequest.Model))),
+                    ("model", effectiveRequest.Model)),
+                AgentId: effectiveRequest.AgentId),
             ct);
 
         var loadedTranscript = await _transcriptStore.LoadAsync(effectiveRequest.SessionKey, ct);
@@ -118,7 +119,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 Timestamp: DateTimeOffset.UtcNow,
                 Data: EventData.Of(
                     ("systemPromptChars", initialPrompt.Length),
-                    ("toolCount", initialTools.Count))),
+                    ("toolCount", initialTools.Count)),
+                AgentId: effectiveRequest.AgentId),
             ct);
 
         var maxRounds = effectiveRequest.MaxRounds;
@@ -163,7 +165,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     AgentEventStream.Lifecycle,
                     Type: "llm_round_started",
                     Timestamp: DateTimeOffset.UtcNow,
-                    Data: EventData.Of(("round", rounds))),
+                    Data: EventData.Of(("round", rounds)),
+                    AgentId: effectiveRequest.AgentId),
                 ct);
 
             await foreach (var delta in _llmClient.StreamAsync(llmRequest, ct))
@@ -180,7 +183,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                                 AgentEventStream.Assistant,
                                 Type: "assistant_delta",
                                 Timestamp: DateTimeOffset.UtcNow,
-                                Data: EventData.Of(("text", text.Text))),
+                                Data: EventData.Of(("text", text.Text)),
+                                AgentId: effectiveRequest.AgentId),
                             ct);
                         break;
 
@@ -197,7 +201,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                                 Timestamp: DateTimeOffset.UtcNow,
                                 Data: EventData.Of(
                                     ("toolName", toolCall.ToolName),
-                                    ("toolCallId", toolCall.ToolCallId))),
+                                    ("toolCallId", toolCall.ToolCallId)),
+                                AgentId: effectiveRequest.AgentId),
                             ct);
                         break;
 
@@ -255,7 +260,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
                 else
                 {
-                    var execContext = new ToolExecutionContext(runId, effectiveRequest.SessionKey, effectiveRequest.Provider, effectiveRequest.Model, effectiveRequest.Caller);
+                    var execContext = new ToolExecutionContext(runId, effectiveRequest.SessionKey, effectiveRequest.Provider, effectiveRequest.Model, effectiveRequest.Caller, SubagentDepth: effectiveRequest.ToolPolicy.SubagentDepth);
                     result = await _toolExecutor.ExecuteAsync(tool, toolCall, execContext, ct);
                 }
 
@@ -274,7 +279,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                             ("toolCallId", toolCall.ToolCallId),
                             ("isError", result.IsError),
                             ("contentChars", result.Content.Length)),
-                        Severity: result.IsError ? AgentEventSeverity.Warning : AgentEventSeverity.Info),
+                        Severity: result.IsError ? AgentEventSeverity.Warning : AgentEventSeverity.Info,
+                        AgentId: effectiveRequest.AgentId),
                     ct);
             }
 
@@ -357,7 +363,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     ("inputTokens", aggregatedInput),
                     ("outputTokens", aggregatedOutput),
                     ("cacheReadTokens", lastCacheRead),
-                    ("cacheWriteTokens", lastCacheWrite))),
+                    ("cacheWriteTokens", lastCacheWrite)),
+                AgentId: effectiveRequest.AgentId),
             ct);
 
         return new AgentRunResult(
@@ -426,7 +433,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                             Timestamp: DateTimeOffset.UtcNow,
                             Data: EventData.Of(
                                 ("toolName", toolCall.ToolName),
-                                ("toolCallId", toolCall.ToolCallId))),
+                                ("toolCallId", toolCall.ToolCallId)),
+                            AgentId: request.AgentId),
                         ct);
                     break;
 
@@ -445,7 +453,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             toolsUsed.Add(toolCall.ToolName);
             transcript.Add(new ChatMessage(ChatRole.Assistant, toolCall.Arguments.GetRawText(), toolCall.ToolCallId, toolCall.ToolName));
 
-            var execContext = new ToolExecutionContext(runId, request.SessionKey, request.Provider, request.Model, request.Caller);
+            var execContext = new ToolExecutionContext(runId, request.SessionKey, request.Provider, request.Model, request.Caller, SubagentDepth: request.ToolPolicy.SubagentDepth);
             var result = await _toolExecutor.ExecuteAsync(createSkillTool, toolCall, execContext, ct);
 
             var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);
@@ -463,7 +471,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         ("toolCallId", toolCall.ToolCallId),
                         ("isError", result.IsError),
                         ("contentChars", result.Content.Length)),
-                    Severity: result.IsError ? AgentEventSeverity.Warning : AgentEventSeverity.Info),
+                    Severity: result.IsError ? AgentEventSeverity.Warning : AgentEventSeverity.Info,
+                    AgentId: request.AgentId),
                 ct);
         }
 

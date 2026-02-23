@@ -29,7 +29,8 @@ public static class ToolPolicyEvaluator
                 "group:runtime",
                 "group:messaging",
                 "group:system",
-                "group:skills"
+                "group:skills",
+                "group:agents"
             }
         };
 

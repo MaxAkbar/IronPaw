@@ -2,6 +2,7 @@
 
 `IronPaw` is a .NET 10 agent orchestration framework following an OpenClaw-inspired architecture:
 - headless agent core with event-driven UI hosts (CLI + WPF Desktop)
+- **multi-agent delegation** with named specialist agents and supervisor pattern
 - tool pipeline with profile-based policy filtering
 - durable session + transcript storage with persistent memory
 - provider routing (`local`, `openai`, `ollama`, `lmstudio`, `anthropic`)
@@ -28,6 +29,7 @@ flowchart LR
   Core --> Persistence[IronPaw.AgentCore.Persistence]
 
   Tools --> Addins[Add-in Skill DLLs]
+  Tools --> AgentReg[Agent Registry]
   Addins --> ExampleAddin[IronPaw.Skills.ExampleAddin]
 ```
 
@@ -117,7 +119,7 @@ sequenceDiagram
 
 - `src/IronPaw.AgentCore.Abstractions`: shared contracts, DTOs, and runtime interfaces (tools, skills, LLM, sessions, memory, run history).
 - `src/IronPaw.AgentCore`: orchestration loop, lane scheduler, system prompt builder with memory injection, transcript repair and truncation.
-- `src/IronPaw.AgentCore.Tools`: built-in tools (file I/O, memory, review, runtime skill creation), policy pipeline, schema normalization, and add-in skill loading.
+- `src/IronPaw.AgentCore.Tools`: built-in tools (file I/O, memory, review, runtime skill creation, agent delegation), policy pipeline, schema normalization, agent registry, and add-in skill loading.
 - `src/IronPaw.AgentCore.Persistence`: file-based stores for sessions, transcripts, memory, and run history.
 - `src/IronPaw.AgentCore.Providers`: `ILlmClient` implementations (OpenAI, Anthropic, Ollama, LM Studio, local rule-based), provider routing, shared defaults, and factory wiring.
 - `src/IronPaw.Cli`: Spectre.Console terminal host with interactive REPL, slash commands, memory management, and task review.
@@ -193,6 +195,42 @@ To inspect loaded skills from terminal:
 
 ```powershell
 dotnet run --project src/IronPaw.Cli -- --list-skills
+```
+
+## Multi-Agent Delegation
+
+IronPaw supports multi-agent orchestration through a supervisor/specialist pattern. A top-level agent can delegate tasks to named specialist agents using the `invoke_agent` tool.
+
+### How it works
+
+1. **Define agents** — register `AgentDefinition` records with unique IDs, system prompts, tool policies, and optional provider/model overrides via the `IAgentRegistry`.
+2. **Supervisor delegates** — when the `invoke_agent` tool is available (Full profile), the LLM can delegate tasks to specialist agents by name.
+3. **Isolated execution** — each sub-agent gets its own ephemeral session (transcript isolation), runs through the same `AgentOrchestrator`, and returns its final message as a tool result to the parent.
+4. **Event attribution** — all events from sub-agents are tagged with `@agentId` for clear attribution in the event stream.
+
+### Agent tools (`group:agents`)
+
+| Tool | Description |
+|------|-------------|
+| `invoke_agent` | Delegate a task to a specialist agent by ID |
+| `list_agents` | List all registered agents and their descriptions |
+
+### Recursion safety
+
+- `SubagentDepth` increments on each delegation level (max depth: 3 by default)
+- Sub-agents cannot create runtime skills (`group:runtime` filtered at depth > 0)
+- Each agent has its own `MaxRounds` bound
+
+### Programmatic registration
+
+```csharp
+var agentRegistry = bootstrap.AgentRegistry;
+agentRegistry.Register(new AgentDefinition(
+    AgentId: "coder",
+    DisplayName: "Coder",
+    Description: "Writes and refactors code",
+    SystemPrompt: "You are a coding specialist. Write clean, tested code.",
+    ToolPolicy: new ToolSelectionPolicy(ToolProfile.Coding)));
 ```
 
 ## First run suggestion
