@@ -129,7 +129,9 @@ try
                 options.NoEvents,
                 bootstrap.SkillLoadResult.SkillsLoaded,
                 bootstrap.MemoryStore,
-                bootstrap.RunHistoryStore))
+                bootstrap.RunHistoryStore,
+                bootstrap.SessionStore,
+                bootstrap.TranscriptStore))
         {
             continue;
         }

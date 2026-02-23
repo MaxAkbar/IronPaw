@@ -24,6 +24,8 @@ internal static class ConsoleUi
         AnsiConsole.MarkupLine("  [white]/remember[/]   Save a memory");
         AnsiConsole.MarkupLine("  [white]/forget[/]     Remove a memory");
         AnsiConsole.MarkupLine("  [white]/memories[/]   List all memories");
+        AnsiConsole.MarkupLine("  [white]/sessions[/]   List all sessions");
+        AnsiConsole.MarkupLine("  [white]/session-detail[/] Inspect a session's files and stats");
         AnsiConsole.MarkupLine("  [white]/tasks[/]      List recent task runs");
         AnsiConsole.MarkupLine("  [white]/review[/]     Review a specific task run");
         AnsiConsole.MarkupLine("  [white]quit[/]        Exit the app");
@@ -242,6 +244,80 @@ internal static class ConsoleUi
             .RoundedBorder()
             .BorderColor(Color.Green3_1);
         AnsiConsole.Write(responsePanel);
+    }
+
+    public static void RenderSessionList(IReadOnlyDictionary<SessionKey, SessionEntry> sessions)
+    {
+        AnsiConsole.Write(new Rule("[grey]Sessions[/]").LeftJustified());
+
+        if (sessions.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No sessions found.[/]");
+            return;
+        }
+
+        var table = new Table()
+            .RoundedBorder()
+            .AddColumn("[bold]Session ID[/]")
+            .AddColumn("[bold]Last Updated[/]")
+            .AddColumn("[bold]Total Tokens[/]")
+            .AddColumn("[bold]Compactions[/]")
+            .AddColumn("[bold]Transcript Path[/]");
+
+        foreach (var (key, entry) in sessions.OrderByDescending(s => s.Value.UpdatedAt))
+        {
+            table.AddRow(
+                $"[deepskyblue1]{Markup.Escape(key.Value)}[/]",
+                $"[grey70]{Markup.Escape(entry.UpdatedAt.ToLocalTime().ToString("g"))}[/]",
+                $"[white]{entry.TotalTokens}[/]",
+                $"[white]{entry.CompactionCount}[/]",
+                $"[grey70]{Markup.Escape(entry.TranscriptPath ?? "-")}[/]");
+        }
+
+        AnsiConsole.Write(table);
+    }
+
+    public static void RenderSessionDetail(
+        SessionEntry session,
+        IReadOnlyList<ChatMessage> transcript,
+        IReadOnlyList<MemoryEntry> sessionMemories)
+    {
+        AnsiConsole.Write(new Rule("[grey]Session Detail[/]").LeftJustified());
+
+        var infoTable = new Table()
+            .RoundedBorder()
+            .AddColumn("[bold]Field[/]")
+            .AddColumn("[bold]Value[/]");
+
+        infoTable.AddRow("Session ID", $"[deepskyblue1]{Markup.Escape(session.SessionId)}[/]");
+        infoTable.AddRow("Last Updated", $"[white]{Markup.Escape(session.UpdatedAt.ToLocalTime().ToString("O"))}[/]");
+        infoTable.AddRow("Provider", $"[white]{Markup.Escape(session.ProviderOverride ?? "-")}[/]");
+        infoTable.AddRow("Model", $"[white]{Markup.Escape(session.ModelOverride ?? "-")}[/]");
+        infoTable.AddRow("Input Tokens", $"[white]{session.InputTokens}[/]");
+        infoTable.AddRow("Output Tokens", $"[white]{session.OutputTokens}[/]");
+        infoTable.AddRow("Total Tokens", $"[white]{session.TotalTokens}[/]");
+        infoTable.AddRow("Compactions", $"[white]{session.CompactionCount}[/]");
+        infoTable.AddRow("Transcript Path", $"[grey70]{Markup.Escape(session.TranscriptPath ?? "-")}[/]");
+
+        AnsiConsole.Write(infoTable);
+
+        // Transcript stats
+        var userCount = transcript.Count(m => m.Role is ChatRole.User);
+        var assistantCount = transcript.Count(m => m.Role is ChatRole.Assistant);
+        var toolCount = transcript.Count(m => m.Role is ChatRole.Tool);
+
+        var statsTable = new Table()
+            .RoundedBorder()
+            .AddColumn("[bold]Transcript Stats[/]")
+            .AddColumn("[bold]Count[/]");
+
+        statsTable.AddRow("Total Messages", $"[white]{transcript.Count}[/]");
+        statsTable.AddRow("User Messages", $"[white]{userCount}[/]");
+        statsTable.AddRow("Assistant Messages", $"[white]{assistantCount}[/]");
+        statsTable.AddRow("Tool Messages", $"[white]{toolCount}[/]");
+        statsTable.AddRow("Session Memories", $"[white]{sessionMemories.Count}[/]");
+
+        AnsiConsole.Write(statsTable);
     }
 
     public static void RenderSuccess(string message)

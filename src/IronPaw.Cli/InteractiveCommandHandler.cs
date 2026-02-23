@@ -14,7 +14,9 @@ internal static class InteractiveCommandHandler
         bool noEvents,
         int skillsLoaded,
         IMemoryStore memoryStore,
-        IRunHistoryStore runHistoryStore)
+        IRunHistoryStore runHistoryStore,
+        ISessionStore sessionStore,
+        ITranscriptStore transcriptStore)
     {
         var command = promptOrCommand.Trim();
         if (!command.StartsWith("/", StringComparison.Ordinal))
@@ -187,6 +189,36 @@ internal static class InteractiveCommandHandler
                 }
 
                 ConsoleUi.RenderRunDetail(detail);
+                return true;
+            }
+
+            case "/sessions":
+            {
+                var allSessions = sessionStore.LoadAllAsync(CancellationToken.None).GetAwaiter().GetResult();
+                ConsoleUi.RenderSessionList(allSessions);
+                return true;
+            }
+
+            case "/session-detail":
+            {
+                var allSessions = sessionStore.LoadAllAsync(CancellationToken.None).GetAwaiter().GetResult();
+                if (allSessions.Count == 0)
+                {
+                    ConsoleUi.RenderWarning("No sessions found.");
+                    return true;
+                }
+
+                var selectedId = AnsiConsole.Prompt(
+                    new SelectionPrompt<string>()
+                        .Title("Select a session to inspect:")
+                        .AddChoices(allSessions.Keys.Select(k => k.Value).OrderBy(k => k)));
+
+                var key = new SessionKey(selectedId);
+                var session = allSessions[key];
+                var transcript = transcriptStore.LoadAsync(key, CancellationToken.None).GetAwaiter().GetResult();
+                var sessionMemories = memoryStore.LoadSessionAsync(key, CancellationToken.None).GetAwaiter().GetResult();
+
+                ConsoleUi.RenderSessionDetail(session, transcript, sessionMemories);
                 return true;
             }
 

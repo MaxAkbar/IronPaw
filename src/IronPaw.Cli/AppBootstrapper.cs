@@ -8,7 +8,7 @@ namespace IronPaw.Cli;
 
 internal static class AppBootstrapper
 {
-    public static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult, IMemoryStore MemoryStore, IRunHistoryStore RunHistoryStore) Build()
+    public static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult, IMemoryStore MemoryStore, IRunHistoryStore RunHistoryStore, ISessionStore SessionStore, ITranscriptStore TranscriptStore) Build()
     {
         var workspaceRoot = Directory.GetCurrentDirectory();
         var appData = Path.Combine(
@@ -62,6 +62,6 @@ internal static class AppBootstrapper
             memoryStore,
             runHistoryStore);
 
-        return (orchestrator, skillLoadResult, memoryStore, runHistoryStore);
+        return (orchestrator, skillLoadResult, memoryStore, runHistoryStore, sessionStore, transcriptStore);
     }
 }
