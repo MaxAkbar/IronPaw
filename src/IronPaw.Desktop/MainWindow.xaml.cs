@@ -1,11 +1,8 @@
 using System.Collections.ObjectModel;
-using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
-using IronPaw.AgentCore;
 using IronPaw.AgentCore.Abstractions;
-using IronPaw.AgentCore.Persistence;
 using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
 
@@ -13,6 +10,7 @@ namespace IronPaw.Desktop;
 
 public partial class MainWindow : Window
 {
+    private readonly DesktopBootstrap _bootstrap;
     private readonly IAgentOrchestrator _orchestrator;
     private CancellationTokenSource? _runCancellationTokenSource;
 
@@ -21,9 +19,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         Events = new ObservableCollection<string>();
         DataContext = this;
-        var bootstrap = BuildOrchestrator();
-        _orchestrator = bootstrap.Orchestrator;
-        AppendSkillDiagnostics(bootstrap.SkillLoadResult);
+        _bootstrap = DesktopBootstrapper.Build();
+        _orchestrator = _bootstrap.Orchestrator;
+        AppendSkillDiagnostics(_bootstrap.SkillLoadResult);
         PromptTextBox.Text = "Create a project plan for an agent architecture and write it to Plan.md.";
     }
 
@@ -118,54 +116,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult) BuildOrchestrator()
-    {
-        var workspaceRoot = Directory.GetCurrentDirectory();
-        var appData = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "IronPaw");
-        var stateRoot = Path.Combine(appData, "state");
-        var sessionsDirectory = Path.Combine(stateRoot, "sessions");
-        var sessionStorePath = Path.Combine(stateRoot, "session-store.json");
-
-        Directory.CreateDirectory(stateRoot);
-        Directory.CreateDirectory(sessionsDirectory);
-
-        var skillLoadResult = SkillAddinLoader.LoadFromDirectories(
-        [
-            Path.Combine(workspaceRoot, "addins", "skills"),
-            Path.Combine(appData, "skills")
-        ]);
-
-        var tools = BuiltInToolFactory.CreateDefault(workspaceRoot, skillLoadResult.SkillTools);
-        var toolRegistry = new InMemoryToolRegistry(tools);
-        var sessionStore = new FileSessionStore(new FileSessionStoreOptions(
-            StoreFilePath: sessionStorePath,
-            CacheTtl: TimeSpan.FromSeconds(5)));
-        var transcriptStore = new JsonTranscriptStore(sessionsDirectory);
-        var laneScheduler = new SessionLaneScheduler();
-        var toolExecutor = new ToolExecutor();
-        var schemaNormalizer = new ToolSchemaNormalizer();
-        var llmClient = LlmClientFactory.Build();
-        var sanitizer = new TranscriptSanitizer();
-        var truncator = new ToolResultTruncator();
-        var promptBuilder = new DefaultSystemPromptBuilder();
-
-        var orchestrator = new AgentOrchestrator(
-            laneScheduler,
-            sessionStore,
-            transcriptStore,
-            toolRegistry,
-            toolExecutor,
-            schemaNormalizer,
-            llmClient,
-            sanitizer,
-            truncator,
-            promptBuilder);
-
-        return (orchestrator, skillLoadResult);
-    }
-
     private string GetSelectedProvider()
     {
         if (ProviderComboBox.SelectedItem is ComboBoxItem comboBoxItem &&
@@ -220,5 +170,14 @@ public partial class MainWindow : Window
         return string.Join(
             ", ",
             data.Select(pair => $"{pair.Key}={pair.Value}"));
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _runCancellationTokenSource?.Cancel();
+        _runCancellationTokenSource?.Dispose();
+        _runCancellationTokenSource = null;
+        _bootstrap.Dispose();
+        base.OnClosed(e);
     }
 }

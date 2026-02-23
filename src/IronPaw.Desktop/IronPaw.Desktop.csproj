@@ -1,4 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\IronPaw.AgentCore.Abstractions\IronPaw.AgentCore.Abstractions.csproj" />

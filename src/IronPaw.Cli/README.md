@@ -22,7 +22,7 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 
 - `Program.cs` — entry point, interactive REPL loop, single-run execution
 - `CliOptions.cs` — argument parsing and validation (`Parse`, `TryValidate`, `ResolvePromptAsync`, `PrintHelp`)
-- `AppBootstrapper.cs` — composition root wiring all dependencies (including `IAgentRegistry` and agent tools)
+- `AppBootstrapper.cs` — DI-based composition root wiring interfaces to runtime implementations (including `IAgentRegistry` and agent tools)
 - `ConsoleUi.cs` — Spectre.Console rendering for banners, settings, diagnostics, results, memory, and run history
 - `AnsiConsoleEventSink.cs` — `IAgentEventSink` that formats agent events with Spectre.Console markup (displays `@agentId` prefix for sub-agent events)
 - `InteractiveCommandHandler.cs` — slash command dispatch (`/help`, `/settings`, `/provider`, `/model`, `/session`, `/remember`, `/forget`, `/memories`, `/tasks`, `/review`)

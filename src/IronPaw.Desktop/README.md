@@ -18,7 +18,7 @@
     - assistant output
     - event stream list
 - `MainWindow.xaml.cs`
-  - runtime composition of orchestrator stack via `LlmClientFactory.Build()`
+  - consumes DI bootstrap output (`DesktopBootstrapper`) and runs requests
   - add-in skill loading and diagnostics
 - `UiEventSink.cs`
   - `IAgentEventSink` implementation that dispatches events to the WPF UI thread
@@ -59,4 +59,4 @@ Skill load diagnostics are written to the event panel.
 ## Notes
 
 - The Desktop project is a host/composition layer; core runtime behavior remains in `IronPaw.AgentCore`.
-- Provider wiring is handled by `LlmClientFactory.Build()` from `IronPaw.AgentCore.Providers`.
+- Provider wiring is handled in the DI composition root (`DesktopBootstrapper`) via `LlmClientFactory.Build()`.

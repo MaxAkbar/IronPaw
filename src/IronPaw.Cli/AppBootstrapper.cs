@@ -4,87 +4,129 @@ using IronPaw.AgentCore.Persistence;
 using IronPaw.AgentCore.Persistence.Sqlite;
 using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace IronPaw.Cli;
 
 internal static class AppBootstrapper
 {
-    public static (IAgentOrchestrator Orchestrator, SkillAddinLoadResult SkillLoadResult, IMemoryStore MemoryStore, IRunHistoryStore RunHistoryStore, ISessionStore SessionStore, ITranscriptStore TranscriptStore, IAgentRegistry AgentRegistry) Build(StoreBackend storeBackend = StoreBackend.Json)
+    public static AppBootstrap Build(StoreBackend storeBackend = StoreBackend.Json)
+    {
+        var paths = ResolvePaths();
+        Directory.CreateDirectory(paths.StateRoot);
+        Directory.CreateDirectory(paths.AppSkillsDirectory);
+
+        var services = new ServiceCollection();
+        ConfigureServices(services, storeBackend, paths);
+
+        var serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateScopes = true,
+            ValidateOnBuild = true
+        });
+
+        return new AppBootstrap(serviceProvider);
+    }
+
+    private static BootstrapPaths ResolvePaths()
     {
         var workspaceRoot = Directory.GetCurrentDirectory();
-        var appData = Path.Combine(
+        var appDataRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "IronPaw");
-        var appSkillsDirectory = Path.Combine(appData, "skills");
-        var stateRoot = Path.Combine(appData, "state");
+        return new BootstrapPaths(
+            WorkspaceRoot: workspaceRoot,
+            AppSkillsDirectory: Path.Combine(appDataRoot, "skills"),
+            StateRoot: Path.Combine(appDataRoot, "state"));
+    }
 
-        Directory.CreateDirectory(stateRoot);
-        Directory.CreateDirectory(appSkillsDirectory);
-
-        var (memoryStore, runHistoryStore, sessionStore, transcriptStore) = storeBackend switch
-        {
-            StoreBackend.Sqlite => BuildSqliteStores(stateRoot),
-            _ => BuildJsonStores(stateRoot)
-        };
+    private static void ConfigureServices(IServiceCollection services, StoreBackend storeBackend, BootstrapPaths paths)
+    {
+        RegisterStores(services, storeBackend, paths.StateRoot);
 
         var skillLoadResult = SkillAddinLoader.LoadFromDirectories(
         [
-            Path.Combine(workspaceRoot, "addins", "skills"),
-            appSkillsDirectory
+            Path.Combine(paths.WorkspaceRoot, "addins", "skills"),
+            paths.AppSkillsDirectory
         ]);
-        var tools = BuiltInToolFactory.CreateDefault(workspaceRoot, skillLoadResult.SkillTools, memoryStore, runHistoryStore);
-        var toolRegistry = new InMemoryToolRegistry(tools);
-        toolRegistry.RegisterTools([new CreateSkillTool(toolRegistry, appSkillsDirectory)]);
-        var laneScheduler = new SessionLaneScheduler();
-        var toolExecutor = new ToolExecutor();
-        var schemaNormalizer = new ToolSchemaNormalizer();
-        var llmClient = LlmClientFactory.Build();
-        var sanitizer = new TranscriptSanitizer();
-        var truncator = new ToolResultTruncator();
-        var promptBuilder = new DefaultSystemPromptBuilder();
+        services.AddSingleton(skillLoadResult);
 
-        var orchestrator = new AgentOrchestrator(
-            laneScheduler,
-            sessionStore,
-            transcriptStore,
-            toolRegistry,
-            toolExecutor,
-            schemaNormalizer,
-            llmClient,
-            sanitizer,
-            truncator,
-            promptBuilder,
-            memoryStore,
-            runHistoryStore);
+        services.AddSingleton<InMemoryToolRegistry>(sp =>
+        {
+            var builtInTools = BuiltInToolFactory.CreateDefault(
+                paths.WorkspaceRoot,
+                sp.GetRequiredService<SkillAddinLoadResult>().SkillTools,
+                sp.GetRequiredService<IMemoryStore>(),
+                sp.GetRequiredService<IRunHistoryStore>());
+            return new InMemoryToolRegistry(builtInTools);
+        });
+        services.AddSingleton<IToolRegistry>(sp => sp.GetRequiredService<InMemoryToolRegistry>());
+        services.AddSingleton<IToolRegistrar>(sp => sp.GetRequiredService<InMemoryToolRegistry>());
 
-        var agentRegistry = new InMemoryAgentRegistry();
-        RegisterDefaultAgents(agentRegistry);
-        toolRegistry.RegisterTools([
-            new InvokeAgentTool(agentRegistry, orchestrator),
-            new ListAgentsTool(agentRegistry)
-        ]);
+        services.AddSingleton<IAgentRegistry, InMemoryAgentRegistry>();
+        services.AddSingleton<ISessionLaneScheduler, SessionLaneScheduler>();
+        services.AddSingleton<IToolExecutor, ToolExecutor>();
+        services.AddSingleton<IToolSchemaNormalizer, ToolSchemaNormalizer>();
+        services.AddSingleton<ILlmClient>(_ => LlmClientFactory.Build());
+        services.AddSingleton<ITranscriptSanitizer, TranscriptSanitizer>();
+        services.AddSingleton<IToolResultTruncator, ToolResultTruncator>();
+        services.AddSingleton<ISystemPromptBuilder, DefaultSystemPromptBuilder>();
 
-        return (orchestrator, skillLoadResult, memoryStore, runHistoryStore, sessionStore, transcriptStore, agentRegistry);
+        services.AddSingleton<IAgentOrchestrator>(sp =>
+        {
+            var orchestrator = new AgentOrchestrator(
+                sp.GetRequiredService<ISessionLaneScheduler>(),
+                sp.GetRequiredService<ISessionStore>(),
+                sp.GetRequiredService<ITranscriptStore>(),
+                sp.GetRequiredService<IToolRegistry>(),
+                sp.GetRequiredService<IToolExecutor>(),
+                sp.GetRequiredService<IToolSchemaNormalizer>(),
+                sp.GetRequiredService<ILlmClient>(),
+                sp.GetRequiredService<ITranscriptSanitizer>(),
+                sp.GetRequiredService<IToolResultTruncator>(),
+                sp.GetRequiredService<ISystemPromptBuilder>(),
+                sp.GetRequiredService<IMemoryStore>(),
+                sp.GetRequiredService<IRunHistoryStore>());
+
+            RegisterRuntimeTools(sp, paths.AppSkillsDirectory, orchestrator);
+            return orchestrator;
+        });
     }
 
-    private static (IMemoryStore, IRunHistoryStore, ISessionStore, ITranscriptStore) BuildJsonStores(string stateRoot)
+    private static void RegisterStores(IServiceCollection services, StoreBackend storeBackend, string stateRoot)
+    {
+        switch (storeBackend)
+        {
+            case StoreBackend.Sqlite:
+                RegisterSqliteStores(services, stateRoot);
+                break;
+            default:
+                RegisterJsonStores(services, stateRoot);
+                break;
+        }
+    }
+
+    private static void RegisterJsonStores(IServiceCollection services, string stateRoot)
     {
         var sessionsDirectory = Path.Combine(stateRoot, "sessions");
         Directory.CreateDirectory(sessionsDirectory);
 
-        var memoryStore = new FileMemoryStore(new FileMemoryStoreOptions(
+        IMemoryStore memoryStore = new FileMemoryStore(new FileMemoryStoreOptions(
             GlobalMemoryPath: Path.Combine(stateRoot, "memories.json"),
             SessionMemoriesDirectory: sessionsDirectory));
-        var runHistoryStore = new JsonRunHistoryStore(Path.Combine(stateRoot, "run-history.jsonl"));
-        var sessionStore = new FileSessionStore(new FileSessionStoreOptions(
+        IRunHistoryStore runHistoryStore = new JsonRunHistoryStore(Path.Combine(stateRoot, "run-history.jsonl"));
+        ISessionStore sessionStore = new FileSessionStore(new FileSessionStoreOptions(
             StoreFilePath: Path.Combine(stateRoot, "session-store.json"),
             CacheTtl: TimeSpan.FromSeconds(5)));
-        var transcriptStore = new JsonTranscriptStore(sessionsDirectory);
+        ITranscriptStore transcriptStore = new JsonTranscriptStore(sessionsDirectory);
 
-        return (memoryStore, runHistoryStore, sessionStore, transcriptStore);
+        services.AddSingleton(memoryStore);
+        services.AddSingleton(runHistoryStore);
+        services.AddSingleton(sessionStore);
+        services.AddSingleton(transcriptStore);
     }
 
-    private static (IMemoryStore, IRunHistoryStore, ISessionStore, ITranscriptStore) BuildSqliteStores(string stateRoot)
+    private static void RegisterSqliteStores(IServiceCollection services, string stateRoot)
     {
         var dbPath = Path.Combine(stateRoot, "ironpaw.db");
         var connectionString = SqliteSchemaInitializer.BuildConnectionString(dbPath);
@@ -96,7 +138,23 @@ internal static class AppBootstrapper
         ISessionStore sessionStore = new SqliteSessionStore(options);
         ITranscriptStore transcriptStore = new SqliteTranscriptStore(options);
 
-        return (memoryStore, runHistoryStore, sessionStore, transcriptStore);
+        services.AddSingleton(memoryStore);
+        services.AddSingleton(runHistoryStore);
+        services.AddSingleton(sessionStore);
+        services.AddSingleton(transcriptStore);
+    }
+
+    private static void RegisterRuntimeTools(IServiceProvider services, string appSkillsDirectory, IAgentOrchestrator orchestrator)
+    {
+        var toolRegistrar = services.GetRequiredService<IToolRegistrar>();
+        var agentRegistry = services.GetRequiredService<IAgentRegistry>();
+
+        toolRegistrar.RegisterTools([new CreateSkillTool(toolRegistrar, appSkillsDirectory)]);
+        RegisterDefaultAgents(agentRegistry);
+        toolRegistrar.RegisterTools([
+            new InvokeAgentTool(agentRegistry, orchestrator),
+            new ListAgentsTool(agentRegistry)
+        ]);
     }
 
     private static void RegisterDefaultAgents(IAgentRegistry registry)
@@ -147,5 +205,47 @@ internal static class AppBootstrapper
     {
         var value = Environment.GetEnvironmentVariable(name);
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private sealed record BootstrapPaths(
+        string WorkspaceRoot,
+        string AppSkillsDirectory,
+        string StateRoot);
+}
+
+internal sealed class AppBootstrap : IDisposable
+{
+    private readonly ServiceProvider _serviceProvider;
+
+    public AppBootstrap(ServiceProvider serviceProvider)
+    {
+        _serviceProvider = serviceProvider;
+        // Force creation during startup so tool registrations run once.
+        Orchestrator = _serviceProvider.GetRequiredService<IAgentOrchestrator>();
+        SkillLoadResult = _serviceProvider.GetRequiredService<SkillAddinLoadResult>();
+        MemoryStore = _serviceProvider.GetRequiredService<IMemoryStore>();
+        RunHistoryStore = _serviceProvider.GetRequiredService<IRunHistoryStore>();
+        SessionStore = _serviceProvider.GetRequiredService<ISessionStore>();
+        TranscriptStore = _serviceProvider.GetRequiredService<ITranscriptStore>();
+        AgentRegistry = _serviceProvider.GetRequiredService<IAgentRegistry>();
+    }
+
+    public IAgentOrchestrator Orchestrator { get; }
+
+    public SkillAddinLoadResult SkillLoadResult { get; }
+
+    public IMemoryStore MemoryStore { get; }
+
+    public IRunHistoryStore RunHistoryStore { get; }
+
+    public ISessionStore SessionStore { get; }
+
+    public ITranscriptStore TranscriptStore { get; }
+
+    public IAgentRegistry AgentRegistry { get; }
+
+    public void Dispose()
+    {
+        _serviceProvider.Dispose();
     }
 }
