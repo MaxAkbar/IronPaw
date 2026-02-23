@@ -44,7 +44,7 @@ public sealed class WriteFileTool : ITool
 
         return ToolResult.Success(
             $"Wrote file: {resolvedPath}",
-            new Dictionary<string, object?>
+            details: new Dictionary<string, object?>
             {
                 ["path"] = resolvedPath,
                 ["bytes"] = new FileInfo(resolvedPath).Length

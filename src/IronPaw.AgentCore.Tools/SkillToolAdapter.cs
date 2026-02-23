@@ -38,7 +38,7 @@ internal sealed class SkillToolAdapter : ITool
                 context.Model);
 
             var result = await _skill.ExecuteAsync(skillCall, skillContext, ct);
-            return new ToolResult(result.IsError, result.Content, result.Details);
+            return new ToolResult(result.IsError, result.Content, ContentTrust.Trusted, result.Details);
         }
         catch (Exception ex)
         {

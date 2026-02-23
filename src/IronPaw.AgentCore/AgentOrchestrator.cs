@@ -259,7 +259,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     result = await _toolExecutor.ExecuteAsync(tool, toolCall, execContext, ct);
                 }
 
-                transcript.Add(new ChatMessage(ChatRole.Tool, result.Content, toolCall.ToolCallId, toolCall.ToolName));
+                var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);
+                transcript.Add(new ChatMessage(ChatRole.Tool, fencedContent, toolCall.ToolCallId, toolCall.ToolName));
                 await PublishAsync(
                     sink,
                     new AgentEvent(
@@ -447,7 +448,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             var execContext = new ToolExecutionContext(runId, request.SessionKey, request.Provider, request.Model, request.Caller);
             var result = await _toolExecutor.ExecuteAsync(createSkillTool, toolCall, execContext, ct);
 
-            transcript.Add(new ChatMessage(ChatRole.Tool, result.Content, toolCall.ToolCallId, toolCall.ToolName));
+            var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);
+            transcript.Add(new ChatMessage(ChatRole.Tool, fencedContent, toolCall.ToolCallId, toolCall.ToolName));
             await PublishAsync(
                 sink,
                 new AgentEvent(

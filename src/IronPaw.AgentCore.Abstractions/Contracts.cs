@@ -133,19 +133,30 @@ public sealed record ToolExecutionContext(
     string Model,
     CallerIdentity Caller);
 
+public enum ContentTrust
+{
+    Trusted,
+    Local,
+    Untrusted
+}
+
 public sealed record ToolResult(
     bool IsError,
     string Content,
+    ContentTrust Trust = ContentTrust.Trusted,
     IReadOnlyDictionary<string, object?>? Details = null)
 {
-    public static ToolResult Success(string content, IReadOnlyDictionary<string, object?>? details = null)
+    public static ToolResult Success(
+        string content,
+        ContentTrust trust = ContentTrust.Trusted,
+        IReadOnlyDictionary<string, object?>? details = null)
     {
-        return new ToolResult(false, content, details);
+        return new ToolResult(false, content, trust, details);
     }
 
     public static ToolResult Error(string message, IReadOnlyDictionary<string, object?>? details = null)
     {
-        return new ToolResult(true, message, details);
+        return new ToolResult(true, message, ContentTrust.Trusted, details);
     }
 }
 

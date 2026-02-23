@@ -46,7 +46,7 @@ public sealed class ReadFileTool : ITool
 
         return ToolResult.Success(
             content,
-            new Dictionary<string, object?>
+            details: new Dictionary<string, object?>
             {
                 ["path"] = resolvedPath,
                 ["truncated"] = content.Length >= _maxChars
