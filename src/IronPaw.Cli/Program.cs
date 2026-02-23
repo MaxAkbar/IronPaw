@@ -40,7 +40,7 @@ var sessionKey = new SessionKey(string.IsNullOrWhiteSpace(options.Session) ? "de
 IAgentEventSink eventSink = options.NoEvents
     ? NullAgentEventSink.Instance
     : new AnsiConsoleEventSink();
-var bootstrap = AppBootstrapper.Build();
+var bootstrap = AppBootstrapper.Build(options.Store);
 
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) =>

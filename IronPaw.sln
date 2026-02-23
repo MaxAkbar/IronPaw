@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.4.11513.90 insiders
+VisualStudioVersion = 18.4.11513.90
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
@@ -60,6 +60,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tutorials", "Tutorials", "{
 		docs\tutorials\memory-and-review.md = docs\tutorials\memory-and-review.md
 		docs\tutorials\using-providers.md = docs\tutorials\using-providers.md
 	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.AgentCore.Persistence.Sqlite", "src\IronPaw.AgentCore.Persistence.Sqlite\IronPaw.AgentCore.Persistence.Sqlite.csproj", "{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.AgentCore.Persistence.Sqlite.Tests", "tests\IronPaw.AgentCore.Persistence.Sqlite.Tests\IronPaw.AgentCore.Persistence.Sqlite.Tests.csproj", "{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -239,6 +243,30 @@ Global
 		{E0C3A28A-41D7-4DFB-8159-8F5D031204D2}.Release|x64.Build.0 = Release|Any CPU
 		{E0C3A28A-41D7-4DFB-8159-8F5D031204D2}.Release|x86.ActiveCfg = Release|Any CPU
 		{E0C3A28A-41D7-4DFB-8159-8F5D031204D2}.Release|x86.Build.0 = Release|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Debug|x64.Build.0 = Debug|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Debug|x86.Build.0 = Debug|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Release|x64.ActiveCfg = Release|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Release|x64.Build.0 = Release|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Release|x86.ActiveCfg = Release|Any CPU
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C}.Release|x86.Build.0 = Release|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Debug|x64.Build.0 = Debug|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Debug|x86.Build.0 = Debug|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Release|x64.ActiveCfg = Release|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Release|x64.Build.0 = Release|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Release|x86.ActiveCfg = Release|Any CPU
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -260,6 +288,8 @@ Global
 		{E0C3A28A-41D7-4DFB-8159-8F5D031204D2} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{7E3FD429-7D58-420C-8855-4D4E80DDF344} = {433773FE-1B62-472F-AD2A-78EC253EF362}
 		{9CC8B6FE-275A-4189-BE19-AD47BDBF7F2A} = {433773FE-1B62-472F-AD2A-78EC253EF362}
+		{38ABBF0C-3D2E-4B29-A418-725F615AAA2C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{A4CE2C4D-0412-40DB-8A79-377DC60DF80E} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {2D55FA87-39C6-41A0-B5E6-CBDC31BE77C5}

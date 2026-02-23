@@ -10,6 +10,7 @@ internal sealed record CliOptions(
     string? Prompt,
     string? PromptFile,
     ToolProfile Profile,
+    StoreBackend Store,
     bool AutoCreateSkills,
     bool ListSkills,
     bool NoEvents,
@@ -23,6 +24,7 @@ internal sealed record CliOptions(
         string? prompt = null;
         string? promptFile = null;
         var profile = ToolProfile.Coding;
+        var store = StoreBackend.Json;
         var autoCreateSkills = false;
         var listSkills = false;
         var noEvents = false;
@@ -70,6 +72,15 @@ internal sealed record CliOptions(
 
                     break;
 
+                case "--store":
+                    var storeValue = ReadValue(args, ref i, arg);
+                    if (!Enum.TryParse<StoreBackend>(storeValue, ignoreCase: true, out store))
+                    {
+                        throw new ArgumentException($"Invalid --store value '{storeValue}'. Use 'json' or 'sqlite'.");
+                    }
+
+                    break;
+
                 case "--auto-create-skills":
                     autoCreateSkills = true;
                     break;
@@ -95,7 +106,7 @@ internal sealed record CliOptions(
             }
         }
 
-        return new CliOptions(provider, model, session, prompt, promptFile, profile, autoCreateSkills, listSkills, noEvents, showHelp);
+        return new CliOptions(provider, model, session, prompt, promptFile, profile, store, autoCreateSkills, listSkills, noEvents, showHelp);
     }
 
     public bool TryValidate(out string? error)
@@ -159,6 +170,7 @@ internal sealed record CliOptions(
         table.AddRow("--profile <name>", "Tool profile: Minimal | Coding | Messaging | Full");
         table.AddRow("--auto-create-skills", "Automatically create runtime tools when needed (requires Full profile)");
         table.AddRow("--list-skills", "List discovered add-in skills and exit");
+        table.AddRow("--store <backend>", "Storage backend: json | sqlite (default: json)");
         table.AddRow("--no-events", "Hide event stream logs");
 
         AnsiConsole.Write(new Rule("[bold deepskyblue1]IronPaw CLI[/]").LeftJustified());

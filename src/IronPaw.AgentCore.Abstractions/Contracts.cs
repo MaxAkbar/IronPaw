@@ -459,6 +459,12 @@ public interface IRunHistoryStore
     Task<RunSummary?> GetAsync(string runId, CancellationToken ct);
 }
 
+public enum StoreBackend
+{
+    Json,
+    Sqlite
+}
+
 public static class EventData
 {
     public static IReadOnlyDictionary<string, object?> Of(params (string Key, object? Value)[] values)

@@ -45,6 +45,7 @@ public sealed class CliOptionsTests
             Prompt: "inline",
             PromptFile: "prompt.txt",
             Profile: ToolProfile.Coding,
+            Store: StoreBackend.Json,
             AutoCreateSkills: false,
             ListSkills: false,
             NoEvents: false,
@@ -57,6 +58,20 @@ public sealed class CliOptionsTests
     }
 
     [Fact]
+    public void Parse_ParsesStoreFlag()
+    {
+        var options = CliOptions.Parse(["--store", "sqlite", "--prompt", "hi"]);
+        Assert.Equal(StoreBackend.Sqlite, options.Store);
+    }
+
+    [Fact]
+    public void Parse_DefaultStoreIsJson()
+    {
+        var options = CliOptions.Parse(["--prompt", "hi"]);
+        Assert.Equal(StoreBackend.Json, options.Store);
+    }
+
+    [Fact]
     public async Task ResolvePromptAsync_UsesInlinePromptAndTrimsWhitespace()
     {
         var options = new CliOptions(
@@ -66,6 +81,7 @@ public sealed class CliOptionsTests
             Prompt: "  hello world  ",
             PromptFile: null,
             Profile: ToolProfile.Coding,
+            Store: StoreBackend.Json,
             AutoCreateSkills: false,
             ListSkills: false,
             NoEvents: false,
