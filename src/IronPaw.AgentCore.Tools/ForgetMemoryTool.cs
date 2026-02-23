@@ -17,7 +17,8 @@ public sealed class ForgetMemoryTool : ITool
             [
                 new("memory_id", "string", "The ID of the memory entry to remove.", Required: true)
             ]),
-            Group: "group:system");
+            Group: "group:system",
+            OwnerOnly: true);
     }
 
     public ToolDescriptor Descriptor { get; }

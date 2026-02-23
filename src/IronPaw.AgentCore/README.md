@@ -1,16 +1,17 @@
 # IronPaw.AgentCore
 
-`IronPaw.AgentCore` is the headless orchestration engine.  
+`IronPaw.AgentCore` is the headless orchestration engine.
 It runs the agent loop, coordinates tools, persists state, and emits event streams.
 
 ## Responsibilities
 
 - Orchestrate one run with a stable `RunId`
 - Serialize work per session via lane scheduler
-- Build system prompt
+- Build system prompt (including persistent memory injection)
 - Execute LLM rounds and process deltas
 - Execute tool calls
 - Persist transcripts and session usage
+- Record completed runs in run history
 - Apply transcript repair and tool-result truncation safety steps
 - Publish lifecycle/assistant/tool/diagnostic events
 
@@ -18,10 +19,11 @@ It runs the agent loop, coordinates tools, persists state, and emits event strea
 
 - `AgentOrchestrator.cs`
   - main run loop and recovery boundaries
+  - accepts optional `IMemoryStore` and `IRunHistoryStore`
 - `SessionLaneScheduler.cs`
   - per-session serialization
 - `DefaultSystemPromptBuilder.cs`
-  - baseline system prompt generation
+  - baseline system prompt generation with memory injection
 - `TranscriptSanitizer.cs`
   - tool-call/tool-result repair
 - `ToolResultTruncator.cs`
@@ -32,12 +34,14 @@ It runs the agent loop, coordinates tools, persists state, and emits event strea
 1. Receive `AgentRunRequest`
 2. Acquire session lane
 3. Load and sanitize transcript
-4. Build prompt and resolve tools
-5. Stream LLM output deltas
-6. Execute tool calls and append tool results
-7. Re-sanitize/truncate transcript and persist
-8. Persist usage/session metadata
-9. Return `AgentRunResult`
+4. Load global + session memories (if `IMemoryStore` provided)
+5. Build prompt and resolve tools
+6. Stream LLM output deltas
+7. Execute tool calls and append tool results
+8. Re-sanitize/truncate transcript and persist
+9. Persist usage/session metadata
+10. Record run summary to history (if `IRunHistoryStore` provided)
+11. Return `AgentRunResult`
 
 ## Dependencies
 
@@ -48,6 +52,7 @@ It runs the agent loop, coordinates tools, persists state, and emits event strea
 
 ## Extension points
 
-- Swap `ILLMClient` with different provider routers/adapters.
+- Swap `ILlmClient` with different provider routers/adapters.
 - Extend tool set via `IToolRegistry`.
 - Replace prompt builder/sanitizer/truncator with alternative implementations.
+- Provide `IMemoryStore` / `IRunHistoryStore` for persistent memory and task review.

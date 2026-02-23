@@ -9,32 +9,47 @@
 - Normalize tool schemas per provider
 - Execute tools through hook-aware middleware
 - Load skill add-ins (`ISkillAddin`) from external assemblies and expose them as tools
+- Compile and register skills at runtime via Roslyn
 
 ## Built-in tools
 
-- `current_time`
-- `list_files`
-- `read_file`
-- `write_file`
+### File system (`group:fs`)
 
-Key files:
-- `CurrentTimeTool.cs`
-- `ListFilesTool.cs`
-- `ReadFileTool.cs`
-- `WriteFileTool.cs`
+- `list_files` — list directory contents
+- `read_file` — read file contents
+- `write_file` — write files to disk
+
+Key files: `ListFilesTool.cs`, `ReadFileTool.cs`, `WriteFileTool.cs`
+
+### System (`group:system`)
+
+- `current_time` — returns the current time
+- `save_memory` — save a global or session-scoped memory
+- `recall_memory` — search saved memories by keyword
+- `forget_memory` — remove a memory by ID
+- `review_runs` — list recent run summaries
+- `review_run_detail` — get full details of a specific past run
+
+Key files: `CurrentTimeTool.cs`, `SaveMemoryTool.cs`, `RecallMemoryTool.cs`, `ForgetMemoryTool.cs`, `ReviewRunsTool.cs`, `ReviewRunDetailTool.cs`
+
+### Runtime (`group:runtime`)
+
+- `create_skill` — compile C# source code into a skill at runtime (Full profile only)
+
+Key files: `CreateSkillTool.cs`, `RoslynSkillCompiler.cs`, `JsonSchemaBuilder.cs`
+
+### Skills (`group:skills`)
+
+All skill add-in tools are registered with the `skill_<name>` prefix and placed in this group.
 
 ## Tool policy and registration
 
 - `InMemoryToolRegistry.cs`
-  - stores and resolves tool set
+  - stores and resolves tool set; supports dynamic registration via `IToolRegistrar`
 - `ToolPolicyEvaluator.cs`
   - profile and allow/deny filtering
-  - groups include:
-    - `group:fs`
-    - `group:runtime`
-    - `group:messaging`
-    - `group:system`
-    - `group:skills`
+  - profiles: `Minimal`, `Coding`, `Messaging`, `Full`
+  - groups: `group:fs`, `group:system`, `group:messaging`, `group:runtime`, `group:skills`
 
 ## Execution and schema
 
@@ -56,10 +71,12 @@ Default add-in discovery paths are controlled by host projects (CLI/Desktop), cu
 - `./addins/skills`
 - `%LOCALAPPDATA%/IronPaw/skills`
 
-## Factory
+## Utility
 
 - `BuiltInToolFactory.cs`
-  - creates standard tools and accepts optional additional tools (for add-ins)
+  - creates standard tool set; accepts optional `IMemoryStore`, `IRunHistoryStore`, and additional tools
+- `WorkspacePathResolver.cs`
+  - resolves and validates paths relative to the workspace root
 
 ## Tools vs Skills — Conceptual Guide
 
@@ -68,7 +85,7 @@ Default add-in discovery paths are controlled by host projects (CLI/Desktop), cu
 A **Tool** is the fundamental execution unit that an agent can invoke. It implements `ITool` and is what the LLM directly sees and calls.
 
 - Has a `ToolDescriptor` (name, description, JSON parameter schema, group, owner-only flag) and an `ExecuteAsync` method.
-- Built-in examples: `read_file`, `write_file`, `current_time`, `list_files`.
+- Built-in examples: `read_file`, `write_file`, `current_time`, `list_files`, `save_memory`, `review_runs`.
 - Grouped by category: `group:fs`, `group:system`, `group:messaging`, `group:runtime`, `group:skills`.
 - Compiled into the application as part of the core.
 
@@ -78,6 +95,7 @@ A **Skill** is an external, plugin-based extension mechanism. It implements `ISk
 
 - Has a simpler `SkillDescriptor` (name, description, input schema) and an `ExecuteAsync` method.
 - Loaded dynamically at runtime from external `.dll` assemblies discovered in configurable directories (e.g. `./addins/skills`, `%LOCALAPPDATA%/IronPaw/skills`).
+- Can also be created at runtime via the `create_skill` tool (Full profile, Roslyn compilation).
 - Example: `ExampleSkillAddin` provides `TextStatsSkill` and `SlugifySkill`.
 
 ### The Adapter Pattern
@@ -96,7 +114,7 @@ ISkill  →  SkillToolAdapter (implements ITool)  →  Agent sees it as a regula
 
 | Aspect | Tool | Skill |
 |---|---|---|
-| **Deployment** | Compiled into the application | External DLLs, loaded at runtime |
+| **Deployment** | Compiled into the application | External DLLs or runtime-compiled |
 | **Audience** | Core system developers | Third-party / end-user extensibility |
 | **Access control** | Per-group + `OwnerOnly` flag | Collectively under `group:skills` |
 | **Naming** | Direct (e.g. `read_file`) | Prefixed (e.g. `skill_slugify`) |
@@ -104,7 +122,7 @@ ISkill  →  SkillToolAdapter (implements ITool)  →  Agent sees it as a regula
 
 ### Why This Design?
 
-- **Separation of concerns**: Core tools handle essential operations (file I/O, time); skills add domain-specific functionality.
-- **Extensibility**: New functionality can be added via external DLLs without recompiling the core.
+- **Separation of concerns**: Core tools handle essential operations (file I/O, time, memory); skills add domain-specific functionality.
+- **Extensibility**: New functionality can be added via external DLLs or runtime compilation without recompiling the core.
 - **Unified execution model**: The agent sees all tools uniformly, regardless of origin.
 - **Policy-based access control**: Tools and skills are filtered by profile and policy under a single mechanism.

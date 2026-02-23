@@ -18,16 +18,17 @@
     - assistant output
     - event stream list
 - `MainWindow.xaml.cs`
-  - runtime composition of orchestrator stack
-  - provider routing and key resolution
+  - runtime composition of orchestrator stack via `LlmClientFactory.Build()`
   - add-in skill loading and diagnostics
-- `Properties/launchSettings.json`
-  - local debug profile and environment variables
+- `UiEventSink.cs`
+  - `IAgentEventSink` implementation that dispatches events to the WPF UI thread
+- `App.xaml` / `App.xaml.cs`
+  - WPF application initialization
 
 ## Run
 
 ```powershell
-dotnet run --project src/IronPaw.Desktop --launch-profile IronPaw.Desktop
+dotnet run --project src/IronPaw.Desktop
 ```
 
 ## Runtime configuration
@@ -38,6 +39,7 @@ dotnet run --project src/IronPaw.Desktop --launch-profile IronPaw.Desktop
   - `ollama`
   - `lmstudio`
   - `anthropic`
+- Provider defaults and model names are sourced from `ProviderDefaults` (shared with CLI)
 - API keys read from environment variables:
   - `OPENAI_API_KEY`
   - `ANTHROPIC_API_KEY`
@@ -57,3 +59,4 @@ Skill load diagnostics are written to the event panel.
 ## Notes
 
 - The Desktop project is a host/composition layer; core runtime behavior remains in `IronPaw.AgentCore`.
+- Provider wiring is handled by `LlmClientFactory.Build()` from `IronPaw.AgentCore.Providers`.

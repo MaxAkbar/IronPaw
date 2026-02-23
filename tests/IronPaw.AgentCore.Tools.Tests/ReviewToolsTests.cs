@@ -110,7 +110,8 @@ public sealed class ReviewToolsTests
             RunId.New(),
             new SessionKey("test-session"),
             "local",
-            "rule-based-v1");
+            "rule-based-v1",
+            CallerIdentity.LocalOwner());
     }
 
     private static ToolCall CreateToolCall(string name, object args)

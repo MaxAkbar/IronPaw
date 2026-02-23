@@ -27,7 +27,7 @@ public sealed class SkillAddinLoaderTests
                 ToolCallId: "call-1",
                 ToolName: slugifyTool.Descriptor.Name,
                 Arguments: JsonSerializer.SerializeToElement(new { text = "Hello, Test World!" }));
-            var context = new ToolExecutionContext(new RunId("run-1"), new SessionKey("session-1"), "local", "rule");
+            var context = new ToolExecutionContext(new RunId("run-1"), new SessionKey("session-1"), "local", "rule", CallerIdentity.LocalOwner());
 
             var result = await slugifyTool.ExecuteAsync(toolCall, context, CancellationToken.None);
             Assert.False(result.IsError);

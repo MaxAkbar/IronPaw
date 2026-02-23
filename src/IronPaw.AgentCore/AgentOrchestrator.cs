@@ -74,6 +74,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             effectiveRequest = request with { ActiveMemories = activeMemories };
         }
 
+        // Derive SenderIsOwner from CallerIdentity so it cannot be spoofed by the host.
+        effectiveRequest = effectiveRequest with
+        {
+            ToolPolicy = effectiveRequest.ToolPolicy with { SenderIsOwner = effectiveRequest.Caller.IsOwner }
+        };
+
         await PublishAsync(
             sink,
             new AgentEvent(
@@ -249,7 +255,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
                 else
                 {
-                    var execContext = new ToolExecutionContext(runId, effectiveRequest.SessionKey, effectiveRequest.Provider, effectiveRequest.Model);
+                    var execContext = new ToolExecutionContext(runId, effectiveRequest.SessionKey, effectiveRequest.Provider, effectiveRequest.Model, effectiveRequest.Caller);
                     result = await _toolExecutor.ExecuteAsync(tool, toolCall, execContext, ct);
                 }
 
@@ -438,7 +444,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             toolsUsed.Add(toolCall.ToolName);
             transcript.Add(new ChatMessage(ChatRole.Assistant, toolCall.Arguments.GetRawText(), toolCall.ToolCallId, toolCall.ToolName));
 
-            var execContext = new ToolExecutionContext(runId, request.SessionKey, request.Provider, request.Model);
+            var execContext = new ToolExecutionContext(runId, request.SessionKey, request.Provider, request.Model, request.Caller);
             var result = await _toolExecutor.ExecuteAsync(createSkillTool, toolCall, execContext, ct);
 
             transcript.Add(new ChatMessage(ChatRole.Tool, result.Content, toolCall.ToolCallId, toolCall.ToolName));

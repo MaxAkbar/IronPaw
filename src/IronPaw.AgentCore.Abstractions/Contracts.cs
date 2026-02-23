@@ -41,6 +41,21 @@ public readonly record struct RunId
     public override string ToString() => Value;
 }
 
+public sealed record CallerIdentity(
+    string Id,
+    string DisplayName,
+    bool IsOwner)
+{
+    public static CallerIdentity LocalOwner() =>
+        new(Environment.UserName, Environment.UserName, IsOwner: true);
+
+    public static CallerIdentity Authenticated(string id, string displayName) =>
+        new(id, displayName, IsOwner: false);
+
+    public static CallerIdentity Anonymous() =>
+        new("anonymous", "Anonymous", IsOwner: false);
+}
+
 public enum AgentEventStream
 {
     Lifecycle,
@@ -93,7 +108,7 @@ public enum ToolProfile
 
 public sealed record ToolSelectionPolicy(
     ToolProfile Profile,
-    bool SenderIsOwner,
+    bool SenderIsOwner = false,
     IReadOnlyCollection<string>? AllowList = null,
     IReadOnlyCollection<string>? DenyList = null,
     IReadOnlyCollection<string>? AllowedGroups = null,
@@ -115,7 +130,8 @@ public sealed record ToolExecutionContext(
     RunId RunId,
     SessionKey SessionKey,
     string Provider,
-    string Model);
+    string Model,
+    CallerIdentity Caller);
 
 public sealed record ToolResult(
     bool IsError,
@@ -358,6 +374,7 @@ public sealed record AgentRunRequest(
     string Provider,
     string Model,
     ToolSelectionPolicy ToolPolicy,
+    CallerIdentity Caller,
     bool AutoCreateSkills = false,
     int ContextWindowChars = 32_768,
     string? SystemPromptOverride = null,

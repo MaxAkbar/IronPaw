@@ -1,12 +1,12 @@
 # IronPaw
 
-`IronPaw` is a .NET solution generated from `deep-research-report.md`, following an OpenClaw-inspired architecture:
-- headless agent core
-- tool pipeline with policy filtering
-- durable session + transcript storage
-- event-stream-driven desktop UI
+`IronPaw` is a .NET 10 agent orchestration framework following an OpenClaw-inspired architecture:
+- headless agent core with event-driven UI hosts (CLI + WPF Desktop)
+- tool pipeline with profile-based policy filtering
+- durable session + transcript storage with persistent memory
 - provider routing (`local`, `openai`, `ollama`, `lmstudio`, `anthropic`)
-- add-in skill system with dynamic discovery
+- add-in skill system with dynamic discovery and runtime Roslyn compilation
+- task review and run history tracking
 
 ## Architecture View
 
@@ -115,14 +115,14 @@ sequenceDiagram
 
 ## Solution Layout
 
-- `src/IronPaw.AgentCore.Abstractions`: shared contracts, DTOs, and runtime interfaces.
-- `src/IronPaw.AgentCore`: orchestration loop, lane scheduler, prompt/safety pipeline.
-- `src/IronPaw.AgentCore.Tools`: built-in tools, tool policy pipeline, and add-in skill loading.
-- `src/IronPaw.AgentCore.Persistence`: session/transcript stores with file-safe semantics.
-- `src/IronPaw.AgentCore.Providers`: `ILLMClient` implementations and provider routing.
-- `src/IronPaw.Cli`: Spectre.Console command-center host for terminal execution.
-- `src/IronPaw.Desktop`: WPF host for interactive run/event visualization.
-- `src/IronPaw.Skills.ExampleAddin`: sample add-in that contributes skills as tools.
+- `src/IronPaw.AgentCore.Abstractions`: shared contracts, DTOs, and runtime interfaces (tools, skills, LLM, sessions, memory, run history).
+- `src/IronPaw.AgentCore`: orchestration loop, lane scheduler, system prompt builder with memory injection, transcript repair and truncation.
+- `src/IronPaw.AgentCore.Tools`: built-in tools (file I/O, memory, review, runtime skill creation), policy pipeline, schema normalization, and add-in skill loading.
+- `src/IronPaw.AgentCore.Persistence`: file-based stores for sessions, transcripts, memory, and run history.
+- `src/IronPaw.AgentCore.Providers`: `ILlmClient` implementations (OpenAI, Anthropic, Ollama, LM Studio, local rule-based), provider routing, shared defaults, and factory wiring.
+- `src/IronPaw.Cli`: Spectre.Console terminal host with interactive REPL, slash commands, memory management, and task review.
+- `src/IronPaw.Desktop`: WPF host for interactive run/event visualization (Windows only).
+- `src/IronPaw.Skills.ExampleAddin`: sample add-in that contributes skills as tools (`text_stats`, `slugify`).
 
 ## Build
 

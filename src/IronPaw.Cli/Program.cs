@@ -224,9 +224,8 @@ static async Task<int> RunSingleAsync(
             UserInput: prompt,
             Provider: provider,
             Model: model,
-            ToolPolicy: new ToolSelectionPolicy(
-                Profile: profile,
-                SenderIsOwner: true),
+            ToolPolicy: new ToolSelectionPolicy(Profile: profile),
+            Caller: CallerIdentity.LocalOwner(),
             AutoCreateSkills: autoCreateSkills);
 
         var result = await orchestrator.RunAsync(request, eventSink, ct);

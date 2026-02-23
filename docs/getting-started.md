@@ -102,6 +102,26 @@ dotnet run --project src/IronPaw.Desktop
 
 The WPF app provides a visual interface with provider selection, real-time event streaming, and response display. Windows only.
 
+## Dynamic skill creation (auto-create-skills)
+
+With the `Full` profile and `--auto-create-skills`, the agent can create new tools at runtime by compiling C# via Roslyn. Created skills are persisted to `%LOCALAPPDATA%\IronPaw\skills` and are available across future sessions — no restart needed.
+
+```powershell
+# One-shot: ask the agent to build a tool for you
+dotnet run --project src/IronPaw.Cli -- --provider openai --profile Full --auto-create-skills --prompt "Create a skill that converts Markdown to plain text"
+
+# Interactive: the agent can create tools on demand as you work
+dotnet run --project src/IronPaw.Cli -- --provider openai --profile Full --auto-create-skills
+```
+
+After creation, verify the skill was registered:
+
+```powershell
+dotnet run --project src/IronPaw.Cli -- --list-skills
+```
+
+The persisted skill DLLs live in `%LOCALAPPDATA%\IronPaw\skills` and are loaded automatically on every subsequent launch.
+
 ## Listing available skills
 
 ```powershell

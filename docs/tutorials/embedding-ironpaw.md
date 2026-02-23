@@ -28,9 +28,9 @@ Add these project references (or NuGet packages, if published):
 </ItemGroup>
 ```
 
-## Step 2: Wire up the components
+## Step 2: Wire up the components (quick path)
 
-Here is a minimal setup using the OpenAI provider:
+The easiest approach uses `LlmClientFactory.Build()`, which wires all providers automatically:
 
 ```csharp
 using IronPaw.AgentCore;
@@ -43,12 +43,14 @@ using IronPaw.AgentCore.Tools;
 var stateDir = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
     "MyApp", "state");
-Directory.CreateDirectory(stateDir);
-
 var sessionsDir = Path.Combine(stateDir, "sessions");
+Directory.CreateDirectory(stateDir);
+Directory.CreateDirectory(sessionsDir);
 
 // Persistence
-var sessionStore = new FileSessionStore(Path.Combine(stateDir, "session-store.json"));
+var sessionStore = new FileSessionStore(new FileSessionStoreOptions(
+    StoreFilePath: Path.Combine(stateDir, "session-store.json"),
+    CacheTtl: TimeSpan.FromSeconds(5)));
 var transcriptStore = new JsonTranscriptStore(sessionsDir);
 
 // Tools
@@ -56,15 +58,8 @@ var tools = BuiltInToolFactory.CreateDefault(
     workspaceRoot: Environment.CurrentDirectory);
 var toolRegistry = new InMemoryToolRegistry(tools);
 
-// Provider
-var llmClient = new RoutedLlmClient(
-    providers: new Dictionary<string, ILlmClient>
-    {
-        ["openai"] = new OpenAiLlmClient(
-            () => Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
-            baseUrl: "https://api.openai.com")
-    },
-    fallback: new RuleBasedLlmClient());
+// Provider — wires all providers (local, openai, anthropic, ollama, lmstudio)
+var llmClient = LlmClientFactory.Build();
 
 // Orchestrator
 var orchestrator = new AgentOrchestrator(
@@ -77,7 +72,7 @@ var orchestrator = new AgentOrchestrator(
     llmClient: llmClient,
     transcriptSanitizer: new TranscriptSanitizer(),
     toolResultTruncator: new ToolResultTruncator(),
-    promptBuilder: new DefaultSystemPromptBuilder(toolRegistry));
+    promptBuilder: new DefaultSystemPromptBuilder());
 ```
 
 ## Step 3: Run a request
@@ -88,7 +83,8 @@ var request = new AgentRunRequest(
     UserInput: "What files are in the current directory?",
     Provider: "openai",
     Model: "gpt-4o-mini",
-    ToolPolicy: ToolSelectionPolicy.Default("Coding"));
+    ToolPolicy: new ToolSelectionPolicy(Profile: ToolProfile.Coding),
+    Caller: CallerIdentity.LocalOwner());
 
 var result = await orchestrator.RunAsync(
     request,
@@ -113,15 +109,15 @@ public sealed class MyEventSink : IAgentEventSink
         {
             case AgentEventStream.Assistant when evt.Type == "assistant_delta":
                 // Stream text to UI as it arrives
-                Console.Write(evt.Data?["text"]);
+                Console.Write(evt.Data["text"]);
                 break;
 
             case AgentEventStream.Tool when evt.Type == "tool_call":
-                Console.WriteLine($"\n[Tool: {evt.Data?["name"]}]");
+                Console.WriteLine($"\n[Tool: {evt.Data["name"]}]");
                 break;
 
             case AgentEventStream.Lifecycle when evt.Type == "run_completed":
-                Console.WriteLine($"\n[Done — {evt.Data?["rounds"]} rounds]");
+                Console.WriteLine($"\n[Done — {evt.Data["rounds"]} rounds]");
                 break;
         }
 
@@ -161,22 +157,26 @@ var orchestrator = new AgentOrchestrator(
     runHistoryStore: runHistoryStore);
 ```
 
-## Multiple providers
+## Custom provider wiring
 
-Route between providers by adding more entries to the `RoutedLlmClient`:
+If you only need specific providers, wire them manually instead of using `LlmClientFactory.Build()`:
 
 ```csharp
+var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+
 var llmClient = new RoutedLlmClient(
-    providers: new Dictionary<string, ILlmClient>
+    new Dictionary<string, ILlmClient>(StringComparer.OrdinalIgnoreCase)
     {
         ["openai"] = new OpenAiLlmClient(
-            () => Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
-            baseUrl: "https://api.openai.com"),
+            httpClient,
+            () => Environment.GetEnvironmentVariable("OPENAI_API_KEY")),
         ["anthropic"] = new AnthropicLlmClient(
+            httpClient,
             () => Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")),
         ["ollama"] = new OpenAiLlmClient(
+            httpClient,
             () => "ollama",
-            baseUrl: "http://localhost:11434"),
+            "http://localhost:11434"),
         ["local"] = new RuleBasedLlmClient()
     },
     fallback: new RuleBasedLlmClient());
@@ -190,7 +190,8 @@ var request = new AgentRunRequest(
     UserInput: "Hello",
     Provider: "anthropic",             // route to Anthropic
     Model: "claude-3-5-haiku-latest",
-    ToolPolicy: ToolSelectionPolicy.Default("Coding"));
+    ToolPolicy: new ToolSelectionPolicy(Profile: ToolProfile.Coding),
+    Caller: CallerIdentity.LocalOwner());
 ```
 
 ## Loading skill add-ins
@@ -198,18 +199,17 @@ var request = new AgentRunRequest(
 ```csharp
 using IronPaw.AgentCore.Tools;
 
-var skillTools = SkillAddinLoader.LoadFromDirectories([
+var skillLoadResult = SkillAddinLoader.LoadFromDirectories([
     "./addins/skills",
     Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "IronPaw", "skills")
 ]);
 
-var allTools = BuiltInToolFactory.CreateDefault(workspaceRoot: ".")
-    .Concat(skillTools)
-    .ToList();
-
-var toolRegistry = new InMemoryToolRegistry(allTools);
+var tools = BuiltInToolFactory.CreateDefault(
+    workspaceRoot: Environment.CurrentDirectory,
+    additionalTools: skillLoadResult.SkillTools);
+var toolRegistry = new InMemoryToolRegistry(tools);
 ```
 
 ## Session continuity
@@ -219,14 +219,18 @@ Sessions survive across runs automatically. Use the same `SessionKey` to continu
 ```csharp
 // First interaction
 var result1 = await orchestrator.RunAsync(
-    new AgentRunRequest(new SessionKey("chat-1"), "My name is Alice", "openai", "gpt-4o-mini",
-        ToolSelectionPolicy.Default("Coding")),
+    new AgentRunRequest(
+        new SessionKey("chat-1"), "My name is Alice", "openai", "gpt-4o-mini",
+        new ToolSelectionPolicy(Profile: ToolProfile.Coding),
+        CallerIdentity.LocalOwner()),
     NullAgentEventSink.Instance, ct);
 
 // Second interaction — same session, transcript is preserved
 var result2 = await orchestrator.RunAsync(
-    new AgentRunRequest(new SessionKey("chat-1"), "What is my name?", "openai", "gpt-4o-mini",
-        ToolSelectionPolicy.Default("Coding")),
+    new AgentRunRequest(
+        new SessionKey("chat-1"), "What is my name?", "openai", "gpt-4o-mini",
+        new ToolSelectionPolicy(Profile: ToolProfile.Coding),
+        CallerIdentity.LocalOwner()),
     NullAgentEventSink.Instance, ct);
 
 // result2.FinalAssistantMessage will reference "Alice"
@@ -234,21 +238,22 @@ var result2 = await orchestrator.RunAsync(
 
 ## Tool profiles
 
-Control which tools the agent can use via `ToolSelectionPolicy`:
+Control which tools the agent can use via `ToolSelectionPolicy`.
+The `SenderIsOwner` flag is derived automatically from `CallerIdentity.IsOwner` by the orchestrator — you do not need to set it manually:
 
 ```csharp
 // Only system tools (time, memory, review)
-ToolSelectionPolicy.Default("Minimal")
+new ToolSelectionPolicy(Profile: ToolProfile.Minimal)
 
 // File system + system + skills (default)
-ToolSelectionPolicy.Default("Coding")
+new ToolSelectionPolicy(Profile: ToolProfile.Coding)
 
 // Everything including runtime skill creation
-ToolSelectionPolicy.Default("Full")
+new ToolSelectionPolicy(Profile: ToolProfile.Full)
 
 // Custom: explicit allow/deny lists
 new ToolSelectionPolicy(
-    AllowedGroups: ["group:system", "group:fs"],
+    Profile: ToolProfile.Coding,
     DenyList: ["write_file"])  // allow reads but block writes
 ```
 

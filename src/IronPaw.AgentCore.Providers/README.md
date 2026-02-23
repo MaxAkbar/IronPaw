@@ -1,16 +1,17 @@
 # IronPaw.AgentCore.Providers
 
-`IronPaw.AgentCore.Providers` contains LLM client adapters implementing `ILLMClient`.
+`IronPaw.AgentCore.Providers` contains LLM client adapters implementing `ILlmClient`, provider configuration defaults, and shared factory logic.
 
 ## Responsibilities
 
-- Convert IronPaw’s internal request/delta model into provider-specific HTTP APIs
+- Convert IronPaw's internal request/delta model into provider-specific HTTP APIs
 - Parse provider responses into normalized deltas:
   - `AssistantTextDelta`
   - `ToolCallDelta`
   - `UsageDelta`
   - `CompletedDelta` / `LlmErrorDelta`
 - Route calls to provider clients by name
+- Provide shared provider defaults and factory wiring for all host applications
 
 ## Implementations
 
@@ -27,7 +28,17 @@
   - supports `tool_use` / `tool_result`
   - reads `ANTHROPIC_API_KEY`
 - `RoutedLlmClient.cs`
-  - `provider -> ILLMClient` dispatch with fallback client
+  - `provider -> ILlmClient` dispatch with fallback client
+
+## Shared configuration
+
+- `ProviderDefaults.cs`
+  - canonical `ProviderNames` list and `DefaultModels` dictionary
+  - single source of truth for both CLI and Desktop hosts
+- `LlmClientFactory.cs`
+  - `Build()` — creates a fully wired `RoutedLlmClient` with all providers
+  - `ResolveApiKey()` — resolves an API key from environment with fallback
+  - `ResolveOpenAiCompatibleBaseUrl()` — normalizes base URLs for Ollama/LM Studio
 
 ## Environment variables
 

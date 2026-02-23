@@ -18,7 +18,8 @@ public sealed class WriteFileTool : ITool
                     new("path", "string", "Relative path from workspace root.", true),
                     new("content", "string", "UTF-8 content to write.", true)
                 ]),
-            Group: "group:fs");
+            Group: "group:fs",
+            OwnerOnly: true);
     }
 
     public ToolDescriptor Descriptor { get; }

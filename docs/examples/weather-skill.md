@@ -232,7 +232,7 @@ public async Task WeatherForecast_ReturnsDataForKnownCity()
 
     var result = await skill.ExecuteAsync(
         call,
-        new SkillExecutionContext(RunId.New(), new SessionKey("test")),
+        new SkillExecutionContext(RunId.New(), new SessionKey("test"), "local", "rule-based-v1"),
         CancellationToken.None);
 
     Assert.False(result.IsError);
@@ -251,7 +251,7 @@ public async Task WeatherForecast_ReturnsErrorForMissingCity()
 
     var result = await skill.ExecuteAsync(
         call,
-        new SkillExecutionContext(RunId.New(), new SessionKey("test")),
+        new SkillExecutionContext(RunId.New(), new SessionKey("test"), "local", "rule-based-v1"),
         CancellationToken.None);
 
     Assert.True(result.IsError);

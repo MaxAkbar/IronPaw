@@ -31,7 +31,8 @@ public sealed class CreateSkillTool : ITool
                     "Must include all necessary using statements.",
                     Required: true)
             ]),
-            Group: "group:runtime");
+            Group: "group:runtime",
+            OwnerOnly: true);
     }
 
     public ToolDescriptor Descriptor { get; }

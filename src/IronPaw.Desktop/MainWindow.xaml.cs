@@ -65,9 +65,8 @@ public partial class MainWindow : Window
                 UserInput: prompt,
                 Provider: provider,
                 Model: model,
-                ToolPolicy: new ToolSelectionPolicy(
-                    Profile: ToolProfile.Coding,
-                    SenderIsOwner: true));
+                ToolPolicy: new ToolSelectionPolicy(Profile: ToolProfile.Coding),
+                Caller: CallerIdentity.LocalOwner());
 
             var result = await _orchestrator.RunAsync(
                 request,

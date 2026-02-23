@@ -22,7 +22,8 @@ public sealed class SaveMemoryTool : ITool
                 new("category", "string", "Optional category: preference, fact, context, task.", Required: false),
                 new("scope", "string", "Memory scope: 'global' (default) or 'session'.", Required: false)
             ]),
-            Group: "group:system");
+            Group: "group:system",
+            OwnerOnly: true);
     }
 
     public ToolDescriptor Descriptor { get; }

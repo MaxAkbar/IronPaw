@@ -11,6 +11,8 @@
   - skills/add-ins
   - LLM streaming
   - session/transcript persistence
+  - memory management
+  - run history
 - Provide a single source of truth for cross-project data models.
 
 ## Main file
@@ -24,16 +26,17 @@ All abstractions currently live in this file.
 - **Identity and events**
   - `SessionKey`, `RunId`
   - `AgentEvent`, `AgentEventStream`, `AgentEventSeverity`
-  - `IAgentEventSink`
+  - `IAgentEventSink`, `NullAgentEventSink`
 - **Tools**
-  - `ITool`, `ToolDescriptor`, `ToolCall`, `ToolResult`
-  - `IToolRegistry`, `IToolHookRunner`
+  - `ITool`, `ToolDescriptor`, `ToolCall`, `ToolResult`, `ToolExecutionContext`
+  - `IToolRegistry`, `IToolRegistrar`, `IToolExecutor`, `IToolSchemaNormalizer`
+  - `IToolHookRunner`, `ToolMiddlewareContext`, `NullToolHookRunner`
   - `ToolSelectionPolicy`, `ToolProfile`
 - **Skills / add-ins**
   - `ISkill`, `ISkillAddin`
-  - `SkillDescriptor`, `SkillCall`, `SkillResult`
+  - `SkillDescriptor`, `SkillCall`, `SkillResult`, `SkillExecutionContext`
 - **LLM provider interface**
-  - `ILLMClient`
+  - `ILlmClient`
   - `LlmRequest`, `LlmToolDefinition`, `LlmDelta` (+ derived deltas)
 - **Agent orchestration**
   - `IAgentOrchestrator`
@@ -41,10 +44,19 @@ All abstractions currently live in this file.
 - **Persistence**
   - `ISessionStore`, `SessionEntry`
   - `ITranscriptStore`
+- **Memory**
+  - `IMemoryStore`, `MemoryEntry`, `MemoryScope`
+- **Run history**
+  - `IRunHistoryStore`, `RunSummary`
 - **Safety/runtime helpers**
   - `ISessionLaneScheduler`
   - `ITranscriptSanitizer`
   - `IToolResultTruncator`
+  - `ISystemPromptBuilder`
+- **Messaging**
+  - `ChatMessage`, `ChatRole`
+- **Utility**
+  - `EventData`
 
 ## Dependency rules
 

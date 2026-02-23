@@ -46,7 +46,8 @@ public sealed class AgentOrchestratorTests
                 UserInput: "Create a project plan and write it to Plan.md",
                 Provider: "local",
                 Model: "rule-based-v1",
-                ToolPolicy: new ToolSelectionPolicy(ToolProfile.Coding, SenderIsOwner: true));
+                ToolPolicy: new ToolSelectionPolicy(ToolProfile.Coding),
+                Caller: CallerIdentity.LocalOwner());
             var sink = new CapturingEventSink();
 
             var result = await orchestrator.RunAsync(request, sink, CancellationToken.None);

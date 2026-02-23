@@ -62,6 +62,38 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.Contains(result, tool => tool.Descriptor.Name == "custom");
     }
 
+    [Fact]
+    public void Apply_NonOwner_ExcludesOwnerOnlyBuiltInTools()
+    {
+        var tools = BuiltInToolFactory.CreateDefault(Path.GetTempPath());
+        var policy = new ToolSelectionPolicy(
+            Profile: ToolProfile.Full,
+            SenderIsOwner: false);
+
+        var result = ToolPolicyEvaluator.Apply(tools, policy);
+        var names = result.Select(t => t.Descriptor.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.DoesNotContain("write_file", names);
+        Assert.Contains("read_file", names);
+        Assert.Contains("list_files", names);
+        Assert.Contains("current_time", names);
+    }
+
+    [Fact]
+    public void Apply_Owner_IncludesOwnerOnlyBuiltInTools()
+    {
+        var tools = BuiltInToolFactory.CreateDefault(Path.GetTempPath());
+        var policy = new ToolSelectionPolicy(
+            Profile: ToolProfile.Full,
+            SenderIsOwner: true);
+
+        var result = ToolPolicyEvaluator.Apply(tools, policy);
+        var names = result.Select(t => t.Descriptor.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        Assert.Contains("write_file", names);
+        Assert.Contains("read_file", names);
+    }
+
     private sealed class StubTool : ITool
     {
         public StubTool(string name, string group, bool ownerOnly = false)
