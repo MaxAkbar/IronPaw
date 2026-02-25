@@ -40,6 +40,21 @@ public sealed class WebExtractStructuredTool : ITool
                         type = "boolean",
                         description = "Include extracted ordered/unordered list data. Default true."
                     },
+                    root_selector = new
+                    {
+                        type = "string",
+                        description = "Optional CSS selector to scope extraction to a specific page region."
+                    },
+                    table_selector = new
+                    {
+                        type = "string",
+                        description = "Optional CSS selector for table extraction candidates."
+                    },
+                    list_selector = new
+                    {
+                        type = "string",
+                        description = "Optional CSS selector for list extraction candidates."
+                    },
                     max_items = new
                     {
                         type = "integer",
@@ -81,7 +96,10 @@ public sealed class WebExtractStructuredTool : ITool
             IncludeMetadata: includeMetadata ?? true,
             IncludeTables: includeTables ?? true,
             IncludeLists: includeLists ?? true,
-            MaxItems: Math.Clamp(maxItems ?? 10, 1, 50));
+            MaxItems: Math.Clamp(maxItems ?? 10, 1, 50),
+            RootSelector: TryGetOptionalString(call.Arguments, "root_selector"),
+            TableSelector: TryGetOptionalString(call.Arguments, "table_selector"),
+            ListSelector: TryGetOptionalString(call.Arguments, "list_selector"));
 
         WebStructuredDataResult result;
         try

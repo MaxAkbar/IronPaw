@@ -52,6 +52,7 @@ internal static class DesktopBootstrapper
             paths.AppSkillsDirectory
         ]);
         services.AddSingleton(skillLoadResult);
+        services.AddSingleton<IWebBrowserService, WebBrowserService>();
 
         ISessionStore sessionStore = new FileSessionStore(new FileSessionStoreOptions(
             StoreFilePath: paths.SessionStorePath,
@@ -65,7 +66,8 @@ internal static class DesktopBootstrapper
         {
             var tools = BuiltInToolFactory.CreateDefault(
                 paths.WorkspaceRoot,
-                sp.GetRequiredService<SkillAddinLoadResult>().SkillTools);
+                sp.GetRequiredService<SkillAddinLoadResult>().SkillTools,
+                webBrowserService: sp.GetRequiredService<IWebBrowserService>());
             return new InMemoryToolRegistry(tools);
         });
         services.AddSingleton<IToolRegistry>(sp => sp.GetRequiredService<InMemoryToolRegistry>());

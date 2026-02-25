@@ -49,6 +49,9 @@ Messaging tools use `IAgentMessageBus` and enforce recipient authorization throu
 Key files: `WebNavigateTool.cs`, `WebExtractStructuredTool.cs`, `WebBrowserService.cs`
 
 Web tools return `ContentTrust.Untrusted` and include retry/rate-limit handling in `WebBrowserService`.
+`web_navigate` supports CSS selector controls (`link_selector`, `form_selector`).
+`web_extract_structured` supports CSS scoping/filters (`root_selector`, `table_selector`, `list_selector`).
+`WebBrowserService` also exposes session snapshots for host-level debugging (`GetSessionSnapshots`, `GetSessionSnapshot`).
 
 ### Runtime (`group:runtime`)
 

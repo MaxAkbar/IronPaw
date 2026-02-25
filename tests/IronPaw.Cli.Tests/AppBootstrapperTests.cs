@@ -17,6 +17,7 @@ public sealed class AppBootstrapperTests
         Assert.Contains("web pages", webBrowser.Description, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("web_navigate", webBrowser.ToolPolicy.AllowList ?? []);
         Assert.Contains("web_extract_structured", webBrowser.ToolPolicy.AllowList ?? []);
+        Assert.NotNull(bootstrap.WebBrowserService);
     }
 
     [Fact]

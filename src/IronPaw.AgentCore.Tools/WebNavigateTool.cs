@@ -45,10 +45,20 @@ public sealed class WebNavigateTool : ITool
                         type = "string",
                         description = "Optional text matcher for follow_link/click."
                     },
+                    link_selector = new
+                    {
+                        type = "string",
+                        description = "Optional CSS selector to locate link candidates for follow_link/click."
+                    },
                     form_index = new
                     {
                         type = "integer",
                         description = "Zero-based form index for submit_form. Defaults to 0."
+                    },
+                    form_selector = new
+                    {
+                        type = "string",
+                        description = "Optional CSS selector to locate form candidates for submit_form."
                     },
                     fields = new
                     {
@@ -101,7 +111,9 @@ public sealed class WebNavigateTool : ITool
             Url: TryGetOptionalString(call.Arguments, "url"),
             LinkIndex: linkIndex,
             LinkText: TryGetOptionalString(call.Arguments, "link_text"),
+            LinkSelector: TryGetOptionalString(call.Arguments, "link_selector"),
             FormIndex: formIndex,
+            FormSelector: TryGetOptionalString(call.Arguments, "form_selector"),
             Fields: fields);
 
         WebNavigationResult result;

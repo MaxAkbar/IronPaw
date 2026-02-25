@@ -8,9 +8,10 @@ public static class BuiltInToolFactory
         string workspaceRoot,
         IEnumerable<ITool>? additionalTools = null,
         IMemoryStore? memoryStore = null,
-        IRunHistoryStore? runHistoryStore = null)
+        IRunHistoryStore? runHistoryStore = null,
+        IWebBrowserService? webBrowserService = null)
     {
-        var webBrowser = new WebBrowserService();
+        var webBrowser = webBrowserService ?? new WebBrowserService();
         var tools = new List<ITool>
         {
             new CurrentTimeTool(),

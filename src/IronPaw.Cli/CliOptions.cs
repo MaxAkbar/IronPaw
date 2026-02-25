@@ -215,6 +215,7 @@ internal sealed record CliOptions(
         AnsiConsole.MarkupLine("  Launch without --prompt/--prompt-file to keep running until you type [white]quit[/].");
         AnsiConsole.MarkupLine("  Commands: [white]/help[/], [white]/settings[/], [white]/provider[/], [white]/model[/], [white]/session[/],");
         AnsiConsole.MarkupLine("           [white]/remember[/], [white]/forget[/], [white]/memories[/], [white]/scope-runs[/], [white]/agent-messages[/],");
+        AnsiConsole.MarkupLine("           [white]/web-sessions[/],");
         AnsiConsole.MarkupLine("           [white]/tasks[/], [white]/review[/]");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[bold]Add-in Skill Directories[/]");

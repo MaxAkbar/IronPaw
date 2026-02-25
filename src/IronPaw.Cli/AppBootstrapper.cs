@@ -56,6 +56,7 @@ internal static class AppBootstrapper
             paths.AppSkillsDirectory
         ]);
         services.AddSingleton(skillLoadResult);
+        services.AddSingleton<IWebBrowserService, WebBrowserService>();
 
         services.AddSingleton<InMemoryToolRegistry>(sp =>
         {
@@ -63,7 +64,8 @@ internal static class AppBootstrapper
                 paths.WorkspaceRoot,
                 sp.GetRequiredService<SkillAddinLoadResult>().SkillTools,
                 sp.GetRequiredService<IMemoryStore>(),
-                sp.GetRequiredService<IRunHistoryStore>());
+                sp.GetRequiredService<IRunHistoryStore>(),
+                sp.GetRequiredService<IWebBrowserService>());
             return new InMemoryToolRegistry(builtInTools);
         });
         services.AddSingleton<IToolRegistry>(sp => sp.GetRequiredService<InMemoryToolRegistry>());
@@ -278,6 +280,7 @@ internal sealed class AppBootstrap : IDisposable
         TranscriptStore = _serviceProvider.GetRequiredService<ITranscriptStore>();
         AgentRegistry = _serviceProvider.GetRequiredService<IAgentRegistry>();
         MessageBus = _serviceProvider.GetRequiredService<IAgentMessageBus>();
+        WebBrowserService = _serviceProvider.GetRequiredService<IWebBrowserService>();
     }
 
     public IAgentOrchestrator Orchestrator { get; }
@@ -295,6 +298,8 @@ internal sealed class AppBootstrap : IDisposable
     public IAgentRegistry AgentRegistry { get; }
 
     public IAgentMessageBus MessageBus { get; }
+
+    public IWebBrowserService WebBrowserService { get; }
 
     public void Dispose()
     {

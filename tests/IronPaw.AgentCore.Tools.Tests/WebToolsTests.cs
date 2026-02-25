@@ -54,6 +54,34 @@ public sealed class WebToolsTests
     }
 
     [Fact]
+    public async Task WebNavigateTool_PassesCssSelectors()
+    {
+        var browser = new StubWebBrowserService();
+        var tool = new WebNavigateTool(browser);
+        var call = new ToolCall(
+            Guid.NewGuid().ToString("n"),
+            "web_navigate",
+            JsonSerializer.SerializeToElement(new
+            {
+                action = "submit_form",
+                session_id = "session-1",
+                form_selector = "form.search",
+                form_index = 0,
+                fields = new
+                {
+                    q = "ironpaw"
+                }
+            }));
+
+        var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.NotNull(browser.LastNavigationRequest);
+        Assert.Equal("form.search", browser.LastNavigationRequest!.FormSelector);
+        Assert.Equal("ironpaw", browser.LastNavigationRequest.Fields!["q"]);
+    }
+
+    [Fact]
     public async Task WebExtractStructuredTool_InvalidMaxItems_ReturnsError()
     {
         var browser = new StubWebBrowserService();
@@ -95,6 +123,31 @@ public sealed class WebToolsTests
         Assert.Equal(ContentTrust.Untrusted, result.Trust);
         Assert.NotNull(browser.LastStructuredRequest);
         Assert.Equal(3, browser.LastStructuredRequest!.MaxItems);
+    }
+
+    [Fact]
+    public async Task WebExtractStructuredTool_PassesCssSelectors()
+    {
+        var browser = new StubWebBrowserService();
+        var tool = new WebExtractStructuredTool(browser);
+        var call = new ToolCall(
+            Guid.NewGuid().ToString("n"),
+            "web_extract_structured",
+            JsonSerializer.SerializeToElement(new
+            {
+                session_id = "s2",
+                root_selector = "#main",
+                table_selector = "table.metrics",
+                list_selector = "ul.items"
+            }));
+
+        var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
+
+        Assert.False(result.IsError);
+        Assert.NotNull(browser.LastStructuredRequest);
+        Assert.Equal("#main", browser.LastStructuredRequest!.RootSelector);
+        Assert.Equal("table.metrics", browser.LastStructuredRequest.TableSelector);
+        Assert.Equal("ul.items", browser.LastStructuredRequest.ListSelector);
     }
 
     private static ToolExecutionContext CreateContext(string? agentId = "web_browser")
@@ -153,6 +206,16 @@ public sealed class WebToolsTests
                     [
                         new WebListData(0, "ul", ["x", "y"])
                     ]));
+        }
+
+        public IReadOnlyList<WebSessionSnapshot> GetSessionSnapshots()
+        {
+            return Array.Empty<WebSessionSnapshot>();
+        }
+
+        public WebSessionSnapshot? GetSessionSnapshot(string sessionId)
+        {
+            return null;
         }
     }
 }

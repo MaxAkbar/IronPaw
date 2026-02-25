@@ -98,6 +98,43 @@ public sealed class WebBrowserServiceTests
     }
 
     [Fact]
+    public async Task NavigateAsync_FollowLink_UsesCssSelector()
+    {
+        var handler = new SequencedHandler(
+        [
+            HtmlResponse(HttpStatusCode.OK, """
+                                           <html>
+                                             <body>
+                                               <a class="secondary" href="/ignore">Ignore</a>
+                                               <nav><a class="primary-link" href="/target">Target</a></nav>
+                                             </body>
+                                           </html>
+                                           """),
+            HtmlResponse(HttpStatusCode.OK, "<html><body>target page</body></html>")
+        ]);
+
+        var service = new WebBrowserService(
+            new HttpClient(handler),
+            minHostInterval: TimeSpan.Zero);
+
+        await service.NavigateAsync(
+            new WebNavigationRequest(
+                SessionId: "selector-nav",
+                Action: WebNavigationAction.Open,
+                Url: "https://example.com/start"),
+            CancellationToken.None);
+
+        var follow = await service.NavigateAsync(
+            new WebNavigationRequest(
+                SessionId: "selector-nav",
+                Action: WebNavigationAction.FollowLink,
+                LinkSelector: "a.primary-link"),
+            CancellationToken.None);
+
+        Assert.Equal("https://example.com/target", follow.Url);
+    }
+
+    [Fact]
     public async Task ExtractStructuredDataAsync_ReturnsMetadataTablesAndLists()
     {
         var handler = new SequencedHandler(
@@ -148,6 +185,60 @@ public sealed class WebBrowserServiceTests
         Assert.Single(extracted.Lists);
         Assert.Equal("Widget", extracted.Tables[0].Rows[0][0]);
         Assert.Equal("One", extracted.Lists[0].Items[0]);
+    }
+
+    [Fact]
+    public async Task ExtractStructuredDataAsync_UsesRootAndCssSelectors()
+    {
+        var handler = new SequencedHandler(
+        [
+            HtmlResponse(HttpStatusCode.OK, """
+                                           <html>
+                                             <body>
+                                               <section id="ignore">
+                                                 <table><tr><td>ignore</td></tr></table>
+                                               </section>
+                                               <section id="target">
+                                                 <table class="pricing">
+                                                   <tr><th>Plan</th></tr>
+                                                   <tr><td>Pro</td></tr>
+                                                 </table>
+                                                 <ul class="features">
+                                                   <li>Support</li>
+                                                 </ul>
+                                               </section>
+                                             </body>
+                                           </html>
+                                           """)
+        ]);
+
+        var service = new WebBrowserService(
+            new HttpClient(handler),
+            minHostInterval: TimeSpan.Zero);
+
+        await service.NavigateAsync(
+            new WebNavigationRequest(
+                SessionId: "selector-extract",
+                Action: WebNavigationAction.Open,
+                Url: "https://example.com/source"),
+            CancellationToken.None);
+
+        var extracted = await service.ExtractStructuredDataAsync(
+            new WebStructuredDataRequest(
+                SessionId: "selector-extract",
+                IncludeMetadata: false,
+                IncludeTables: true,
+                IncludeLists: true,
+                MaxItems: 5,
+                RootSelector: "#target",
+                TableSelector: "table.pricing",
+                ListSelector: "ul.features"),
+            CancellationToken.None);
+
+        Assert.Single(extracted.Tables);
+        Assert.Single(extracted.Lists);
+        Assert.Equal("Pro", extracted.Tables[0].Rows[0][0]);
+        Assert.Equal("Support", extracted.Lists[0].Items[0]);
     }
 
     [Fact]
@@ -222,6 +313,42 @@ public sealed class WebBrowserServiceTests
             CancellationToken.None);
 
         Assert.Contains(delays, delay => delay == TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task GetSessionSnapshots_ReturnsLoadedSessionSummary()
+    {
+        var handler = new SequencedHandler(
+        [
+            HtmlResponse(HttpStatusCode.OK, """
+                                           <html>
+                                             <head><title>Snapshot</title></head>
+                                             <body>
+                                               <a href="/n">n</a>
+                                               <form action="/f"></form>
+                                             </body>
+                                           </html>
+                                           """)
+        ]);
+        var service = new WebBrowserService(
+            new HttpClient(handler),
+            minHostInterval: TimeSpan.Zero);
+
+        await service.NavigateAsync(
+            new WebNavigationRequest(
+                SessionId: "snapshot-session",
+                Action: WebNavigationAction.Open,
+                Url: "https://example.com/snapshot"),
+            CancellationToken.None);
+
+        var all = service.GetSessionSnapshots();
+        var single = service.GetSessionSnapshot("snapshot-session");
+
+        Assert.Contains(all, session => session.SessionId == "snapshot-session");
+        Assert.NotNull(single);
+        Assert.Equal("Snapshot", single!.Title);
+        Assert.Equal(1, single.LinkCount);
+        Assert.Equal(1, single.FormCount);
     }
 
     private static HttpResponseMessage HtmlResponse(HttpStatusCode statusCode, string body)

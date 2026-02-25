@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.RegularExpressions;
+using Fizzler.Systems.HtmlAgilityPack;
 using HtmlAgilityPack;
 
 namespace IronPaw.AgentCore.Tools;
@@ -20,7 +21,9 @@ public sealed record WebNavigationRequest(
     string? Url = null,
     int? LinkIndex = null,
     string? LinkText = null,
+    string? LinkSelector = null,
     int? FormIndex = null,
+    string? FormSelector = null,
     IReadOnlyDictionary<string, string>? Fields = null);
 
 public sealed record WebStructuredDataRequest(
@@ -28,7 +31,10 @@ public sealed record WebStructuredDataRequest(
     bool IncludeMetadata = true,
     bool IncludeTables = true,
     bool IncludeLists = true,
-    int MaxItems = 10);
+    int MaxItems = 10,
+    string? RootSelector = null,
+    string? TableSelector = null,
+    string? ListSelector = null);
 
 public sealed record WebLinkSummary(
     int Index,
@@ -72,11 +78,25 @@ public sealed record WebStructuredDataResult(
     IReadOnlyList<WebTableData> Tables,
     IReadOnlyList<WebListData> Lists);
 
+public sealed record WebSessionSnapshot(
+    string SessionId,
+    string Url,
+    string? Title,
+    DateTimeOffset RetrievedAt,
+    int StatusCode,
+    string? MediaType,
+    int LinkCount,
+    int FormCount);
+
 public interface IWebBrowserService
 {
     Task<WebNavigationResult> NavigateAsync(WebNavigationRequest request, CancellationToken ct);
 
     Task<WebStructuredDataResult> ExtractStructuredDataAsync(WebStructuredDataRequest request, CancellationToken ct);
+
+    IReadOnlyList<WebSessionSnapshot> GetSessionSnapshots();
+
+    WebSessionSnapshot? GetSessionSnapshot(string sessionId);
 }
 
 public sealed class WebBrowserService : IWebBrowserService
@@ -124,6 +144,39 @@ public sealed class WebBrowserService : IWebBrowserService
         _delayAsync = delayAsync ?? Task.Delay;
     }
 
+    public IReadOnlyList<WebSessionSnapshot> GetSessionSnapshots()
+    {
+        var snapshots = new List<WebSessionSnapshot>();
+        foreach (var (sessionId, session) in _sessions)
+        {
+            if (TryBuildSessionSnapshot(sessionId, session, out var snapshot))
+            {
+                snapshots.Add(snapshot);
+            }
+        }
+
+        return snapshots
+            .OrderByDescending(snapshot => snapshot.RetrievedAt)
+            .ToArray();
+    }
+
+    public WebSessionSnapshot? GetSessionSnapshot(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return null;
+        }
+
+        if (!_sessions.TryGetValue(sessionId.Trim(), out var session))
+        {
+            return null;
+        }
+
+        return TryBuildSessionSnapshot(sessionId.Trim(), session, out var snapshot)
+            ? snapshot
+            : null;
+    }
+
     public async Task<WebNavigationResult> NavigateAsync(WebNavigationRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -142,17 +195,20 @@ public sealed class WebBrowserService : IWebBrowserService
                     session,
                     request.LinkIndex,
                     request.LinkText,
+                    request.LinkSelector,
                     ct),
                 WebNavigationAction.Click => await NavigateFollowLinkAsync(
                     sessionId,
                     session,
                     request.LinkIndex,
                     request.LinkText,
+                    request.LinkSelector,
                     ct),
                 WebNavigationAction.SubmitForm => await NavigateSubmitFormAsync(
                     sessionId,
                     session,
                     request.FormIndex,
+                    request.FormSelector,
                     request.Fields,
                     ct),
                 _ => throw new ArgumentOutOfRangeException(nameof(request.Action), request.Action, "Unsupported action.")
@@ -187,15 +243,16 @@ public sealed class WebBrowserService : IWebBrowserService
 
             var maxItems = Math.Clamp(request.MaxItems, 1, 50);
             var document = LoadDocument(page.Html);
+            var rootNode = ResolveExtractionRoot(document, request.RootSelector);
             var title = ExtractTitle(document);
             var metadata = request.IncludeMetadata
                 ? ExtractMetadata(document, page.Uri, title)
                 : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var tables = request.IncludeTables
-                ? ExtractTables(document, maxItems)
+                ? ExtractTables(rootNode, maxItems, request.TableSelector)
                 : Array.Empty<WebTableData>();
             var lists = request.IncludeLists
-                ? ExtractLists(document, maxItems)
+                ? ExtractLists(rootNode, maxItems, request.ListSelector)
                 : Array.Empty<WebListData>();
 
             return new WebStructuredDataResult(
@@ -235,22 +292,30 @@ public sealed class WebBrowserService : IWebBrowserService
         BrowserSessionState session,
         int? linkIndex,
         string? linkText,
+        string? linkSelector,
         CancellationToken ct)
     {
         var currentPage = session.CurrentPage
             ?? throw new InvalidOperationException(
                 $"No active page is loaded for session '{sessionId}'. Navigate first.");
 
-        if (linkIndex is null && string.IsNullOrWhiteSpace(linkText))
+        if (linkIndex is null &&
+            string.IsNullOrWhiteSpace(linkText) &&
+            string.IsNullOrWhiteSpace(linkSelector))
         {
-            throw new ArgumentException("Provide link_index or link_text to follow/click a link.");
+            throw new ArgumentException("Provide link_selector, link_index, or link_text to follow/click a link.");
         }
 
         var document = LoadDocument(currentPage.Html);
-        var links = ExtractLinks(document, currentPage.Uri, maxItems: 250);
+        var links = string.IsNullOrWhiteSpace(linkSelector)
+            ? ExtractLinks(document.DocumentNode, currentPage.Uri, maxItems: 250, selector: null)
+            : ExtractLinks(document.DocumentNode, currentPage.Uri, maxItems: 250, selector: linkSelector);
         if (links.Count == 0)
         {
-            throw new InvalidOperationException("The current page has no navigable links.");
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(linkSelector)
+                    ? "The current page has no navigable links."
+                    : $"No navigable links matched selector '{linkSelector}'.");
         }
 
         var selected = SelectLink(links, linkIndex, linkText);
@@ -264,6 +329,7 @@ public sealed class WebBrowserService : IWebBrowserService
         string sessionId,
         BrowserSessionState session,
         int? formIndex,
+        string? formSelector,
         IReadOnlyDictionary<string, string>? fields,
         CancellationToken ct)
     {
@@ -272,10 +338,13 @@ public sealed class WebBrowserService : IWebBrowserService
                 $"No active page is loaded for session '{sessionId}'. Navigate first.");
 
         var document = LoadDocument(currentPage.Html);
-        var forms = ExtractForms(document, currentPage.Uri, maxItems: 100);
+        var forms = ExtractForms(document.DocumentNode, currentPage.Uri, maxItems: 100, selector: formSelector);
         if (forms.Count == 0)
         {
-            throw new InvalidOperationException("The current page has no forms to submit.");
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(formSelector)
+                    ? "The current page has no forms to submit."
+                    : $"No forms matched selector '{formSelector}'.");
         }
 
         var resolvedIndex = formIndex ?? 0;
@@ -457,8 +526,8 @@ public sealed class WebBrowserService : IWebBrowserService
         var title = ExtractTitle(document);
         var metadata = ExtractMetadata(document, page.Uri, title);
         metadata.TryGetValue("description", out var description);
-        var links = ExtractLinks(document, page.Uri, _previewLimit);
-        var forms = ExtractForms(document, page.Uri, _previewLimit)
+        var links = ExtractLinks(document.DocumentNode, page.Uri, _previewLimit, selector: null);
+        var forms = ExtractForms(document.DocumentNode, page.Uri, _previewLimit, selector: null)
             .Select(form => new WebFormSummary(
                 Index: form.Index,
                 Method: form.Method,
@@ -555,10 +624,10 @@ public sealed class WebBrowserService : IWebBrowserService
         return metadata;
     }
 
-    private static IReadOnlyList<WebTableData> ExtractTables(HtmlDocument document, int maxItems)
+    private static IReadOnlyList<WebTableData> ExtractTables(HtmlNode rootNode, int maxItems, string? selector)
     {
-        var tableNodes = document.DocumentNode.SelectNodes("//table");
-        if (tableNodes is null || tableNodes.Count == 0)
+        var tableNodes = ResolveTableNodes(rootNode, selector);
+        if (tableNodes.Count == 0)
         {
             return Array.Empty<WebTableData>();
         }
@@ -635,10 +704,10 @@ public sealed class WebBrowserService : IWebBrowserService
         return tables;
     }
 
-    private static IReadOnlyList<WebListData> ExtractLists(HtmlDocument document, int maxItems)
+    private static IReadOnlyList<WebListData> ExtractLists(HtmlNode rootNode, int maxItems, string? selector)
     {
-        var listNodes = document.DocumentNode.SelectNodes("//ul|//ol");
-        if (listNodes is null || listNodes.Count == 0)
+        var listNodes = ResolveListNodes(rootNode, selector);
+        if (listNodes.Count == 0)
         {
             return Array.Empty<WebListData>();
         }
@@ -678,10 +747,14 @@ public sealed class WebBrowserService : IWebBrowserService
         return lists;
     }
 
-    private static IReadOnlyList<WebLinkSummary> ExtractLinks(HtmlDocument document, Uri pageUri, int maxItems)
+    private static IReadOnlyList<WebLinkSummary> ExtractLinks(
+        HtmlNode rootNode,
+        Uri pageUri,
+        int maxItems,
+        string? selector)
     {
-        var linkNodes = document.DocumentNode.SelectNodes("//a[@href]");
-        if (linkNodes is null || linkNodes.Count == 0)
+        var linkNodes = ResolveLinkNodes(rootNode, selector);
+        if (linkNodes.Count == 0)
         {
             return Array.Empty<WebLinkSummary>();
         }
@@ -721,10 +794,14 @@ public sealed class WebBrowserService : IWebBrowserService
         return links;
     }
 
-    private static IReadOnlyList<WebFormInfo> ExtractForms(HtmlDocument document, Uri pageUri, int maxItems)
+    private static IReadOnlyList<WebFormInfo> ExtractForms(
+        HtmlNode rootNode,
+        Uri pageUri,
+        int maxItems,
+        string? selector)
     {
-        var formNodes = document.DocumentNode.SelectNodes("//form");
-        if (formNodes is null || formNodes.Count == 0)
+        var formNodes = ResolveFormNodes(rootNode, selector);
+        if (formNodes.Count == 0)
         {
             return Array.Empty<WebFormInfo>();
         }
@@ -796,7 +873,7 @@ public sealed class WebBrowserService : IWebBrowserService
         var requestedText = linkText?.Trim();
         if (string.IsNullOrWhiteSpace(requestedText))
         {
-            throw new ArgumentException("Provide link_index or link_text to follow/click a link.");
+            return links[0];
         }
 
         var match = links.FirstOrDefault(link =>
@@ -806,6 +883,187 @@ public sealed class WebBrowserService : IWebBrowserService
 
         return match ?? throw new InvalidOperationException(
             $"No link matched '{requestedText}'. Use link_index for deterministic navigation.");
+    }
+
+    private static HtmlNode ResolveExtractionRoot(HtmlDocument document, string? rootSelector)
+    {
+        if (string.IsNullOrWhiteSpace(rootSelector))
+        {
+            return document.DocumentNode;
+        }
+
+        var selector = rootSelector.Trim();
+        try
+        {
+            var node = document.DocumentNode.QuerySelector(selector);
+            return node ?? throw new InvalidOperationException(
+                $"No node matched root_selector '{selector}'.");
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            throw new ArgumentException(
+                $"Invalid CSS selector for root_selector: {ex.Message}",
+                nameof(rootSelector));
+        }
+    }
+
+    private static IReadOnlyList<HtmlNode> ResolveTableNodes(HtmlNode rootNode, string? selector)
+    {
+        if (string.IsNullOrWhiteSpace(selector))
+        {
+            return rootNode.SelectNodes(".//table")?.ToArray() ?? Array.Empty<HtmlNode>();
+        }
+
+        var selected = SelectNodesByCss(rootNode, selector, "table_selector");
+        var tables = new List<HtmlNode>();
+        foreach (var node in selected)
+        {
+            if (node.Name.Equals("table", StringComparison.OrdinalIgnoreCase))
+            {
+                AddDistinctNode(tables, node);
+                continue;
+            }
+
+            var nestedTables = node.SelectNodes(".//table");
+            if (nestedTables is null)
+            {
+                continue;
+            }
+
+            foreach (var nested in nestedTables)
+            {
+                AddDistinctNode(tables, nested);
+            }
+        }
+
+        return tables;
+    }
+
+    private static IReadOnlyList<HtmlNode> ResolveListNodes(HtmlNode rootNode, string? selector)
+    {
+        if (string.IsNullOrWhiteSpace(selector))
+        {
+            return rootNode.SelectNodes(".//ul|.//ol")?.ToArray() ?? Array.Empty<HtmlNode>();
+        }
+
+        var selected = SelectNodesByCss(rootNode, selector, "list_selector");
+        var lists = new List<HtmlNode>();
+        foreach (var node in selected)
+        {
+            if (node.Name.Equals("ul", StringComparison.OrdinalIgnoreCase) ||
+                node.Name.Equals("ol", StringComparison.OrdinalIgnoreCase))
+            {
+                AddDistinctNode(lists, node);
+                continue;
+            }
+
+            var nestedLists = node.SelectNodes(".//ul|.//ol");
+            if (nestedLists is null)
+            {
+                continue;
+            }
+
+            foreach (var nested in nestedLists)
+            {
+                AddDistinctNode(lists, nested);
+            }
+        }
+
+        return lists;
+    }
+
+    private static IReadOnlyList<HtmlNode> ResolveLinkNodes(HtmlNode rootNode, string? selector)
+    {
+        if (string.IsNullOrWhiteSpace(selector))
+        {
+            return rootNode.SelectNodes(".//a[@href]")?.ToArray() ?? Array.Empty<HtmlNode>();
+        }
+
+        var selected = SelectNodesByCss(rootNode, selector, "link_selector");
+        var links = new List<HtmlNode>();
+        foreach (var node in selected)
+        {
+            if (node.Name.Equals("a", StringComparison.OrdinalIgnoreCase) &&
+                node.Attributes["href"] is not null)
+            {
+                AddDistinctNode(links, node);
+                continue;
+            }
+
+            var descendant = node.SelectSingleNode(".//a[@href]");
+            if (descendant is not null)
+            {
+                AddDistinctNode(links, descendant);
+            }
+        }
+
+        return links;
+    }
+
+    private static IReadOnlyList<HtmlNode> ResolveFormNodes(HtmlNode rootNode, string? selector)
+    {
+        if (string.IsNullOrWhiteSpace(selector))
+        {
+            return rootNode.SelectNodes(".//form")?.ToArray() ?? Array.Empty<HtmlNode>();
+        }
+
+        var selected = SelectNodesByCss(rootNode, selector, "form_selector");
+        var forms = new List<HtmlNode>();
+        foreach (var node in selected)
+        {
+            if (node.Name.Equals("form", StringComparison.OrdinalIgnoreCase))
+            {
+                AddDistinctNode(forms, node);
+                continue;
+            }
+
+            var ancestor = node.Ancestors("form").FirstOrDefault();
+            if (ancestor is not null)
+            {
+                AddDistinctNode(forms, ancestor);
+                continue;
+            }
+
+            var descendant = node.SelectSingleNode(".//form");
+            if (descendant is not null)
+            {
+                AddDistinctNode(forms, descendant);
+            }
+        }
+
+        return forms;
+    }
+
+    private static IReadOnlyList<HtmlNode> SelectNodesByCss(
+        HtmlNode rootNode,
+        string selector,
+        string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(selector))
+        {
+            return Array.Empty<HtmlNode>();
+        }
+
+        try
+        {
+            return rootNode.QuerySelectorAll(selector.Trim()).ToArray();
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException(
+                $"Invalid CSS selector for {parameterName}: {ex.Message}",
+                parameterName);
+        }
+    }
+
+    private static void AddDistinctNode(List<HtmlNode> collection, HtmlNode node)
+    {
+        if (collection.Contains(node))
+        {
+            return;
+        }
+
+        collection.Add(node);
     }
 
     private static Uri BuildGetUri(Uri actionUri, IReadOnlyDictionary<string, string> fields)
@@ -871,6 +1129,34 @@ public sealed class WebBrowserService : IWebBrowserService
     {
         return uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
                uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool TryBuildSessionSnapshot(
+        string sessionId,
+        BrowserSessionState session,
+        out WebSessionSnapshot snapshot)
+    {
+        snapshot = default!;
+        var page = session.CurrentPage;
+        if (page is null)
+        {
+            return false;
+        }
+
+        var document = LoadDocument(page.Html);
+        var title = ExtractTitle(document);
+        var links = ExtractLinks(document.DocumentNode, page.Uri, _previewLimit, selector: null);
+        var forms = ExtractForms(document.DocumentNode, page.Uri, _previewLimit, selector: null);
+        snapshot = new WebSessionSnapshot(
+            SessionId: sessionId,
+            Url: page.Uri.ToString(),
+            Title: title,
+            RetrievedAt: page.RetrievedAt,
+            StatusCode: page.StatusCode,
+            MediaType: page.MediaType,
+            LinkCount: links.Count,
+            FormCount: forms.Count);
+        return true;
     }
 
     private static bool ShouldRetry(HttpStatusCode statusCode)

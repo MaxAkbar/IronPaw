@@ -28,6 +28,7 @@ internal static class ConsoleUi
         AnsiConsole.MarkupLine("  [white]/sessions[/]   List all sessions");
         AnsiConsole.MarkupLine("  [white]/session-detail[/] Inspect a session's files and stats");
         AnsiConsole.MarkupLine("  [white]/agent-messages[/] Inspect scoped agent inboxes (peek by default)");
+        AnsiConsole.MarkupLine("  [white]/web-sessions[/] Inspect web browser sessions for debugging/tracing");
         AnsiConsole.MarkupLine("  [white]/tasks[/]      List recent task runs");
         AnsiConsole.MarkupLine("  [white]/review[/]     Review a specific task run");
         AnsiConsole.MarkupLine("  [white]quit[/]        Exit the app");
@@ -413,6 +414,64 @@ internal static class ConsoleUi
         }
 
         AnsiConsole.Write(table);
+    }
+
+    public static void RenderWebSessionList(IReadOnlyList<WebSessionSnapshot> sessions)
+    {
+        AnsiConsole.Write(new Rule("[grey]Web Sessions[/]").LeftJustified());
+        if (sessions.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No active web sessions found.[/]");
+            return;
+        }
+
+        var table = new Table()
+            .RoundedBorder()
+            .AddColumn("[bold]Session ID[/]")
+            .AddColumn("[bold]URL[/]")
+            .AddColumn("[bold]Title[/]")
+            .AddColumn("[bold]Fetched[/]")
+            .AddColumn("[bold]Status[/]")
+            .AddColumn("[bold]Links[/]")
+            .AddColumn("[bold]Forms[/]");
+
+        foreach (var session in sessions)
+        {
+            var title = string.IsNullOrWhiteSpace(session.Title) ? "-" : session.Title;
+            var url = session.Url.Length > 70 ? session.Url[..70] + "..." : session.Url;
+
+            table.AddRow(
+                $"[deepskyblue1]{Markup.Escape(session.SessionId)}[/]",
+                $"[white]{Markup.Escape(url)}[/]",
+                $"[white]{Markup.Escape(title)}[/]",
+                $"[grey70]{Markup.Escape(session.RetrievedAt.ToLocalTime().ToString("g"))}[/]",
+                $"[white]{session.StatusCode}[/]",
+                $"[white]{session.LinkCount}[/]",
+                $"[white]{session.FormCount}[/]");
+        }
+
+        AnsiConsole.Write(table);
+    }
+
+    public static void RenderWebSessionDetail(WebSessionSnapshot session)
+    {
+        AnsiConsole.Write(new Rule("[grey]Web Session Detail[/]").LeftJustified());
+
+        var info = new Table()
+            .RoundedBorder()
+            .AddColumn("[bold]Field[/]")
+            .AddColumn("[bold]Value[/]");
+
+        info.AddRow("Session ID", $"[deepskyblue1]{Markup.Escape(session.SessionId)}[/]");
+        info.AddRow("URL", $"[white]{Markup.Escape(session.Url)}[/]");
+        info.AddRow("Title", $"[white]{Markup.Escape(session.Title ?? "-")}[/]");
+        info.AddRow("Fetched", $"[white]{Markup.Escape(session.RetrievedAt.ToLocalTime().ToString("O"))}[/]");
+        info.AddRow("Status", $"[white]{session.StatusCode}[/]");
+        info.AddRow("Media Type", $"[white]{Markup.Escape(session.MediaType ?? "-")}[/]");
+        info.AddRow("Preview Links", $"[white]{session.LinkCount}[/]");
+        info.AddRow("Preview Forms", $"[white]{session.FormCount}[/]");
+
+        AnsiConsole.Write(info);
     }
 
     public static void RenderSuccess(string message)

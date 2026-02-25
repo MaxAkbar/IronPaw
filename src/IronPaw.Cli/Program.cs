@@ -133,7 +133,8 @@ try
                 bootstrap.SessionStore,
                 bootstrap.TranscriptStore,
                 bootstrap.AgentRegistry,
-                bootstrap.MessageBus))
+                bootstrap.MessageBus,
+                bootstrap.WebBrowserService))
         {
             continue;
         }

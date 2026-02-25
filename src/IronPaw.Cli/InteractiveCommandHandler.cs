@@ -1,4 +1,5 @@
 using IronPaw.AgentCore.Abstractions;
+using IronPaw.AgentCore.Tools;
 using Spectre.Console;
 
 namespace IronPaw.Cli;
@@ -18,7 +19,8 @@ internal static class InteractiveCommandHandler
         ISessionStore sessionStore,
         ITranscriptStore transcriptStore,
         IAgentRegistry agentRegistry,
-        IAgentMessageBus messageBus)
+        IAgentMessageBus messageBus,
+        IWebBrowserService webBrowserService)
     {
         var command = promptOrCommand.Trim();
         if (!command.StartsWith("/", StringComparison.Ordinal))
@@ -34,6 +36,11 @@ internal static class InteractiveCommandHandler
         if (command.StartsWith("/scope-runs", StringComparison.OrdinalIgnoreCase))
         {
             return HandleScopeRunsCommand(command, sessionKey, runHistoryStore);
+        }
+
+        if (command.StartsWith("/web-sessions", StringComparison.OrdinalIgnoreCase))
+        {
+            return HandleWebSessionsCommand(command, webBrowserService);
         }
 
         switch (command.ToLowerInvariant())
@@ -436,5 +443,33 @@ internal static class InteractiveCommandHandler
         }
 
         return agentRegistry.GetAll().Select(definition => definition.AgentId).ToArray();
+    }
+
+    private static bool HandleWebSessionsCommand(string command, IWebBrowserService webBrowserService)
+    {
+        var tokens = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length == 1)
+        {
+            var snapshots = webBrowserService.GetSessionSnapshots();
+            ConsoleUi.RenderWebSessionList(snapshots);
+            return true;
+        }
+
+        var sessionId = tokens[1].Trim();
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            ConsoleUi.RenderWarning("Usage: /web-sessions [session-id]");
+            return true;
+        }
+
+        var snapshot = webBrowserService.GetSessionSnapshot(sessionId);
+        if (snapshot is null)
+        {
+            ConsoleUi.RenderWarning($"No active web session found for '{sessionId}'.");
+            return true;
+        }
+
+        ConsoleUi.RenderWebSessionDetail(snapshot);
+        return true;
     }
 }
