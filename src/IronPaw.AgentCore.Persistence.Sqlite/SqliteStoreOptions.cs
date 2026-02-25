@@ -4,4 +4,5 @@ public sealed record SqliteStoreOptions(
     string DatabasePath,
     int MaxGlobalMemories = 100,
     int MaxSessionMemories = 50,
-    int MaxMemoryContentChars = 500);
+    int MaxMemoryContentChars = 500,
+    int MessageTtlDays = 30);

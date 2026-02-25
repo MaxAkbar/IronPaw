@@ -16,12 +16,24 @@ internal static class InteractiveCommandHandler
         IMemoryStore memoryStore,
         IRunHistoryStore runHistoryStore,
         ISessionStore sessionStore,
-        ITranscriptStore transcriptStore)
+        ITranscriptStore transcriptStore,
+        IAgentRegistry agentRegistry,
+        IAgentMessageBus messageBus)
     {
         var command = promptOrCommand.Trim();
         if (!command.StartsWith("/", StringComparison.Ordinal))
         {
             return false;
+        }
+
+        if (command.StartsWith("/agent-messages", StringComparison.OrdinalIgnoreCase))
+        {
+            return HandleAgentMessagesCommand(command, sessionKey, agentRegistry, messageBus);
+        }
+
+        if (command.StartsWith("/scope-runs", StringComparison.OrdinalIgnoreCase))
+        {
+            return HandleScopeRunsCommand(command, sessionKey, runHistoryStore);
         }
 
         switch (command.ToLowerInvariant())
@@ -226,5 +238,203 @@ internal static class InteractiveCommandHandler
                 ConsoleUi.RenderWarning($"Unknown command '{command}'. Type /help for commands.");
                 return true;
         }
+    }
+
+    private static bool HandleAgentMessagesCommand(
+        string command,
+        SessionKey sessionKey,
+        IAgentRegistry agentRegistry,
+        IAgentMessageBus messageBus)
+    {
+        var tokens = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length < 2)
+        {
+            ConsoleUi.RenderWarning("Usage: /agent-messages <scope-run-id> [agent-id] [--max N] [--consume] [--sender agent-id] [--correlation id]");
+            return true;
+        }
+
+        RunId scopeRunId;
+        try
+        {
+            scopeRunId = new RunId(tokens[1]);
+        }
+        catch (ArgumentException ex)
+        {
+            ConsoleUi.RenderWarning(ex.Message);
+            return true;
+        }
+
+        var index = 2;
+        string? agentIdFilter = null;
+        string? senderFilter = null;
+        string? correlationFilter = null;
+        if (index < tokens.Length && !tokens[index].StartsWith("--", StringComparison.Ordinal))
+        {
+            agentIdFilter = tokens[index].Trim();
+            index++;
+        }
+
+        var maxMessages = 20;
+        var markAsRead = false;
+        while (index < tokens.Length)
+        {
+            var token = tokens[index].Trim();
+            switch (token.ToLowerInvariant())
+            {
+                case "--consume":
+                    markAsRead = true;
+                    index++;
+                    break;
+
+                case "--peek":
+                    markAsRead = false;
+                    index++;
+                    break;
+
+                case "--max":
+                    if (index + 1 >= tokens.Length ||
+                        !int.TryParse(tokens[index + 1], out var parsedMax) ||
+                        parsedMax <= 0)
+                    {
+                        ConsoleUi.RenderWarning("Invalid --max value. Use a positive integer.");
+                        return true;
+                    }
+
+                    maxMessages = Math.Clamp(parsedMax, 1, 100);
+                    index += 2;
+                    break;
+
+                case "--sender":
+                    if (index + 1 >= tokens.Length || string.IsNullOrWhiteSpace(tokens[index + 1]))
+                    {
+                        ConsoleUi.RenderWarning("Invalid --sender value. Provide an agent ID.");
+                        return true;
+                    }
+
+                    senderFilter = tokens[index + 1].Trim();
+                    index += 2;
+                    break;
+
+                case "--correlation":
+                    if (index + 1 >= tokens.Length || string.IsNullOrWhiteSpace(tokens[index + 1]))
+                    {
+                        ConsoleUi.RenderWarning("Invalid --correlation value. Provide a correlation ID.");
+                        return true;
+                    }
+
+                    correlationFilter = tokens[index + 1].Trim();
+                    index += 2;
+                    break;
+
+                default:
+                    ConsoleUi.RenderWarning($"Unknown option '{token}'. Usage: /agent-messages <scope-run-id> [agent-id] [--max N] [--consume] [--sender agent-id] [--correlation id]");
+                    return true;
+            }
+        }
+
+        var recipients = ResolveRecipients(agentRegistry, agentIdFilter);
+        if (recipients.Count == 0)
+        {
+            if (!string.IsNullOrWhiteSpace(agentIdFilter))
+            {
+                ConsoleUi.RenderWarning($"Agent '{agentIdFilter}' is not registered.");
+            }
+            else
+            {
+                ConsoleUi.RenderWarning("No agents available for inbox inspection.");
+            }
+
+            return true;
+        }
+
+        var messages = new List<AgentMessage>();
+        foreach (var recipient in recipients)
+        {
+            var inboxMessages = messageBus.ReadAsync(
+                    new AgentMessageReadRequest(
+                        SessionKey: sessionKey,
+                        ScopeRunId: scopeRunId,
+                        RecipientAgentId: recipient,
+                        MaxMessages: maxMessages,
+                        MarkAsRead: markAsRead,
+                        SenderAgentId: senderFilter,
+                        CorrelationId: correlationFilter),
+                    CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+
+            messages.AddRange(inboxMessages);
+        }
+
+        var ordered = messages
+            .OrderBy(message => message.SentAt)
+            .ToArray();
+        ConsoleUi.RenderAgentMessages(
+            sessionKey.Value,
+            scopeRunId.Value,
+            ordered,
+            markAsRead,
+            senderFilter,
+            correlationFilter);
+        return true;
+    }
+
+    private static bool HandleScopeRunsCommand(
+        string command,
+        SessionKey sessionKey,
+        IRunHistoryStore runHistoryStore)
+    {
+        var tokens = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var limit = 20;
+
+        for (var i = 1; i < tokens.Length; i++)
+        {
+            var token = tokens[i].Trim();
+            if (token.Equals("--limit", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 >= tokens.Length ||
+                    !int.TryParse(tokens[i + 1], out var parsedLimit) ||
+                    parsedLimit <= 0)
+                {
+                    ConsoleUi.RenderWarning("Invalid --limit value. Use a positive integer.");
+                    return true;
+                }
+
+                limit = Math.Clamp(parsedLimit, 1, 100);
+                i++;
+                continue;
+            }
+
+            if (!int.TryParse(token, out var shorthandLimit) || shorthandLimit <= 0)
+            {
+                ConsoleUi.RenderWarning("Usage: /scope-runs [--limit N]");
+                return true;
+            }
+
+            limit = Math.Clamp(shorthandLimit, 1, 100);
+        }
+
+        var runs = runHistoryStore.LoadBySessionAsync(sessionKey, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult()
+            .OrderByDescending(run => run.StartedAt)
+            .Take(limit)
+            .ToArray();
+
+        ConsoleUi.RenderScopeRuns(sessionKey.Value, runs);
+        return true;
+    }
+
+    private static IReadOnlyList<string> ResolveRecipients(IAgentRegistry agentRegistry, string? agentIdFilter)
+    {
+        if (!string.IsNullOrWhiteSpace(agentIdFilter))
+        {
+            var definition = agentRegistry.Get(agentIdFilter.Trim());
+            return definition is null
+                ? Array.Empty<string>()
+                : [definition.AgentId];
+        }
+
+        return agentRegistry.GetAll().Select(definition => definition.AgentId).ToArray();
     }
 }

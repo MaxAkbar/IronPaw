@@ -10,14 +10,16 @@ namespace IronPaw.Cli;
 
 internal static class AppBootstrapper
 {
-    public static AppBootstrap Build(StoreBackend storeBackend = StoreBackend.Json)
+    public static AppBootstrap Build(
+        StoreBackend storeBackend = StoreBackend.Json,
+        int messageTtlDays = 30)
     {
         var paths = ResolvePaths();
         Directory.CreateDirectory(paths.StateRoot);
         Directory.CreateDirectory(paths.AppSkillsDirectory);
 
         var services = new ServiceCollection();
-        ConfigureServices(services, storeBackend, paths);
+        ConfigureServices(services, storeBackend, messageTtlDays, paths);
 
         var serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions
         {
@@ -40,9 +42,13 @@ internal static class AppBootstrapper
             StateRoot: Path.Combine(appDataRoot, "state"));
     }
 
-    private static void ConfigureServices(IServiceCollection services, StoreBackend storeBackend, BootstrapPaths paths)
+    private static void ConfigureServices(
+        IServiceCollection services,
+        StoreBackend storeBackend,
+        int messageTtlDays,
+        BootstrapPaths paths)
     {
-        RegisterStores(services, storeBackend, paths.StateRoot);
+        RegisterStores(services, storeBackend, paths.StateRoot, messageTtlDays);
 
         var skillLoadResult = SkillAddinLoader.LoadFromDirectories(
         [
@@ -93,12 +99,16 @@ internal static class AppBootstrapper
         });
     }
 
-    private static void RegisterStores(IServiceCollection services, StoreBackend storeBackend, string stateRoot)
+    private static void RegisterStores(
+        IServiceCollection services,
+        StoreBackend storeBackend,
+        string stateRoot,
+        int messageTtlDays)
     {
         switch (storeBackend)
         {
             case StoreBackend.Sqlite:
-                RegisterSqliteStores(services, stateRoot);
+                RegisterSqliteStores(services, stateRoot, messageTtlDays);
                 break;
             default:
                 RegisterJsonStores(services, stateRoot);
@@ -124,15 +134,16 @@ internal static class AppBootstrapper
         services.AddSingleton(runHistoryStore);
         services.AddSingleton(sessionStore);
         services.AddSingleton(transcriptStore);
+        services.AddSingleton<IAgentMessageBus, InMemoryAgentMessageBus>();
     }
 
-    private static void RegisterSqliteStores(IServiceCollection services, string stateRoot)
+    private static void RegisterSqliteStores(IServiceCollection services, string stateRoot, int messageTtlDays)
     {
         var dbPath = Path.Combine(stateRoot, "ironpaw.db");
         var connectionString = SqliteSchemaInitializer.BuildConnectionString(dbPath);
         SqliteSchemaInitializer.Initialize(connectionString);
 
-        var options = new SqliteStoreOptions(dbPath);
+        var options = new SqliteStoreOptions(dbPath, MessageTtlDays: messageTtlDays);
         IMemoryStore memoryStore = new SqliteMemoryStore(options);
         IRunHistoryStore runHistoryStore = new SqliteRunHistoryStore(options);
         ISessionStore sessionStore = new SqliteSessionStore(options);
@@ -142,16 +153,21 @@ internal static class AppBootstrapper
         services.AddSingleton(runHistoryStore);
         services.AddSingleton(sessionStore);
         services.AddSingleton(transcriptStore);
+        services.AddSingleton<IAgentMessageBus>(sp =>
+            new SqliteAgentMessageBus(options, sp.GetRequiredService<IAgentRegistry>()));
     }
 
     private static void RegisterRuntimeTools(IServiceProvider services, string appSkillsDirectory, IAgentOrchestrator orchestrator)
     {
         var toolRegistrar = services.GetRequiredService<IToolRegistrar>();
         var agentRegistry = services.GetRequiredService<IAgentRegistry>();
+        var messageBus = services.GetRequiredService<IAgentMessageBus>();
 
         toolRegistrar.RegisterTools([new CreateSkillTool(toolRegistrar, appSkillsDirectory)]);
         RegisterDefaultAgents(agentRegistry);
         toolRegistrar.RegisterTools([
+            new SendAgentMessageTool(messageBus, agentRegistry),
+            new ReadAgentMessagesTool(messageBus),
             new InvokeAgentTool(agentRegistry, orchestrator),
             new ListAgentsTool(agentRegistry)
         ]);
@@ -175,12 +191,13 @@ internal static class AppBootstrapper
                           If requirements are ambiguous, state assumptions briefly in the final answer.
                           """,
             ToolPolicy: new ToolSelectionPolicy(
-                Profile: ToolProfile.Coding,
-                DenyList: new[] { "invoke_agent", "list_agents" }),
+                Profile: ToolProfile.Full,
+                DenyList: new[] { "invoke_agent", "list_agents", "create_skill" }),
             Provider: codegenProvider,
             Model: codegenModel,
             MaxRounds: 6,
-            MaxOutputTokens: 4096));
+            MaxOutputTokens: 4096,
+            AllowedMessageSenders: new[] { "codegen", "reviewer" }));
 
         registry.Register(new AgentDefinition(
             AgentId: "reviewer",
@@ -193,12 +210,13 @@ internal static class AppBootstrapper
                           If no issues are found, say so explicitly and note residual risks.
                           """,
             ToolPolicy: new ToolSelectionPolicy(
-                Profile: ToolProfile.Coding,
-                DenyList: new[] { "invoke_agent", "list_agents" }),
+                Profile: ToolProfile.Full,
+                DenyList: new[] { "invoke_agent", "list_agents", "create_skill" }),
             Provider: reviewerProvider,
             Model: reviewerModel,
             MaxRounds: 4,
-            MaxOutputTokens: 3072));
+            MaxOutputTokens: 3072,
+            AllowedMessageSenders: new[] { "codegen", "reviewer" }));
     }
 
     private static string? ReadOptionalEnv(string name)
@@ -228,6 +246,7 @@ internal sealed class AppBootstrap : IDisposable
         SessionStore = _serviceProvider.GetRequiredService<ISessionStore>();
         TranscriptStore = _serviceProvider.GetRequiredService<ITranscriptStore>();
         AgentRegistry = _serviceProvider.GetRequiredService<IAgentRegistry>();
+        MessageBus = _serviceProvider.GetRequiredService<IAgentMessageBus>();
     }
 
     public IAgentOrchestrator Orchestrator { get; }
@@ -243,6 +262,8 @@ internal sealed class AppBootstrap : IDisposable
     public ITranscriptStore TranscriptStore { get; }
 
     public IAgentRegistry AgentRegistry { get; }
+
+    public IAgentMessageBus MessageBus { get; }
 
     public void Dispose()
     {

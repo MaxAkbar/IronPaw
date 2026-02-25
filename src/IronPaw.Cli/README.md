@@ -25,7 +25,8 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 - `AppBootstrapper.cs` — DI-based composition root wiring interfaces to runtime implementations (including `IAgentRegistry` and agent tools)
 - `ConsoleUi.cs` — Spectre.Console rendering for banners, settings, diagnostics, results, memory, and run history
 - `AnsiConsoleEventSink.cs` — `IAgentEventSink` that formats agent events with Spectre.Console markup (displays `@agentId` prefix for sub-agent events)
-- `InteractiveCommandHandler.cs` — slash command dispatch (`/help`, `/settings`, `/provider`, `/model`, `/session`, `/remember`, `/forget`, `/memories`, `/tasks`, `/review`)
+- `InteractiveCommandHandler.cs` — slash command dispatch (`/help`, `/settings`, `/provider`, `/model`, `/session`, `/remember`, `/forget`, `/memories`, `/scope-runs`, `/tasks`, `/review`)
+  - Includes scoped agent inbox inspection via `/agent-messages`
 - `ProviderResolver.cs` — provider selection and API key prompting
 - `CliDefaults.cs` — CLI-specific constants (delegates to `ProviderDefaults` for shared config)
 
@@ -41,6 +42,7 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 - `--auto-create-skills` (requires `--profile Full`)
 - `--list-skills`
 - `--no-events`
+- `--message-ttl-days <days>` (SQLite message retention window, default `30`)
 
 ## Usage
 
@@ -81,6 +83,8 @@ Commands:
 | `/remember` | Save a global memory |
 | `/forget` | Remove a memory by ID |
 | `/memories` | List all global and session memories |
+| `/scope-runs` | List recent run IDs for current session (for message scope lookup) |
+| `/agent-messages` | Inspect scoped agent messages: `/agent-messages <scope-run-id> [agent-id] [--max N] [--consume] [--sender id] [--correlation id]` |
 | `/tasks` | Show recent run history |
 | `/review` | View details of a specific past run |
 | `quit` / `exit` / `/quit` / `:q` | Exit the REPL |

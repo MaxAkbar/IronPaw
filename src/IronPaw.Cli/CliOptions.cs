@@ -11,6 +11,7 @@ internal sealed record CliOptions(
     string? PromptFile,
     ToolProfile Profile,
     StoreBackend Store,
+    int MessageTtlDays,
     bool AutoCreateSkills,
     bool ListSkills,
     bool NoEvents,
@@ -25,6 +26,7 @@ internal sealed record CliOptions(
         string? promptFile = null;
         var profile = ToolProfile.Coding;
         var store = StoreBackend.Json;
+        var messageTtlDays = 30;
         var autoCreateSkills = false;
         var listSkills = false;
         var noEvents = false;
@@ -81,6 +83,15 @@ internal sealed record CliOptions(
 
                     break;
 
+                case "--message-ttl-days":
+                    var ttlValue = ReadValue(args, ref i, arg);
+                    if (!int.TryParse(ttlValue, out messageTtlDays) || messageTtlDays <= 0)
+                    {
+                        throw new ArgumentException($"Invalid --message-ttl-days value '{ttlValue}'. Use a positive integer.");
+                    }
+
+                    break;
+
                 case "--auto-create-skills":
                     autoCreateSkills = true;
                     break;
@@ -106,7 +117,7 @@ internal sealed record CliOptions(
             }
         }
 
-        return new CliOptions(provider, model, session, prompt, promptFile, profile, store, autoCreateSkills, listSkills, noEvents, showHelp);
+        return new CliOptions(provider, model, session, prompt, promptFile, profile, store, messageTtlDays, autoCreateSkills, listSkills, noEvents, showHelp);
     }
 
     public bool TryValidate(out string? error)
@@ -126,6 +137,12 @@ internal sealed record CliOptions(
         if (AutoCreateSkills && Profile != ToolProfile.Full)
         {
             error = "--auto-create-skills requires --profile Full.";
+            return false;
+        }
+
+        if (MessageTtlDays <= 0)
+        {
+            error = "--message-ttl-days must be a positive integer.";
             return false;
         }
 
@@ -171,6 +188,7 @@ internal sealed record CliOptions(
         table.AddRow("--auto-create-skills", "Automatically create runtime tools when needed (requires Full profile)");
         table.AddRow("--list-skills", "List discovered add-in skills and exit");
         table.AddRow("--store <backend>", "Storage backend: json | sqlite (default: json)");
+        table.AddRow("--message-ttl-days <days>", "SQLite message retention window in days (default: 30)");
         table.AddRow("--no-events", "Hide event stream logs");
 
         AnsiConsole.Write(new Rule("[bold deepskyblue1]IronPaw CLI[/]").LeftJustified());
@@ -194,7 +212,8 @@ internal sealed record CliOptions(
         AnsiConsole.MarkupLine("[bold]Interactive Mode[/]");
         AnsiConsole.MarkupLine("  Launch without --prompt/--prompt-file to keep running until you type [white]quit[/].");
         AnsiConsole.MarkupLine("  Commands: [white]/help[/], [white]/settings[/], [white]/provider[/], [white]/model[/], [white]/session[/],");
-        AnsiConsole.MarkupLine("           [white]/remember[/], [white]/forget[/], [white]/memories[/], [white]/tasks[/], [white]/review[/]");
+        AnsiConsole.MarkupLine("           [white]/remember[/], [white]/forget[/], [white]/memories[/], [white]/scope-runs[/], [white]/agent-messages[/],");
+        AnsiConsole.MarkupLine("           [white]/tasks[/], [white]/review[/]");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[bold]Add-in Skill Directories[/]");
         AnsiConsole.MarkupLine("  [white].\\addins\\skills[/]");

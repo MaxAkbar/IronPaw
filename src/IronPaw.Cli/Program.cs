@@ -40,7 +40,7 @@ var sessionKey = new SessionKey(string.IsNullOrWhiteSpace(options.Session) ? "de
 IAgentEventSink eventSink = options.NoEvents
     ? NullAgentEventSink.Instance
     : new AnsiConsoleEventSink();
-using var bootstrap = AppBootstrapper.Build(options.Store);
+using var bootstrap = AppBootstrapper.Build(options.Store, options.MessageTtlDays);
 
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) =>
@@ -131,7 +131,9 @@ try
                 bootstrap.MemoryStore,
                 bootstrap.RunHistoryStore,
                 bootstrap.SessionStore,
-                bootstrap.TranscriptStore))
+                bootstrap.TranscriptStore,
+                bootstrap.AgentRegistry,
+                bootstrap.MessageBus))
         {
             continue;
         }

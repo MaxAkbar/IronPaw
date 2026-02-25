@@ -14,6 +14,7 @@ public sealed class CliOptionsTests
             "--session", "s-1",
             "--prompt", "hello",
             "--profile", "Full",
+            "--message-ttl-days", "14",
             "--auto-create-skills",
             "--list-skills",
             "--no-events"
@@ -24,6 +25,7 @@ public sealed class CliOptionsTests
         Assert.Equal("s-1", options.Session);
         Assert.Equal("hello", options.Prompt);
         Assert.Equal(ToolProfile.Full, options.Profile);
+        Assert.Equal(14, options.MessageTtlDays);
         Assert.True(options.AutoCreateSkills);
         Assert.True(options.ListSkills);
         Assert.True(options.NoEvents);
@@ -46,6 +48,7 @@ public sealed class CliOptionsTests
             PromptFile: "prompt.txt",
             Profile: ToolProfile.Coding,
             Store: StoreBackend.Json,
+            MessageTtlDays: 30,
             AutoCreateSkills: false,
             ListSkills: false,
             NoEvents: false,
@@ -72,6 +75,42 @@ public sealed class CliOptionsTests
     }
 
     [Fact]
+    public void Parse_ParsesMessageTtlDays()
+    {
+        var options = CliOptions.Parse(["--message-ttl-days", "45", "--prompt", "hi"]);
+        Assert.Equal(45, options.MessageTtlDays);
+    }
+
+    [Fact]
+    public void Parse_InvalidMessageTtlDays_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => CliOptions.Parse(["--message-ttl-days", "0", "--prompt", "hi"]));
+    }
+
+    [Fact]
+    public void TryValidate_FailsWhenMessageTtlDaysNotPositive()
+    {
+        var options = new CliOptions(
+            Provider: "local",
+            Model: null,
+            Session: "default",
+            Prompt: "inline",
+            PromptFile: null,
+            Profile: ToolProfile.Coding,
+            Store: StoreBackend.Json,
+            MessageTtlDays: 0,
+            AutoCreateSkills: false,
+            ListSkills: false,
+            NoEvents: false,
+            ShowHelp: false);
+
+        var valid = options.TryValidate(out var error);
+
+        Assert.False(valid);
+        Assert.Contains("message-ttl-days", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ResolvePromptAsync_UsesInlinePromptAndTrimsWhitespace()
     {
         var options = new CliOptions(
@@ -82,6 +121,7 @@ public sealed class CliOptionsTests
             PromptFile: null,
             Profile: ToolProfile.Coding,
             Store: StoreBackend.Json,
+            MessageTtlDays: 30,
             AutoCreateSkills: false,
             ListSkills: false,
             NoEvents: false,

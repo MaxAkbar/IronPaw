@@ -72,6 +72,7 @@ internal static class DesktopBootstrapper
         services.AddSingleton<IToolRegistrar>(sp => sp.GetRequiredService<InMemoryToolRegistry>());
 
         services.AddSingleton<IAgentRegistry, InMemoryAgentRegistry>();
+        services.AddSingleton<IAgentMessageBus, InMemoryAgentMessageBus>();
         services.AddSingleton<ISessionLaneScheduler, SessionLaneScheduler>();
         services.AddSingleton<IToolExecutor, ToolExecutor>();
         services.AddSingleton<IToolSchemaNormalizer, ToolSchemaNormalizer>();
@@ -103,10 +104,13 @@ internal static class DesktopBootstrapper
     {
         var toolRegistrar = services.GetRequiredService<IToolRegistrar>();
         var agentRegistry = services.GetRequiredService<IAgentRegistry>();
+        var messageBus = services.GetRequiredService<IAgentMessageBus>();
 
         toolRegistrar.RegisterTools([new CreateSkillTool(toolRegistrar, appSkillsDirectory)]);
         RegisterDefaultAgents(agentRegistry);
         toolRegistrar.RegisterTools([
+            new SendAgentMessageTool(messageBus, agentRegistry),
+            new ReadAgentMessagesTool(messageBus),
             new InvokeAgentTool(agentRegistry, orchestrator),
             new ListAgentsTool(agentRegistry)
         ]);
@@ -130,12 +134,13 @@ internal static class DesktopBootstrapper
                           If requirements are ambiguous, state assumptions briefly in the final answer.
                           """,
             ToolPolicy: new ToolSelectionPolicy(
-                Profile: ToolProfile.Coding,
-                DenyList: new[] { "invoke_agent", "list_agents" }),
+                Profile: ToolProfile.Full,
+                DenyList: new[] { "invoke_agent", "list_agents", "create_skill" }),
             Provider: codegenProvider,
             Model: codegenModel,
             MaxRounds: 6,
-            MaxOutputTokens: 4096));
+            MaxOutputTokens: 4096,
+            AllowedMessageSenders: new[] { "codegen", "reviewer" }));
 
         registry.Register(new AgentDefinition(
             AgentId: "reviewer",
@@ -148,12 +153,13 @@ internal static class DesktopBootstrapper
                           If no issues are found, say so explicitly and note residual risks.
                           """,
             ToolPolicy: new ToolSelectionPolicy(
-                Profile: ToolProfile.Coding,
-                DenyList: new[] { "invoke_agent", "list_agents" }),
+                Profile: ToolProfile.Full,
+                DenyList: new[] { "invoke_agent", "list_agents", "create_skill" }),
             Provider: reviewerProvider,
             Model: reviewerModel,
             MaxRounds: 4,
-            MaxOutputTokens: 3072));
+            MaxOutputTokens: 3072,
+            AllowedMessageSenders: new[] { "codegen", "reviewer" }));
     }
 
     private static string? ReadOptionalEnv(string name)

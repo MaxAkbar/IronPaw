@@ -133,7 +133,15 @@ public sealed record ToolExecutionContext(
     string Provider,
     string Model,
     CallerIdentity Caller,
-    int SubagentDepth = 0);
+    int SubagentDepth = 0,
+    string? AgentId = null,
+    RunId? ParentRunId = null,
+    SessionKey? ParentSessionKey = null)
+{
+    public RunId ScopeRunId => ParentRunId ?? RunId;
+
+    public SessionKey ScopeSessionKey => ParentSessionKey ?? SessionKey;
+}
 
 public enum ContentTrust
 {
@@ -395,7 +403,8 @@ public sealed record AgentRunRequest(
     int MaxRounds = 6,
     IReadOnlyList<MemoryEntry>? ActiveMemories = null,
     string? AgentId = null,
-    RunId? ParentRunId = null);
+    RunId? ParentRunId = null,
+    SessionKey? ParentSessionKey = null);
 
 public sealed record AgentRunResult(
     RunId RunId,
@@ -478,7 +487,76 @@ public sealed record AgentDefinition(
     string? Provider = null,
     string? Model = null,
     int MaxRounds = 6,
-    int MaxOutputTokens = 4096);
+    int MaxOutputTokens = 4096,
+    IReadOnlyCollection<string>? AllowedMessageSenders = null)
+{
+    public bool CanReceiveMessagesFrom(string senderAgentId)
+    {
+        if (string.IsNullOrWhiteSpace(senderAgentId))
+        {
+            return false;
+        }
+
+        if (string.Equals(AgentId, senderAgentId, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (AllowedMessageSenders is null || AllowedMessageSenders.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var allowedSender in AllowedMessageSenders)
+        {
+            if (string.IsNullOrWhiteSpace(allowedSender))
+            {
+                continue;
+            }
+
+            if (string.Equals(allowedSender.Trim(), senderAgentId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+public sealed record AgentMessage(
+    string MessageId,
+    SessionKey SessionKey,
+    RunId ScopeRunId,
+    string SenderAgentId,
+    string RecipientAgentId,
+    string Content,
+    DateTimeOffset SentAt,
+    string? CorrelationId = null);
+
+public sealed record AgentMessageSendRequest(
+    SessionKey SessionKey,
+    RunId ScopeRunId,
+    string SenderAgentId,
+    string RecipientAgentId,
+    string Content,
+    string? CorrelationId = null);
+
+public sealed record AgentMessageReadRequest(
+    SessionKey SessionKey,
+    RunId ScopeRunId,
+    string RecipientAgentId,
+    int MaxMessages = 20,
+    bool MarkAsRead = true,
+    string? SenderAgentId = null,
+    string? CorrelationId = null);
+
+public interface IAgentMessageBus
+{
+    Task<AgentMessage> SendAsync(AgentMessageSendRequest request, CancellationToken ct);
+
+    Task<IReadOnlyList<AgentMessage>> ReadAsync(AgentMessageReadRequest request, CancellationToken ct);
+}
 
 public interface IAgentRegistry
 {

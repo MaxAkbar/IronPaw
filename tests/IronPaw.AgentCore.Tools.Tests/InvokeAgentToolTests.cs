@@ -90,6 +90,36 @@ public sealed class InvokeAgentToolTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ChildRequest_PropagatesScopedParentLineage()
+    {
+        var registry = new InMemoryAgentRegistry();
+        registry.Register(CreateAgentDef("coder"));
+        AgentRunRequest? capturedRequest = null;
+        var orchestrator = new StubOrchestrator("done", onRun: req => capturedRequest = req);
+        var tool = new InvokeAgentTool(registry, orchestrator);
+
+        var parentContext = new ToolExecutionContext(
+            RunId: new RunId("child-run"),
+            SessionKey: new SessionKey("child-session"),
+            Provider: "local",
+            Model: "rule-based-v1",
+            Caller: CallerIdentity.LocalOwner(),
+            SubagentDepth: 1,
+            AgentId: "supervisor",
+            ParentRunId: new RunId("root-run"),
+            ParentSessionKey: new SessionKey("root-session"));
+
+        var call = CreateToolCall(new { agent_id = "coder", task = "do work" });
+        await tool.ExecuteAsync(call, parentContext, CancellationToken.None);
+
+        Assert.NotNull(capturedRequest);
+        Assert.NotNull(capturedRequest.ParentRunId);
+        Assert.Equal("root-run", capturedRequest.ParentRunId!.Value.Value);
+        Assert.NotNull(capturedRequest.ParentSessionKey);
+        Assert.Equal("root-session", capturedRequest.ParentSessionKey!.Value.Value);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_MissingAgentId_ReturnsError()
     {
         var registry = new InMemoryAgentRegistry();

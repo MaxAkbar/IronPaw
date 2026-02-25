@@ -32,6 +32,15 @@ Key files: `ListFilesTool.cs`, `ReadFileTool.cs`, `WriteFileTool.cs`
 
 Key files: `CurrentTimeTool.cs`, `SaveMemoryTool.cs`, `RecallMemoryTool.cs`, `ForgetMemoryTool.cs`, `ReviewRunsTool.cs`, `ReviewRunDetailTool.cs`
 
+### Messaging (`group:messaging`)
+
+- `send_agent_message` — send a scoped message to another registered agent
+- `read_agent_messages` — read pending scoped messages addressed to the current agent
+
+Key files: `SendAgentMessageTool.cs`, `ReadAgentMessagesTool.cs`
+
+Messaging tools use `IAgentMessageBus` and enforce recipient authorization through `AgentDefinition.AllowedMessageSenders`.
+
 ### Runtime (`group:runtime`)
 
 - `create_skill` — compile C# source code into a skill at runtime (Full profile only)

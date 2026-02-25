@@ -113,7 +113,7 @@ public sealed class ToolPolicyEvaluatorTests
     }
 
     [Fact]
-    public void Apply_CodingProfile_ExcludesAgentGroup()
+    public void Apply_CodingProfile_IncludesAgentGroup()
     {
         var tools = new ITool[]
         {
@@ -124,7 +124,7 @@ public sealed class ToolPolicyEvaluatorTests
         var result = ToolPolicyEvaluator.Apply(tools, new ToolSelectionPolicy(ToolProfile.Coding, SenderIsOwner: true));
         var names = result.Select(t => t.Descriptor.Name).ToArray();
 
-        Assert.DoesNotContain("invoke_agent", names);
+        Assert.Contains("invoke_agent", names);
         Assert.Contains("system", names);
     }
 

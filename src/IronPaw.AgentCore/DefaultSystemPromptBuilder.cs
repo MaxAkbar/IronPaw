@@ -53,6 +53,11 @@ public sealed class DefaultSystemPromptBuilder : ISystemPromptBuilder
             AppendAgentDelegationGuidance(lines);
         }
 
+        if (tools.Any(t => t.Descriptor.Name == "send_agent_message"))
+        {
+            AppendAgentMessagingGuidance(lines);
+        }
+
         AppendContentTrustGuidance(lines);
         AppendMemorySection(lines, request.ActiveMemories, _memoryBudgetChars);
 
@@ -221,5 +226,17 @@ public sealed class DefaultSystemPromptBuilder : ISystemPromptBuilder
         lines.Add("");
         lines.Add("After a successful `create_skill` call the new `skill_*` tools appear");
         lines.Add("in your available tools on the next round. You can then call them normally.");
+    }
+
+    private static void AppendAgentMessagingGuidance(List<string> lines)
+    {
+        lines.Add("");
+        lines.Add("## Agent messaging");
+        lines.Add("");
+        lines.Add("You can exchange short messages with other agents in the current scoped run/session.");
+        lines.Add("- send_agent_message: send to a specific recipient agent.");
+        lines.Add("- read_agent_messages: read messages addressed to you.");
+        lines.Add("- Keep messages concise and include enough context for the recipient.");
+        lines.Add("- If sending fails due to authorization, choose another approach.");
     }
 }

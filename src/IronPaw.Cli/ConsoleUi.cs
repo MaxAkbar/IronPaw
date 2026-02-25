@@ -24,8 +24,10 @@ internal static class ConsoleUi
         AnsiConsole.MarkupLine("  [white]/remember[/]   Save a memory");
         AnsiConsole.MarkupLine("  [white]/forget[/]     Remove a memory");
         AnsiConsole.MarkupLine("  [white]/memories[/]   List all memories");
+        AnsiConsole.MarkupLine("  [white]/scope-runs[/] List recent run IDs for current session");
         AnsiConsole.MarkupLine("  [white]/sessions[/]   List all sessions");
         AnsiConsole.MarkupLine("  [white]/session-detail[/] Inspect a session's files and stats");
+        AnsiConsole.MarkupLine("  [white]/agent-messages[/] Inspect scoped agent inboxes (peek by default)");
         AnsiConsole.MarkupLine("  [white]/tasks[/]      List recent task runs");
         AnsiConsole.MarkupLine("  [white]/review[/]     Review a specific task run");
         AnsiConsole.MarkupLine("  [white]quit[/]        Exit the app");
@@ -318,6 +320,99 @@ internal static class ConsoleUi
         statsTable.AddRow("Session Memories", $"[white]{sessionMemories.Count}[/]");
 
         AnsiConsole.Write(statsTable);
+    }
+
+    public static void RenderAgentMessages(
+        string sessionId,
+        string scopeRunId,
+        IReadOnlyList<AgentMessage> messages,
+        bool consumed,
+        string? senderFilter = null,
+        string? correlationFilter = null)
+    {
+        AnsiConsole.Write(new Rule("[grey]Agent Messages[/]").LeftJustified());
+        AnsiConsole.MarkupLine(
+            $"[grey70]session[/]: [deepskyblue1]{Markup.Escape(sessionId)}[/]  " +
+            $"[grey70]scope_run[/]: [deepskyblue1]{Markup.Escape(scopeRunId)}[/]  " +
+            $"[grey70]mode[/]: [white]{(consumed ? "consume" : "peek")}[/]");
+        if (!string.IsNullOrWhiteSpace(senderFilter))
+        {
+            AnsiConsole.MarkupLine($"[grey70]sender filter[/]: [white]{Markup.Escape(senderFilter)}[/]");
+        }
+
+        if (!string.IsNullOrWhiteSpace(correlationFilter))
+        {
+            AnsiConsole.MarkupLine($"[grey70]correlation filter[/]: [white]{Markup.Escape(correlationFilter)}[/]");
+        }
+
+        if (messages.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No queued agent messages found for that scope.[/]");
+            return;
+        }
+
+        var table = new Table()
+            .RoundedBorder()
+            .AddColumn("[bold]Sent[/]")
+            .AddColumn("[bold]Sender[/]")
+            .AddColumn("[bold]Recipient[/]")
+            .AddColumn("[bold]Correlation[/]")
+            .AddColumn("[bold]Message[/]")
+            .AddColumn("[bold]Content[/]");
+
+        foreach (var message in messages)
+        {
+            var shortMessageId = message.MessageId[..Math.Min(8, message.MessageId.Length)];
+            var content = message.Content.Length > 80
+                ? message.Content[..80] + "..."
+                : message.Content;
+
+            table.AddRow(
+                $"[grey70]{Markup.Escape(message.SentAt.ToLocalTime().ToString("HH:mm:ss"))}[/]",
+                $"[white]{Markup.Escape(message.SenderAgentId)}[/]",
+                $"[white]{Markup.Escape(message.RecipientAgentId)}[/]",
+                $"[grey70]{Markup.Escape(message.CorrelationId ?? "-")}[/]",
+                $"[deepskyblue1]{Markup.Escape(shortMessageId)}[/]",
+                $"[white]{Markup.Escape(content)}[/]");
+        }
+
+        AnsiConsole.Write(table);
+    }
+
+    public static void RenderScopeRuns(string sessionId, IReadOnlyList<RunSummary> runs)
+    {
+        AnsiConsole.Write(new Rule("[grey]Scope Runs[/]").LeftJustified());
+        AnsiConsole.MarkupLine($"[grey70]session[/]: [deepskyblue1]{Markup.Escape(sessionId)}[/]");
+
+        if (runs.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]No runs found for this session.[/]");
+            return;
+        }
+
+        var table = new Table()
+            .RoundedBorder()
+            .AddColumn("[bold]Run ID[/]")
+            .AddColumn("[bold]Started[/]")
+            .AddColumn("[bold]Rounds[/]")
+            .AddColumn("[bold]Tokens[/]")
+            .AddColumn("[bold]Prompt[/]");
+
+        foreach (var run in runs)
+        {
+            var prompt = run.UserPrompt.Length > 70
+                ? run.UserPrompt[..70] + "..."
+                : run.UserPrompt;
+
+            table.AddRow(
+                $"[deepskyblue1]{Markup.Escape(run.RunId)}[/]",
+                $"[grey70]{Markup.Escape(run.StartedAt.ToLocalTime().ToString("g"))}[/]",
+                $"[white]{run.Rounds}[/]",
+                $"[white]{run.TotalTokens}[/]",
+                $"[white]{Markup.Escape(prompt)}[/]");
+        }
+
+        AnsiConsole.Write(table);
     }
 
     public static void RenderSuccess(string message)

@@ -449,6 +449,269 @@ public sealed class SqlitePersistenceTests
         }
     }
 
+    // --- Agent Message Bus ---
+
+    [Fact]
+    public async Task SqliteAgentMessageBus_SendAndRead_PersistsAcrossInstances()
+    {
+        var (dbPath, cleanup) = CreateTempDb();
+        try
+        {
+            var options = new SqliteStoreOptions(dbPath);
+            var registry = new TestAgentRegistry(
+            [
+                CreateAgent("codegen", ["reviewer", "codegen"]),
+                CreateAgent("reviewer", ["codegen", "reviewer"])
+            ]);
+
+            var senderBus = new SqliteAgentMessageBus(options, registry);
+            var session = new SessionKey("s-msg");
+            var runId = new RunId("r-msg");
+
+            var sent = await senderBus.SendAsync(
+                new AgentMessageSendRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    SenderAgentId: "codegen",
+                    RecipientAgentId: "reviewer",
+                    Content: "Please review the latest patch.",
+                    CorrelationId: "corr-123"),
+                CancellationToken.None);
+
+            // Recreate bus instance to verify persistence-backed durability.
+            var receiverBus = new SqliteAgentMessageBus(options, registry);
+            var inbox = await receiverBus.ReadAsync(
+                new AgentMessageReadRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    RecipientAgentId: "reviewer"),
+                CancellationToken.None);
+
+            Assert.Single(inbox);
+            Assert.Equal(sent.MessageId, inbox[0].MessageId);
+            Assert.Equal("codegen", inbox[0].SenderAgentId);
+            Assert.Equal("reviewer", inbox[0].RecipientAgentId);
+            Assert.Equal("Please review the latest patch.", inbox[0].Content);
+            Assert.Equal("corr-123", inbox[0].CorrelationId);
+        }
+        finally
+        {
+            cleanup();
+        }
+    }
+
+    [Fact]
+    public async Task SqliteAgentMessageBus_UnauthorizedSender_Throws()
+    {
+        var (dbPath, cleanup) = CreateTempDb();
+        try
+        {
+            var options = new SqliteStoreOptions(dbPath);
+            var registry = new TestAgentRegistry(
+            [
+                CreateAgent("reviewer", ["codegen"])
+            ]);
+            var bus = new SqliteAgentMessageBus(options, registry);
+
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                bus.SendAsync(
+                    new AgentMessageSendRequest(
+                        SessionKey: new SessionKey("s-msg"),
+                        ScopeRunId: new RunId("r-msg"),
+                        SenderAgentId: "intruder",
+                        RecipientAgentId: "reviewer",
+                        Content: "malicious ping"),
+                    CancellationToken.None));
+        }
+        finally
+        {
+            cleanup();
+        }
+    }
+
+    [Fact]
+    public async Task SqliteAgentMessageBus_ReadWithoutMarkAsRead_DoesNotConsume()
+    {
+        var (dbPath, cleanup) = CreateTempDb();
+        try
+        {
+            var options = new SqliteStoreOptions(dbPath);
+            var registry = new TestAgentRegistry(
+            [
+                CreateAgent("codegen", ["reviewer", "codegen"]),
+                CreateAgent("reviewer", ["codegen", "reviewer"])
+            ]);
+
+            var bus = new SqliteAgentMessageBus(options, registry);
+            var session = new SessionKey("s-msg");
+            var runId = new RunId("r-msg");
+
+            await bus.SendAsync(
+                new AgentMessageSendRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    SenderAgentId: "codegen",
+                    RecipientAgentId: "reviewer",
+                    Content: "message one"),
+                CancellationToken.None);
+
+            var peek = await bus.ReadAsync(
+                new AgentMessageReadRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    RecipientAgentId: "reviewer",
+                    MaxMessages: 10,
+                    MarkAsRead: false),
+                CancellationToken.None);
+            Assert.Single(peek);
+
+            var consume = await bus.ReadAsync(
+                new AgentMessageReadRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    RecipientAgentId: "reviewer"),
+                CancellationToken.None);
+            Assert.Single(consume);
+        }
+        finally
+        {
+            cleanup();
+        }
+    }
+
+    [Fact]
+    public async Task SqliteAgentMessageBus_ReadWithSenderAndCorrelationFilters_Works()
+    {
+        var (dbPath, cleanup) = CreateTempDb();
+        try
+        {
+            var options = new SqliteStoreOptions(dbPath);
+            var registry = new TestAgentRegistry(
+            [
+                CreateAgent("codegen", ["reviewer", "codegen"]),
+                CreateAgent("reviewer", ["codegen", "reviewer", "analyst"]),
+                CreateAgent("analyst", ["reviewer", "analyst"])
+            ]);
+
+            var bus = new SqliteAgentMessageBus(options, registry);
+            var session = new SessionKey("s-msg");
+            var runId = new RunId("r-msg");
+
+            await bus.SendAsync(
+                new AgentMessageSendRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    SenderAgentId: "codegen",
+                    RecipientAgentId: "reviewer",
+                    Content: "codegen/corr-1",
+                    CorrelationId: "corr-1"),
+                CancellationToken.None);
+            await bus.SendAsync(
+                new AgentMessageSendRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    SenderAgentId: "analyst",
+                    RecipientAgentId: "reviewer",
+                    Content: "analyst/corr-1",
+                    CorrelationId: "corr-1"),
+                CancellationToken.None);
+            await bus.SendAsync(
+                new AgentMessageSendRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    SenderAgentId: "codegen",
+                    RecipientAgentId: "reviewer",
+                    Content: "codegen/corr-2",
+                    CorrelationId: "corr-2"),
+                CancellationToken.None);
+
+            var filtered = await bus.ReadAsync(
+                new AgentMessageReadRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    RecipientAgentId: "reviewer",
+                    MarkAsRead: false,
+                    SenderAgentId: "codegen",
+                    CorrelationId: "corr-1"),
+                CancellationToken.None);
+
+            Assert.Single(filtered);
+            Assert.Equal("codegen", filtered[0].SenderAgentId);
+            Assert.Equal("corr-1", filtered[0].CorrelationId);
+            Assert.Equal("codegen/corr-1", filtered[0].Content);
+        }
+        finally
+        {
+            cleanup();
+        }
+    }
+
+    [Fact]
+    public async Task SqliteAgentMessageBus_TtlCleanup_RemovesExpiredMessagesOnRead()
+    {
+        var (dbPath, cleanup) = CreateTempDb();
+        try
+        {
+            var options = new SqliteStoreOptions(dbPath, MessageTtlDays: 1);
+            var registry = new TestAgentRegistry(
+            [
+                CreateAgent("codegen", ["reviewer", "codegen"]),
+                CreateAgent("reviewer", ["codegen", "reviewer"])
+            ]);
+
+            var bus = new SqliteAgentMessageBus(options, registry);
+            var session = new SessionKey("s-msg");
+            var runId = new RunId("r-msg");
+            var sent = await bus.SendAsync(
+                new AgentMessageSendRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    SenderAgentId: "codegen",
+                    RecipientAgentId: "reviewer",
+                    Content: "stale message"),
+                CancellationToken.None);
+
+            // Age the record beyond TTL.
+            var connectionString = SqliteSchemaInitializer.BuildConnectionString(dbPath);
+            await using (var connection = new SqliteConnection(connectionString))
+            {
+                await connection.OpenAsync(CancellationToken.None);
+                await using var command = connection.CreateCommand();
+                command.CommandText = """
+                    UPDATE agent_messages
+                    SET sent_at = @oldSentAt
+                    WHERE message_id = @messageId
+                    """;
+                command.Parameters.AddWithValue("@oldSentAt", DateTimeOffset.UtcNow.AddDays(-5).ToString("O"));
+                command.Parameters.AddWithValue("@messageId", sent.MessageId);
+                await command.ExecuteNonQueryAsync(CancellationToken.None);
+            }
+
+            var inbox = await bus.ReadAsync(
+                new AgentMessageReadRequest(
+                    SessionKey: session,
+                    ScopeRunId: runId,
+                    RecipientAgentId: "reviewer"),
+                CancellationToken.None);
+            Assert.Empty(inbox);
+
+            // Confirm cleanup removed the expired row.
+            await using (var connection = new SqliteConnection(connectionString))
+            {
+                await connection.OpenAsync(CancellationToken.None);
+                await using var countCommand = connection.CreateCommand();
+                countCommand.CommandText = "SELECT COUNT(*) FROM agent_messages WHERE message_id = @messageId";
+                countCommand.Parameters.AddWithValue("@messageId", sent.MessageId);
+                var remaining = (long)(await countCommand.ExecuteScalarAsync(CancellationToken.None))!;
+                Assert.Equal(0, remaining);
+            }
+        }
+        finally
+        {
+            cleanup();
+        }
+    }
+
     // --- Helpers ---
 
     private static (string dbPath, Action cleanup) CreateTempDb()
@@ -463,5 +726,32 @@ public sealed class SqlitePersistenceTests
             SqliteConnection.ClearAllPools();
             Directory.Delete(dir, recursive: true);
         });
+    }
+
+    private static AgentDefinition CreateAgent(string id, IReadOnlyCollection<string> allowedSenders)
+    {
+        return new AgentDefinition(
+            AgentId: id,
+            DisplayName: id,
+            Description: $"Agent {id}",
+            SystemPrompt: $"You are {id}.",
+            ToolPolicy: new ToolSelectionPolicy(ToolProfile.Coding),
+            AllowedMessageSenders: allowedSenders);
+    }
+
+    private sealed class TestAgentRegistry : IAgentRegistry
+    {
+        private readonly Dictionary<string, AgentDefinition> _agents;
+
+        public TestAgentRegistry(IEnumerable<AgentDefinition> definitions)
+        {
+            _agents = definitions.ToDictionary(definition => definition.AgentId, StringComparer.OrdinalIgnoreCase);
+        }
+
+        public IReadOnlyList<AgentDefinition> GetAll() => _agents.Values.ToList();
+
+        public AgentDefinition? Get(string agentId) => _agents.GetValueOrDefault(agentId);
+
+        public void Register(AgentDefinition definition) => _agents[definition.AgentId] = definition;
     }
 }

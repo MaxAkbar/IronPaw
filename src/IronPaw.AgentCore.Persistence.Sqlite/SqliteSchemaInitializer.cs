@@ -80,5 +80,22 @@ public static class SqliteSchemaInitializer
         );
         CREATE INDEX IF NOT EXISTS idx_run_history_session
             ON run_history(session_id);
+
+        CREATE TABLE IF NOT EXISTS agent_messages (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id         TEXT NOT NULL UNIQUE,
+            session_id         TEXT NOT NULL,
+            scope_run_id       TEXT NOT NULL,
+            sender_agent_id    TEXT NOT NULL,
+            recipient_agent_id TEXT NOT NULL,
+            content            TEXT NOT NULL,
+            correlation_id     TEXT,
+            sent_at            TEXT NOT NULL,
+            read_at            TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_messages_inbox
+            ON agent_messages(session_id, scope_run_id, recipient_agent_id, read_at, id);
+        CREATE INDEX IF NOT EXISTS idx_agent_messages_sent_at
+            ON agent_messages(sent_at);
         """;
 }

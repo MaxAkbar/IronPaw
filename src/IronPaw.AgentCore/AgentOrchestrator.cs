@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text;
 using System.Text.Json;
 using IronPaw.AgentCore.Abstractions;
@@ -274,28 +275,22 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 }
                 else
                 {
-                    var execContext = new ToolExecutionContext(runId, effectiveRequest.SessionKey, effectiveRequest.Provider, effectiveRequest.Model, effectiveRequest.Caller, SubagentDepth: effectiveRequest.ToolPolicy.SubagentDepth);
+                    var execContext = new ToolExecutionContext(
+                        runId,
+                        effectiveRequest.SessionKey,
+                        effectiveRequest.Provider,
+                        effectiveRequest.Model,
+                        effectiveRequest.Caller,
+                        SubagentDepth: effectiveRequest.ToolPolicy.SubagentDepth,
+                        AgentId: effectiveRequest.AgentId,
+                        ParentRunId: effectiveRequest.ParentRunId,
+                        ParentSessionKey: effectiveRequest.ParentSessionKey);
                     result = await _toolExecutor.ExecuteAsync(tool, toolCall, execContext, ct);
                 }
 
                 var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);
                 transcript.Add(new ChatMessage(ChatRole.Tool, fencedContent, toolCall.ToolCallId, toolCall.ToolName));
-                await PublishAsync(
-                    sink,
-                    new AgentEvent(
-                        runId,
-                        effectiveRequest.SessionKey,
-                        AgentEventStream.Tool,
-                        Type: "tool_result",
-                        Timestamp: DateTimeOffset.UtcNow,
-                        Data: EventData.Of(
-                            ("toolName", toolCall.ToolName),
-                            ("toolCallId", toolCall.ToolCallId),
-                            ("isError", result.IsError),
-                            ("contentChars", result.Content.Length)),
-                        Severity: result.IsError ? AgentEventSeverity.Warning : AgentEventSeverity.Info,
-                        AgentId: effectiveRequest.AgentId),
-                    ct);
+                await PublishToolResultEventsAsync(sink, runId, effectiveRequest, toolCall, result, ct);
             }
 
             transcript = _toolResultTruncator.Truncate(transcript, effectiveRequest.ContextWindowChars).ToList();
@@ -399,6 +394,89 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         return sink.PublishAsync(evt, ct);
     }
 
+    private static async Task PublishToolResultEventsAsync(
+        IAgentEventSink sink,
+        RunId runId,
+        AgentRunRequest request,
+        ToolCall toolCall,
+        ToolResult result,
+        CancellationToken ct)
+    {
+        await PublishAsync(
+            sink,
+            new AgentEvent(
+                runId,
+                request.SessionKey,
+                AgentEventStream.Tool,
+                Type: "tool_result",
+                Timestamp: DateTimeOffset.UtcNow,
+                Data: EventData.Of(
+                    ("toolName", toolCall.ToolName),
+                    ("toolCallId", toolCall.ToolCallId),
+                    ("isError", result.IsError),
+                    ("contentChars", result.Content.Length)),
+                Severity: result.IsError ? AgentEventSeverity.Warning : AgentEventSeverity.Info,
+                AgentId: request.AgentId),
+            ct);
+
+        if (result.IsError || result.Details is null)
+        {
+            return;
+        }
+
+        if (!TryBuildObservabilityEventData(
+                result.Details,
+                out var eventType,
+                out var eventData))
+        {
+            return;
+        }
+
+        await PublishAsync(
+            sink,
+            new AgentEvent(
+                runId,
+                request.SessionKey,
+                AgentEventStream.Diagnostics,
+                Type: eventType,
+                Timestamp: DateTimeOffset.UtcNow,
+                Data: eventData,
+                AgentId: request.AgentId),
+            ct);
+    }
+
+    private static bool TryBuildObservabilityEventData(
+        IReadOnlyDictionary<string, object?> details,
+        out string eventType,
+        out IReadOnlyDictionary<string, object?> eventData)
+    {
+        eventType = string.Empty;
+        eventData = EventData.Of();
+
+        if (!details.TryGetValue("observability_event_type", out var eventTypeObj) ||
+            eventTypeObj is not string rawEventType ||
+            string.IsNullOrWhiteSpace(rawEventType))
+        {
+            return false;
+        }
+
+        eventType = rawEventType.Trim();
+
+        var data = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (key, value) in details)
+        {
+            if (key.Equals("observability_event_type", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            data[key] = value;
+        }
+
+        eventData = new ReadOnlyDictionary<string, object?>(data);
+        return true;
+    }
+
     private async Task<RoutePlanExecutionResult> TryRouteWithDelegatesAsync(
         AgentRunRequest request,
         List<ChatMessage> transcript,
@@ -433,7 +511,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             request.Provider,
             request.Model,
             request.Caller,
-            SubagentDepth: request.ToolPolicy.SubagentDepth);
+            SubagentDepth: request.ToolPolicy.SubagentDepth,
+            AgentId: request.AgentId,
+            ParentRunId: request.ParentRunId,
+            ParentSessionKey: request.ParentSessionKey);
 
         var listResult = await _toolExecutor.ExecuteAsync(listAgentsTool, listCall, execContext, ct);
         if (listResult.IsError)
@@ -572,22 +653,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);
             transcript.Add(new ChatMessage(ChatRole.Tool, fencedContent, toolCall.ToolCallId, toolCall.ToolName));
 
-            await PublishAsync(
-                sink,
-                new AgentEvent(
-                    runId,
-                    request.SessionKey,
-                    AgentEventStream.Tool,
-                    Type: "tool_result",
-                    Timestamp: DateTimeOffset.UtcNow,
-                    Data: EventData.Of(
-                        ("toolName", toolCall.ToolName),
-                        ("toolCallId", toolCall.ToolCallId),
-                        ("isError", result.IsError),
-                        ("contentChars", result.Content.Length)),
-                    Severity: result.IsError ? AgentEventSeverity.Warning : AgentEventSeverity.Info,
-                    AgentId: request.AgentId),
-                ct);
+            await PublishToolResultEventsAsync(sink, runId, request, toolCall, result, ct);
         }
 
         if (plan.Delegations.Count > 0)
@@ -674,27 +740,21 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             toolsUsed.Add(toolCall.ToolName);
             transcript.Add(new ChatMessage(ChatRole.Assistant, toolCall.Arguments.GetRawText(), toolCall.ToolCallId, toolCall.ToolName));
 
-            var execContext = new ToolExecutionContext(runId, request.SessionKey, request.Provider, request.Model, request.Caller, SubagentDepth: request.ToolPolicy.SubagentDepth);
+            var execContext = new ToolExecutionContext(
+                runId,
+                request.SessionKey,
+                request.Provider,
+                request.Model,
+                request.Caller,
+                SubagentDepth: request.ToolPolicy.SubagentDepth,
+                AgentId: request.AgentId,
+                ParentRunId: request.ParentRunId,
+                ParentSessionKey: request.ParentSessionKey);
             var result = await _toolExecutor.ExecuteAsync(createSkillTool, toolCall, execContext, ct);
 
             var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);
             transcript.Add(new ChatMessage(ChatRole.Tool, fencedContent, toolCall.ToolCallId, toolCall.ToolName));
-            await PublishAsync(
-                sink,
-                new AgentEvent(
-                    runId,
-                    request.SessionKey,
-                    AgentEventStream.Tool,
-                    Type: "tool_result",
-                    Timestamp: DateTimeOffset.UtcNow,
-                    Data: EventData.Of(
-                        ("toolName", toolCall.ToolName),
-                        ("toolCallId", toolCall.ToolCallId),
-                        ("isError", result.IsError),
-                        ("contentChars", result.Content.Length)),
-                    Severity: result.IsError ? AgentEventSeverity.Warning : AgentEventSeverity.Info,
-                    AgentId: request.AgentId),
-                ct);
+            await PublishToolResultEventsAsync(sink, runId, request, toolCall, result, ct);
         }
 
         return true;

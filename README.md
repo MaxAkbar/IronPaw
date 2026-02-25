@@ -99,6 +99,7 @@ sequenceDiagram
 | Example | Description |
 |---------|-------------|
 | [Weather Skill](docs/examples/weather-skill.md) | Complete worked example of a custom skill |
+| [Agent Messaging Workflow](docs/examples/agent-messaging-workflow.md) | End-to-end delegation + inter-agent messaging + observability events |
 
 ### Reference
 
@@ -214,6 +215,13 @@ IronPaw supports multi-agent orchestration through a supervisor/specialist patte
 |------|-------------|
 | `invoke_agent` | Delegate a task to a specialist agent by ID |
 | `list_agents` | List all registered agents and their descriptions |
+
+### Messaging tools (`group:messaging`)
+
+| Tool | Description |
+|------|-------------|
+| `send_agent_message` | Send a scoped message to another agent |
+| `read_agent_messages` | Read pending scoped messages for the current agent |
 
 ### Recursion safety
 
