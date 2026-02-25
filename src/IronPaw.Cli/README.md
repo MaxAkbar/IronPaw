@@ -17,6 +17,7 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 - Runtime skill add-in discovery and dynamic skill creation
 - Skill catalog listing (`--list-skills`)
 - Multi-agent delegation support (Coding/Full profiles) with `@agentId` event attribution
+- Web browsing specialist agent (`web_browser`) for navigation and structured extraction
 
 ## Main files
 
@@ -38,7 +39,7 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 - `-s`, `--session <key>`
 - `--prompt <text>`
 - `--prompt-file <path>`
-- `--profile <Minimal|Coding|Messaging|Full>`
+- `--profile <Minimal|Coding|Messaging|Web|Full>`
 - `--auto-create-skills` (requires `--profile Full`)
 - `--list-skills`
 - `--no-events`
@@ -108,6 +109,8 @@ If required provider settings are missing (for example `OPENAI_API_KEY` or `ANTH
 - `IRONPAW_CODEGEN_MODEL` (optional; override model for the `codegen` specialist)
 - `IRONPAW_REVIEWER_PROVIDER` (optional; override provider for the `reviewer` specialist)
 - `IRONPAW_REVIEWER_MODEL` (optional; override model for the `reviewer` specialist)
+- `IRONPAW_WEB_BROWSER_PROVIDER` (optional; override provider for the `web_browser` specialist)
+- `IRONPAW_WEB_BROWSER_MODEL` (optional; override model for the `web_browser` specialist)
 
 Example split-model setup (PowerShell):
 

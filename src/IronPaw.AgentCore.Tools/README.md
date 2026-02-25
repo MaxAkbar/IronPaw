@@ -41,6 +41,15 @@ Key files: `SendAgentMessageTool.cs`, `ReadAgentMessagesTool.cs`
 
 Messaging tools use `IAgentMessageBus` and enforce recipient authorization through `AgentDefinition.AllowedMessageSenders`.
 
+### Web (`group:web`)
+
+- `web_navigate` — open pages, follow links/click targets, and submit forms with session state
+- `web_extract_structured` — extract metadata, tables, and lists from the current page
+
+Key files: `WebNavigateTool.cs`, `WebExtractStructuredTool.cs`, `WebBrowserService.cs`
+
+Web tools return `ContentTrust.Untrusted` and include retry/rate-limit handling in `WebBrowserService`.
+
 ### Runtime (`group:runtime`)
 
 - `create_skill` — compile C# source code into a skill at runtime (Full profile only)
@@ -70,8 +79,8 @@ Key files: `InvokeAgentTool.cs`, `ListAgentsTool.cs`, `AgentPrefixedEventSink.cs
   - stores and resolves tool set; supports dynamic registration via `IToolRegistrar`
 - `ToolPolicyEvaluator.cs`
   - profile and allow/deny filtering
-  - profiles: `Minimal`, `Coding`, `Messaging`, `Full`
-  - groups: `group:fs`, `group:system`, `group:messaging`, `group:runtime`, `group:skills`, `group:agents`
+  - profiles: `Minimal`, `Coding`, `Messaging`, `Web`, `Full`
+  - groups: `group:fs`, `group:system`, `group:messaging`, `group:web`, `group:runtime`, `group:skills`, `group:agents`
 
 ## Execution and schema
 
@@ -108,7 +117,7 @@ A **Tool** is the fundamental execution unit that an agent can invoke. It implem
 
 - Has a `ToolDescriptor` (name, description, JSON parameter schema, group, owner-only flag) and an `ExecuteAsync` method.
 - Built-in examples: `read_file`, `write_file`, `current_time`, `list_files`, `save_memory`, `review_runs`.
-- Grouped by category: `group:fs`, `group:system`, `group:messaging`, `group:runtime`, `group:skills`.
+- Grouped by category: `group:fs`, `group:system`, `group:messaging`, `group:web`, `group:runtime`, `group:skills`.
 - Compiled into the application as part of the core.
 
 ### What is a Skill?

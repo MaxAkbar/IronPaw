@@ -104,6 +104,7 @@ public enum ToolProfile
     Minimal,
     Coding,
     Messaging,
+    Web,
     Full
 }
 

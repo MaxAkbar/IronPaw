@@ -184,7 +184,7 @@ internal sealed record CliOptions(
         table.AddRow("-s, --session <key>", "Session key (default: default)");
         table.AddRow("--prompt <text>", "Prompt text");
         table.AddRow("--prompt-file <path>", "Read prompt from file");
-        table.AddRow("--profile <name>", "Tool profile: Minimal | Coding | Messaging | Full");
+        table.AddRow("--profile <name>", "Tool profile: Minimal | Coding | Messaging | Web | Full");
         table.AddRow("--auto-create-skills", "Automatically create runtime tools when needed (requires Full profile)");
         table.AddRow("--list-skills", "List discovered add-in skills and exit");
         table.AddRow("--store <backend>", "Storage backend: json | sqlite (default: json)");
@@ -208,6 +208,8 @@ internal sealed record CliOptions(
         AnsiConsole.MarkupLine("  [white]IRONPAW_CODEGEN_MODEL[/] (optional; specialist override)");
         AnsiConsole.MarkupLine("  [white]IRONPAW_REVIEWER_PROVIDER[/] (optional; specialist override)");
         AnsiConsole.MarkupLine("  [white]IRONPAW_REVIEWER_MODEL[/] (optional; specialist override)");
+        AnsiConsole.MarkupLine("  [white]IRONPAW_WEB_BROWSER_PROVIDER[/] (optional; specialist override)");
+        AnsiConsole.MarkupLine("  [white]IRONPAW_WEB_BROWSER_MODEL[/] (optional; specialist override)");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[bold]Interactive Mode[/]");
         AnsiConsole.MarkupLine("  Launch without --prompt/--prompt-file to keep running until you type [white]quit[/].");

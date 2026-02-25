@@ -14,6 +14,7 @@ public sealed class ToolPolicyEvaluatorTests
             new StubTool("fs", "group:fs"),
             new StubTool("runtime", "group:runtime"),
             new StubTool("msg", "group:messaging"),
+            new StubTool("web", "group:web"),
             new StubTool("system", "group:system"),
             new StubTool("skill", "group:skills")
         };
@@ -26,6 +27,7 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.Contains("skill", names);
         Assert.DoesNotContain("runtime", names);
         Assert.DoesNotContain("msg", names);
+        Assert.DoesNotContain("web", names);
     }
 
     [Fact]
@@ -110,6 +112,44 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.Contains("invoke_agent", names);
         Assert.Contains("list_agents", names);
         Assert.Contains("system", names);
+    }
+
+    [Fact]
+    public void Apply_FullProfile_IncludesWebGroup()
+    {
+        var tools = new ITool[]
+        {
+            new StubTool("web_navigate", "group:web"),
+            new StubTool("system", "group:system")
+        };
+
+        var result = ToolPolicyEvaluator.Apply(tools, new ToolSelectionPolicy(ToolProfile.Full, SenderIsOwner: true));
+        var names = result.Select(t => t.Descriptor.Name).ToArray();
+
+        Assert.Contains("web_navigate", names);
+        Assert.Contains("system", names);
+    }
+
+    [Fact]
+    public void Apply_WebProfile_IncludesWebMessagingAndSystemOnly()
+    {
+        var tools = new ITool[]
+        {
+            new StubTool("web_navigate", "group:web"),
+            new StubTool("send_agent_message", "group:messaging"),
+            new StubTool("current_time", "group:system"),
+            new StubTool("read_file", "group:fs"),
+            new StubTool("invoke_agent", "group:agents")
+        };
+
+        var result = ToolPolicyEvaluator.Apply(tools, new ToolSelectionPolicy(ToolProfile.Web, SenderIsOwner: true));
+        var names = result.Select(t => t.Descriptor.Name).ToArray();
+
+        Assert.Contains("web_navigate", names);
+        Assert.Contains("send_agent_message", names);
+        Assert.Contains("current_time", names);
+        Assert.DoesNotContain("read_file", names);
+        Assert.DoesNotContain("invoke_agent", names);
     }
 
     [Fact]

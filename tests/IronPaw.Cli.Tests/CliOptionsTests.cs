@@ -88,6 +88,14 @@ public sealed class CliOptionsTests
     }
 
     [Fact]
+    public void Parse_WebProfile_IsSupported()
+    {
+        var options = CliOptions.Parse(["--profile", "web", "--prompt", "hi"]);
+
+        Assert.Equal(ToolProfile.Web, options.Profile);
+    }
+
+    [Fact]
     public void TryValidate_FailsWhenMessageTtlDaysNotPositive()
     {
         var options = new CliOptions(

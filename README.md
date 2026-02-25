@@ -100,6 +100,7 @@ sequenceDiagram
 |---------|-------------|
 | [Weather Skill](docs/examples/weather-skill.md) | Complete worked example of a custom skill |
 | [Agent Messaging Workflow](docs/examples/agent-messaging-workflow.md) | End-to-end delegation + inter-agent messaging + observability events |
+| [Web Browser Agent Workflow](docs/examples/web-browser-agent-workflow.md) | Delegate web navigation/extraction to the `web_browser` specialist |
 
 ### Reference
 
@@ -120,7 +121,7 @@ sequenceDiagram
 
 - `src/IronPaw.AgentCore.Abstractions`: shared contracts, DTOs, and runtime interfaces (tools, skills, LLM, sessions, memory, run history).
 - `src/IronPaw.AgentCore`: orchestration loop, lane scheduler, system prompt builder with memory injection, transcript repair and truncation.
-- `src/IronPaw.AgentCore.Tools`: built-in tools (file I/O, memory, review, runtime skill creation, agent delegation), policy pipeline, schema normalization, agent registry, and add-in skill loading.
+- `src/IronPaw.AgentCore.Tools`: built-in tools (file I/O, memory, review, web browsing/extraction, runtime skill creation, agent delegation), policy pipeline, schema normalization, agent registry, and add-in skill loading.
 - `src/IronPaw.AgentCore.Persistence`: file-based stores for sessions, transcripts, memory, and run history.
 - `src/IronPaw.AgentCore.Providers`: `ILlmClient` implementations (OpenAI, Anthropic, Ollama, LM Studio, local rule-based), provider routing, shared defaults, and factory wiring.
 - `src/IronPaw.Cli`: Spectre.Console terminal host with interactive REPL, slash commands, memory management, and task review.
@@ -209,6 +210,11 @@ IronPaw supports multi-agent orchestration through a supervisor/specialist patte
 3. **Isolated execution** — each sub-agent gets its own ephemeral session (transcript isolation), runs through the same `AgentOrchestrator`, and returns its final message as a tool result to the parent.
 4. **Event attribution** — all events from sub-agents are tagged with `@agentId` for clear attribution in the event stream.
 
+Default specialists include:
+- `codegen` — implementation-focused coding agent
+- `reviewer` — correctness/regression review agent
+- `web_browser` — web navigation + structured extraction agent
+
 ### Agent tools (`group:agents`)
 
 | Tool | Description |
@@ -222,6 +228,13 @@ IronPaw supports multi-agent orchestration through a supervisor/specialist patte
 |------|-------------|
 | `send_agent_message` | Send a scoped message to another agent |
 | `read_agent_messages` | Read pending scoped messages for the current agent |
+
+### Web tools (`group:web`)
+
+| Tool | Description |
+|------|-------------|
+| `web_navigate` | Open pages, follow links/click targets, and submit forms with session state |
+| `web_extract_structured` | Extract metadata, tables, and lists from the active browser session |
 
 ### Recursion safety
 

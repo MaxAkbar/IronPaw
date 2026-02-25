@@ -24,10 +24,17 @@ public static class ToolPolicyEvaluator
                 "group:system",
                 "group:skills"
             },
+            [ToolProfile.Web] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "group:web",
+                "group:messaging",
+                "group:system"
+            },
             [ToolProfile.Full] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "group:fs",
                 "group:runtime",
+                "group:web",
                 "group:messaging",
                 "group:system",
                 "group:skills",

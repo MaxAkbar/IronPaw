@@ -10,12 +10,15 @@ public static class BuiltInToolFactory
         IMemoryStore? memoryStore = null,
         IRunHistoryStore? runHistoryStore = null)
     {
+        var webBrowser = new WebBrowserService();
         var tools = new List<ITool>
         {
             new CurrentTimeTool(),
             new ListFilesTool(workspaceRoot),
             new ReadFileTool(workspaceRoot),
-            new WriteFileTool(workspaceRoot)
+            new WriteFileTool(workspaceRoot),
+            new WebNavigateTool(webBrowser),
+            new WebExtractStructuredTool(webBrowser)
         };
 
         if (memoryStore is not null)
