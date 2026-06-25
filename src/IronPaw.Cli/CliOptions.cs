@@ -15,7 +15,11 @@ internal sealed record CliOptions(
     bool AutoCreateSkills,
     bool ListSkills,
     bool NoEvents,
-    bool ShowHelp)
+    bool ShowHelp,
+    int? LlmContextWindowTokens = null,
+    int? LlmSafetyMarginTokens = null,
+    int? LlmMinOutputTokensPerRequest = null,
+    int? LlmMaxAutoContinuationPasses = null)
 {
     public static CliOptions Parse(string[] args)
     {
@@ -31,6 +35,10 @@ internal sealed record CliOptions(
         var listSkills = false;
         var noEvents = false;
         var showHelp = false;
+        int? llmContextWindowTokens = null;
+        int? llmSafetyMarginTokens = null;
+        int? llmMinOutputTokensPerRequest = null;
+        int? llmMaxAutoContinuationPasses = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -92,6 +100,22 @@ internal sealed record CliOptions(
 
                     break;
 
+                case "--llm-context-window-tokens":
+                    llmContextWindowTokens = ReadIntOption(args, ref i, arg, minInclusive: 1);
+                    break;
+
+                case "--llm-safety-margin-tokens":
+                    llmSafetyMarginTokens = ReadIntOption(args, ref i, arg, minInclusive: 0);
+                    break;
+
+                case "--llm-min-output-tokens-per-request":
+                    llmMinOutputTokensPerRequest = ReadIntOption(args, ref i, arg, minInclusive: 1);
+                    break;
+
+                case "--llm-max-auto-continuation-passes":
+                    llmMaxAutoContinuationPasses = ReadIntOption(args, ref i, arg, minInclusive: 0);
+                    break;
+
                 case "--auto-create-skills":
                     autoCreateSkills = true;
                     break;
@@ -117,7 +141,23 @@ internal sealed record CliOptions(
             }
         }
 
-        return new CliOptions(provider, model, session, prompt, promptFile, profile, store, messageTtlDays, autoCreateSkills, listSkills, noEvents, showHelp);
+        return new CliOptions(
+            provider,
+            model,
+            session,
+            prompt,
+            promptFile,
+            profile,
+            store,
+            messageTtlDays,
+            autoCreateSkills,
+            listSkills,
+            noEvents,
+            showHelp,
+            llmContextWindowTokens,
+            llmSafetyMarginTokens,
+            llmMinOutputTokensPerRequest,
+            llmMaxAutoContinuationPasses);
     }
 
     public bool TryValidate(out string? error)
@@ -143,6 +183,30 @@ internal sealed record CliOptions(
         if (MessageTtlDays <= 0)
         {
             error = "--message-ttl-days must be a positive integer.";
+            return false;
+        }
+
+        if (LlmContextWindowTokens.HasValue && LlmContextWindowTokens.Value <= 0)
+        {
+            error = "--llm-context-window-tokens must be a positive integer.";
+            return false;
+        }
+
+        if (LlmSafetyMarginTokens.HasValue && LlmSafetyMarginTokens.Value < 0)
+        {
+            error = "--llm-safety-margin-tokens must be zero or a positive integer.";
+            return false;
+        }
+
+        if (LlmMinOutputTokensPerRequest.HasValue && LlmMinOutputTokensPerRequest.Value <= 0)
+        {
+            error = "--llm-min-output-tokens-per-request must be a positive integer.";
+            return false;
+        }
+
+        if (LlmMaxAutoContinuationPasses.HasValue && LlmMaxAutoContinuationPasses.Value < 0)
+        {
+            error = "--llm-max-auto-continuation-passes must be zero or a positive integer.";
             return false;
         }
 
@@ -189,6 +253,10 @@ internal sealed record CliOptions(
         table.AddRow("--list-skills", "List discovered add-in skills and exit");
         table.AddRow("--store <backend>", "Storage backend: json | sqlite (default: json)");
         table.AddRow("--message-ttl-days <days>", "SQLite message retention window in days (default: 30)");
+        table.AddRow("--llm-context-window-tokens <n>", "Override context window tokens for OpenAI-compatible providers");
+        table.AddRow("--llm-safety-margin-tokens <n>", "Override reserved safety margin tokens for OpenAI-compatible providers");
+        table.AddRow("--llm-min-output-tokens-per-request <n>", "Override minimum output tokens budgeted per provider request");
+        table.AddRow("--llm-max-auto-continuation-passes <n>", "Override max auto-continue passes when truncated by length");
         table.AddRow("--no-events", "Hide event stream logs");
 
         AnsiConsole.Write(new Rule("[bold deepskyblue1]IronPaw CLI[/]").LeftJustified());
@@ -204,6 +272,10 @@ internal sealed record CliOptions(
         AnsiConsole.MarkupLine("  [white]OLLAMA_API_KEY[/] (optional, default: ollama)");
         AnsiConsole.MarkupLine("  [white]LMSTUDIO_BASE_URL[/] (default: http://localhost:1234)");
         AnsiConsole.MarkupLine("  [white]LMSTUDIO_API_KEY[/] (optional, default: lm-studio)");
+        AnsiConsole.MarkupLine("  [white]IRONPAW_LLM_CONTEXT_WINDOW_TOKENS[/] (optional; OpenAI-compatible override)");
+        AnsiConsole.MarkupLine("  [white]IRONPAW_LLM_SAFETY_MARGIN_TOKENS[/] (optional; OpenAI-compatible override)");
+        AnsiConsole.MarkupLine("  [white]IRONPAW_LLM_MIN_OUTPUT_TOKENS_PER_REQUEST[/] (optional; OpenAI-compatible override)");
+        AnsiConsole.MarkupLine("  [white]IRONPAW_LLM_MAX_AUTO_CONTINUATION_PASSES[/] (optional; OpenAI-compatible override)");
         AnsiConsole.MarkupLine("  [white]IRONPAW_CODEGEN_PROVIDER[/] (optional; specialist override)");
         AnsiConsole.MarkupLine("  [white]IRONPAW_CODEGEN_MODEL[/] (optional; specialist override)");
         AnsiConsole.MarkupLine("  [white]IRONPAW_REVIEWER_PROVIDER[/] (optional; specialist override)");
@@ -232,5 +304,16 @@ internal sealed record CliOptions(
 
         index++;
         return args[index];
+    }
+
+    private static int ReadIntOption(string[] args, ref int index, string option, int minInclusive)
+    {
+        var value = ReadValue(args, ref index, option);
+        if (!int.TryParse(value, out var parsedValue) || parsedValue < minInclusive)
+        {
+            throw new ArgumentException($"Invalid {option} value '{value}'. Use an integer >= {minInclusive}.");
+        }
+
+        return parsedValue;
     }
 }

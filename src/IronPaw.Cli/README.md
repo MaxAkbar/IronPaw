@@ -45,6 +45,10 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 - `--list-skills`
 - `--no-events`
 - `--message-ttl-days <days>` (SQLite message retention window, default `30`)
+- `--llm-context-window-tokens <n>` (OpenAI-compatible budget override)
+- `--llm-safety-margin-tokens <n>` (OpenAI-compatible budget override)
+- `--llm-min-output-tokens-per-request <n>` (OpenAI-compatible budget override)
+- `--llm-max-auto-continuation-passes <n>` (OpenAI-compatible budget override)
 
 ## Usage
 
@@ -78,7 +82,7 @@ Commands:
 | Command | Description |
 |---------|-------------|
 | `/help` | Show the command list |
-| `/settings` | Display current provider, model, session, and profile |
+| `/settings` | Display current provider, model, session, profile, and effective OpenAI-compatible token budget settings |
 | `/provider` | Switch LLM provider interactively |
 | `/model` | Change the model for the current provider |
 | `/session` | Switch to a different session |
@@ -107,6 +111,10 @@ If required provider settings are missing (for example `OPENAI_API_KEY` or `ANTH
 - `OLLAMA_API_KEY` (optional; default `ollama`)
 - `LMSTUDIO_BASE_URL` (default: `http://localhost:1234`)
 - `LMSTUDIO_API_KEY` (optional; default `lm-studio`)
+- `IRONPAW_LLM_CONTEXT_WINDOW_TOKENS` (optional; OpenAI-compatible budget override)
+- `IRONPAW_LLM_SAFETY_MARGIN_TOKENS` (optional; OpenAI-compatible budget override)
+- `IRONPAW_LLM_MIN_OUTPUT_TOKENS_PER_REQUEST` (optional; OpenAI-compatible budget override)
+- `IRONPAW_LLM_MAX_AUTO_CONTINUATION_PASSES` (optional; OpenAI-compatible budget override)
 - `IRONPAW_CODEGEN_PROVIDER` (optional; override provider for the `codegen` specialist)
 - `IRONPAW_CODEGEN_MODEL` (optional; override model for the `codegen` specialist)
 - `IRONPAW_REVIEWER_PROVIDER` (optional; override provider for the `reviewer` specialist)

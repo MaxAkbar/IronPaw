@@ -12,14 +12,15 @@ internal static class AppBootstrapper
 {
     public static AppBootstrap Build(
         StoreBackend storeBackend = StoreBackend.Json,
-        int messageTtlDays = 30)
+        int messageTtlDays = 30,
+        OpenAiClientOptionOverrides? llmOptions = null)
     {
         var paths = ResolvePaths();
         Directory.CreateDirectory(paths.StateRoot);
         Directory.CreateDirectory(paths.AppSkillsDirectory);
 
         var services = new ServiceCollection();
-        ConfigureServices(services, storeBackend, messageTtlDays, paths);
+        ConfigureServices(services, storeBackend, messageTtlDays, llmOptions, paths);
 
         var serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions
         {
@@ -46,6 +47,7 @@ internal static class AppBootstrapper
         IServiceCollection services,
         StoreBackend storeBackend,
         int messageTtlDays,
+        OpenAiClientOptionOverrides? llmOptions,
         BootstrapPaths paths)
     {
         RegisterStores(services, storeBackend, paths.StateRoot, messageTtlDays);
@@ -75,7 +77,7 @@ internal static class AppBootstrapper
         services.AddSingleton<ISessionLaneScheduler, SessionLaneScheduler>();
         services.AddSingleton<IToolExecutor, ToolExecutor>();
         services.AddSingleton<IToolSchemaNormalizer, ToolSchemaNormalizer>();
-        services.AddSingleton<ILlmClient>(_ => LlmClientFactory.Build());
+        services.AddSingleton<ILlmClient>(_ => LlmClientFactory.Build(llmOptions));
         services.AddSingleton<ITranscriptSanitizer, TranscriptSanitizer>();
         services.AddSingleton<IToolResultTruncator, ToolResultTruncator>();
         services.AddSingleton<ISystemPromptBuilder, DefaultSystemPromptBuilder>();

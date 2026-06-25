@@ -96,6 +96,36 @@ public sealed class CliOptionsTests
     }
 
     [Fact]
+    public void Parse_ParsesLlmBudgetFlags()
+    {
+        var options = CliOptions.Parse(
+        [
+            "--llm-context-window-tokens", "32768",
+            "--llm-safety-margin-tokens", "1024",
+            "--llm-min-output-tokens-per-request", "512",
+            "--llm-max-auto-continuation-passes", "3",
+            "--prompt", "hi"
+        ]);
+
+        Assert.Equal(32768, options.LlmContextWindowTokens);
+        Assert.Equal(1024, options.LlmSafetyMarginTokens);
+        Assert.Equal(512, options.LlmMinOutputTokensPerRequest);
+        Assert.Equal(3, options.LlmMaxAutoContinuationPasses);
+    }
+
+    [Fact]
+    public void Parse_InvalidLlmContextWindow_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => CliOptions.Parse(["--llm-context-window-tokens", "0", "--prompt", "hi"]));
+    }
+
+    [Fact]
+    public void Parse_InvalidLlmAutoContinuationPasses_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => CliOptions.Parse(["--llm-max-auto-continuation-passes", "-1", "--prompt", "hi"]));
+    }
+
+    [Fact]
     public void TryValidate_FailsWhenMessageTtlDaysNotPositive()
     {
         var options = new CliOptions(
@@ -116,6 +146,30 @@ public sealed class CliOptionsTests
 
         Assert.False(valid);
         Assert.Contains("message-ttl-days", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryValidate_FailsWhenLlmContextWindowNotPositive()
+    {
+        var options = new CliOptions(
+            Provider: "local",
+            Model: null,
+            Session: "default",
+            Prompt: "inline",
+            PromptFile: null,
+            Profile: ToolProfile.Coding,
+            Store: StoreBackend.Json,
+            MessageTtlDays: 30,
+            AutoCreateSkills: false,
+            ListSkills: false,
+            NoEvents: false,
+            ShowHelp: false,
+            LlmContextWindowTokens: 0);
+
+        var valid = options.TryValidate(out var error);
+
+        Assert.False(valid);
+        Assert.Contains("llm-context-window-tokens", error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

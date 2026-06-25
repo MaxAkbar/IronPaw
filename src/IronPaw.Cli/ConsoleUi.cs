@@ -1,4 +1,5 @@
 using IronPaw.AgentCore.Abstractions;
+using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
 using Spectre.Console;
 
@@ -41,7 +42,8 @@ internal static class ConsoleUi
         string session,
         ToolProfile profile,
         bool noEvents,
-        int skillsLoaded)
+        int skillsLoaded,
+        OpenAiClientOptions? llmBudgetOptions = null)
     {
         var table = new Table()
             .RoundedBorder()
@@ -54,6 +56,17 @@ internal static class ConsoleUi
         table.AddRow("Tool Profile", $"[white]{Markup.Escape(profile.ToString())}[/]");
         table.AddRow("Loaded Skills", $"[white]{skillsLoaded}[/]");
         table.AddRow("Event Stream", noEvents ? "[white]disabled[/]" : "[white]enabled[/]");
+        if (llmBudgetOptions is null)
+        {
+            table.AddRow("LLM Budget", "[grey70]n/a (provider not OpenAI-compatible)[/]");
+        }
+        else
+        {
+            table.AddRow("LLM Context Window", $"[white]{llmBudgetOptions.ContextWindowTokens} tokens[/]");
+            table.AddRow("LLM Safety Margin", $"[white]{llmBudgetOptions.SafetyMarginTokens} tokens[/]");
+            table.AddRow("LLM Min Output/Request", $"[white]{llmBudgetOptions.MinimumOutputTokensPerRequest} tokens[/]");
+            table.AddRow("LLM Auto-Continuation", $"[white]{llmBudgetOptions.MaxAutoContinuationPasses} passes[/]");
+        }
 
         var panel = new Panel(table)
             .Header("[bold deepskyblue1]Run Configuration[/]")

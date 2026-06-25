@@ -8,15 +8,24 @@ namespace IronPaw.AgentCore.Providers;
 
 public sealed class OpenAiLlmClient : ILlmClient
 {
+    private const string ContinuationPrompt =
+        "Continue exactly where you left off. Do not repeat previous text. Keep the same format and tone.";
+
     private readonly HttpClient _httpClient;
     private readonly Func<string?> _apiKeyResolver;
     private readonly Uri _chatCompletionsEndpoint;
+    private readonly OpenAiClientOptions _options;
 
-    public OpenAiLlmClient(HttpClient httpClient, Func<string?> apiKeyResolver, string baseUrl = "https://api.openai.com")
+    public OpenAiLlmClient(
+        HttpClient httpClient,
+        Func<string?> apiKeyResolver,
+        string baseUrl = "https://api.openai.com",
+        OpenAiClientOptions? options = null)
     {
         _httpClient = httpClient;
         _apiKeyResolver = apiKeyResolver;
         _chatCompletionsEndpoint = new Uri($"{baseUrl.TrimEnd('/')}/v1/chat/completions");
+        _options = (options ?? new OpenAiClientOptions()).Normalize();
     }
 
     public async IAsyncEnumerable<LlmDelta> StreamAsync(
@@ -30,21 +39,75 @@ public sealed class OpenAiLlmClient : ILlmClient
             yield break;
         }
 
-        var payload = BuildPayload(request);
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _chatCompletionsEndpoint);
-        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        httpRequest.Content = JsonContent.Create(payload);
+        var conversationMessages = request.Messages.ToList();
+        var continuationPassesRemaining = _options.MaxAutoContinuationPasses;
+        long consumedOutputTokensByUsage = 0;
+        long consumedOutputTokensByEstimate = 0;
 
-        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
-        if (!response.IsSuccessStatusCode)
+        while (true)
         {
-            var errorBody = await response.Content.ReadAsStringAsync(ct);
-            yield return new LlmErrorDelta(
-                $"OpenAI request failed ({(int)response.StatusCode}): {ExtractErrorMessage(errorBody)}");
-            yield break;
+            var consumedOutputTokens = Math.Max(consumedOutputTokensByUsage, consumedOutputTokensByEstimate);
+            var payloadBuild = BuildPayload(request, conversationMessages, consumedOutputTokens);
+            if (payloadBuild.Budget.MaxTokens <= 0)
+            {
+                // If we already produced output, exit cleanly when the remaining budget is exhausted.
+                if (consumedOutputTokens > 0 || payloadBuild.Budget.RemainingRequestedOutputTokens <= 0)
+                {
+                    break;
+                }
+
+                yield return new LlmErrorDelta(
+                    $"No output token budget available (estimated_input_tokens={payloadBuild.Budget.EstimatedInputTokens}, " +
+                    $"context_window_tokens={_options.ContextWindowTokens}, safety_margin_tokens={_options.SafetyMarginTokens}). " +
+                    "Reduce prompt size or increase the context window setting.");
+                yield break;
+            }
+
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _chatCompletionsEndpoint);
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+            httpRequest.Content = JsonContent.Create(payloadBuild.Payload);
+
+            using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                yield return new LlmErrorDelta(
+                    $"OpenAI request failed ({(int)response.StatusCode}): {ExtractErrorMessage(errorBody)}");
+                yield break;
+            }
+
+            var passState = new StreamPassState();
+            await foreach (var delta in StreamPassAsync(response, passState, ct))
+            {
+                yield return delta;
+            }
+
+            consumedOutputTokensByEstimate += passState.EstimatedOutputTokens;
+            if (passState.OutputTokensFromUsage.HasValue)
+            {
+                consumedOutputTokensByUsage += passState.OutputTokensFromUsage.Value;
+            }
+
+            consumedOutputTokens = Math.Max(consumedOutputTokensByUsage, consumedOutputTokensByEstimate);
+            if (!ShouldAutoContinue(passState, continuationPassesRemaining, consumedOutputTokens, request.MaxOutputTokens))
+            {
+                break;
+            }
+
+            conversationMessages.Add(new ChatMessage(ChatRole.Assistant, passState.AssistantText.ToString()));
+            conversationMessages.Add(new ChatMessage(ChatRole.User, ContinuationPrompt));
+            continuationPassesRemaining--;
         }
 
+        yield return new CompletedDelta();
+    }
+
+    private async IAsyncEnumerable<LlmDelta> StreamPassAsync(
+        HttpResponseMessage response,
+        StreamPassState passState,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
         // Accumulate tool-call argument fragments per index; emit complete calls at finish.
         var toolCallBuilders = new Dictionary<int, ToolCallBuilder>();
 
@@ -74,9 +137,18 @@ public sealed class OpenAiLlmClient : ILlmClient
                 {
                     if (root.TryGetProperty("usage", out var topUsageEl))
                     {
+                        var promptTokens = TryReadLong(topUsageEl, "prompt_tokens");
+                        var completionTokens = TryReadLong(topUsageEl, "completion_tokens");
+                        if (completionTokens.HasValue)
+                        {
+                            passState.OutputTokensFromUsage = Math.Max(
+                                passState.OutputTokensFromUsage ?? 0,
+                                completionTokens.Value);
+                        }
+
                         yield return new UsageDelta(
-                            TryReadLong(topUsageEl, "prompt_tokens"),
-                            TryReadLong(topUsageEl, "completion_tokens"),
+                            promptTokens,
+                            completionTokens,
                             CacheReadTokens: null,
                             CacheWriteTokens: null);
                     }
@@ -87,21 +159,25 @@ public sealed class OpenAiLlmClient : ILlmClient
                 var choice = choicesEl[0];
                 if (!choice.TryGetProperty("delta", out var delta)) continue;
 
-                // Text content — emit immediately for real-time streaming
+                // Text content — emit immediately for real-time streaming.
                 if (delta.TryGetProperty("content", out var contentEl) &&
                     contentEl.ValueKind is JsonValueKind.String)
                 {
                     var text = contentEl.GetString();
                     if (!string.IsNullOrEmpty(text))
                     {
+                        passState.AssistantText.Append(text);
+                        passState.EstimatedOutputCharacters += text.Length;
                         yield return new AssistantTextDelta(text);
                     }
                 }
 
-                // Tool-call fragments — accumulate until finish
+                // Tool-call fragments — accumulate until finish.
                 if (delta.TryGetProperty("tool_calls", out var toolCallsEl) &&
                     toolCallsEl.ValueKind is JsonValueKind.Array)
                 {
+                    passState.HasToolCalls = true;
+
                     foreach (var tcEl in toolCallsEl.EnumerateArray())
                     {
                         if (!tcEl.TryGetProperty("index", out var indexEl)) continue;
@@ -128,32 +204,37 @@ public sealed class OpenAiLlmClient : ILlmClient
                             if (funcEl.TryGetProperty("arguments", out var argsEl) &&
                                 argsEl.ValueKind is JsonValueKind.String)
                             {
-                                builder.Arguments.Append(argsEl.GetString());
+                                var fragment = argsEl.GetString() ?? string.Empty;
+                                passState.EstimatedOutputCharacters += fragment.Length;
+                                builder.Arguments.Append(fragment);
                             }
                         }
                     }
                 }
 
-                // On finish, emit any accumulated tool calls
+                // On finish, emit any accumulated tool calls.
                 if (choice.TryGetProperty("finish_reason", out var finishEl) &&
                     finishEl.ValueKind is JsonValueKind.String &&
-                    finishEl.GetString() is { } finishReason &&
-                    finishReason is "tool_calls" or "stop")
+                    finishEl.GetString() is { } finishReason)
                 {
-                    foreach (var builder in toolCallBuilders.Values.OrderBy(b => b.Index))
+                    passState.LastFinishReason = finishReason;
+                    if (finishReason is "tool_calls" or "stop")
                     {
-                        yield return new ToolCallDelta(
-                            builder.Id ?? Guid.NewGuid().ToString("n"),
-                            builder.Name ?? "unknown_tool",
-                            ParseJsonArguments(builder.Arguments.ToString()));
-                    }
+                        foreach (var builder in toolCallBuilders.Values.OrderBy(b => b.Index))
+                        {
+                            yield return new ToolCallDelta(
+                                builder.Id ?? Guid.NewGuid().ToString("n"),
+                                builder.Name ?? "unknown_tool",
+                                ParseJsonArguments(builder.Arguments.ToString()));
+                        }
 
-                    toolCallBuilders.Clear();
+                        toolCallBuilders.Clear();
+                    }
                 }
             }
         }
 
-        // Emit any remaining tool calls (some local models omit a finish_reason chunk)
+        // Emit any remaining tool calls (some local models omit a finish_reason chunk).
         foreach (var builder in toolCallBuilders.Values.OrderBy(b => b.Index))
         {
             yield return new ToolCallDelta(
@@ -161,11 +242,12 @@ public sealed class OpenAiLlmClient : ILlmClient
                 builder.Name ?? "unknown_tool",
                 ParseJsonArguments(builder.Arguments.ToString()));
         }
-
-        yield return new CompletedDelta();
     }
 
-    private static object BuildPayload(LlmRequest request)
+    private PayloadBuildResult BuildPayload(
+        LlmRequest request,
+        IReadOnlyList<ChatMessage> conversationMessages,
+        long consumedOutputTokens)
     {
         var tools = request.Tools.Select(
             tool => new Dictionary<string, object?>
@@ -177,32 +259,43 @@ public sealed class OpenAiLlmClient : ILlmClient
                     ["description"] = tool.Description,
                     ["parameters"] = ToUntypedObject(tool.ParametersSchema)
                 }
-            }).ToArray();
+            })
+            .Cast<object>()
+            .ToArray();
+        var messages = BuildMessages(request.SystemPrompt, conversationMessages);
+        var budget = OpenAiOutputTokenBudgetPlanner.Plan(
+            _options,
+            messages,
+            tools,
+            request.MaxOutputTokens,
+            consumedOutputTokens);
 
-        return new Dictionary<string, object?>
+        var payload = new Dictionary<string, object?>
         {
             ["model"] = request.Model,
-            ["messages"] = BuildMessages(request),
+            ["messages"] = messages,
             ["tools"] = tools,
             ["tool_choice"] = "auto",
-            ["max_tokens"] = request.MaxOutputTokens,
+            ["max_tokens"] = budget.MaxTokens,
             ["stream"] = true,
             ["stream_options"] = new Dictionary<string, object?> { ["include_usage"] = true }
         };
+
+        return new PayloadBuildResult(payload, budget);
     }
 
-    private static IReadOnlyList<object> BuildMessages(LlmRequest request)
+    private static IReadOnlyList<object> BuildMessages(string systemPrompt, IReadOnlyList<ChatMessage> transcript)
     {
         var messages = new List<object>
         {
             new Dictionary<string, object?>
             {
                 ["role"] = "system",
-                ["content"] = request.SystemPrompt
+                ["content"] = systemPrompt
             }
         };
 
-        foreach (var message in request.Messages)
+        foreach (var message in transcript)
         {
             switch (message.Role)
             {
@@ -256,6 +349,35 @@ public sealed class OpenAiLlmClient : ILlmClient
         }
 
         return messages;
+    }
+
+    private static bool ShouldAutoContinue(
+        StreamPassState passState,
+        int continuationPassesRemaining,
+        long consumedOutputTokens,
+        int requestedMaxOutputTokens)
+    {
+        if (continuationPassesRemaining <= 0)
+        {
+            return false;
+        }
+
+        if (!string.Equals(passState.LastFinishReason, "length", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (passState.HasToolCalls)
+        {
+            return false;
+        }
+
+        if (passState.AssistantText.Length == 0)
+        {
+            return false;
+        }
+
+        return consumedOutputTokens < requestedMaxOutputTokens;
     }
 
     private static async IAsyncEnumerable<string> ReadSseDataLinesAsync(
@@ -339,4 +461,18 @@ public sealed class OpenAiLlmClient : ILlmClient
         public string? Name { get; set; }
         public StringBuilder Arguments { get; } = new();
     }
+
+    private sealed class StreamPassState
+    {
+        public StringBuilder AssistantText { get; } = new();
+        public string? LastFinishReason { get; set; }
+        public bool HasToolCalls { get; set; }
+        public long? OutputTokensFromUsage { get; set; }
+        public int EstimatedOutputCharacters { get; set; }
+        public int EstimatedOutputTokens => OpenAiOutputTokenBudgetPlanner.EstimateTokensFromCharacters(EstimatedOutputCharacters);
+    }
+
+    private sealed record PayloadBuildResult(
+        IReadOnlyDictionary<string, object?> Payload,
+        OpenAiOutputTokenBudgetPlan Budget);
 }

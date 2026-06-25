@@ -1,4 +1,5 @@
 using IronPaw.AgentCore.Abstractions;
+using IronPaw.AgentCore.Providers;
 using IronPaw.Cli;
 using Spectre.Console;
 
@@ -40,7 +41,12 @@ var sessionKey = new SessionKey(string.IsNullOrWhiteSpace(options.Session) ? "de
 IAgentEventSink eventSink = options.NoEvents
     ? NullAgentEventSink.Instance
     : new AnsiConsoleEventSink();
-using var bootstrap = AppBootstrapper.Build(options.Store, options.MessageTtlDays);
+var llmOptionOverrides = new OpenAiClientOptionOverrides(
+    ContextWindowTokens: options.LlmContextWindowTokens,
+    SafetyMarginTokens: options.LlmSafetyMarginTokens,
+    MinimumOutputTokensPerRequest: options.LlmMinOutputTokensPerRequest,
+    MaxAutoContinuationPasses: options.LlmMaxAutoContinuationPasses);
+using var bootstrap = AppBootstrapper.Build(options.Store, options.MessageTtlDays, llmOptionOverrides);
 
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) =>
@@ -52,7 +58,14 @@ Console.CancelKeyPress += (_, eventArgs) =>
 try
 {
     ConsoleUi.RenderBanner();
-    ConsoleUi.RenderRunSettings(provider, model, sessionKey.Value, options.Profile, options.NoEvents, bootstrap.SkillLoadResult.SkillsLoaded);
+    ConsoleUi.RenderRunSettings(
+        provider,
+        model,
+        sessionKey.Value,
+        options.Profile,
+        options.NoEvents,
+        bootstrap.SkillLoadResult.SkillsLoaded,
+        ResolveLlmBudgetOptions(provider, llmOptionOverrides));
     ConsoleUi.RenderSkillDiagnostics(bootstrap.SkillLoadResult);
 
     if (options.ListSkills)
@@ -128,6 +141,7 @@ try
                 options.Profile,
                 options.NoEvents,
                 bootstrap.SkillLoadResult.SkillsLoaded,
+                llmOptionOverrides,
                 bootstrap.MemoryStore,
                 bootstrap.RunHistoryStore,
                 bootstrap.SessionStore,
@@ -190,6 +204,11 @@ static string ResolveModel(string? configuredModel, string provider)
     }
 
     return CliDefaults.ProviderDefaultModels[provider];
+}
+
+static OpenAiClientOptions? ResolveLlmBudgetOptions(string provider, OpenAiClientOptionOverrides llmOptionOverrides)
+{
+    return LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides);
 }
 
 static string PromptForInteractivePrompt(string provider, string model, string sessionKey)

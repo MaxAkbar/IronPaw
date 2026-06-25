@@ -1,4 +1,5 @@
 using IronPaw.AgentCore.Abstractions;
+using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
 using Spectre.Console;
 
@@ -14,6 +15,7 @@ internal static class InteractiveCommandHandler
         ToolProfile profile,
         bool noEvents,
         int skillsLoaded,
+        OpenAiClientOptionOverrides llmOptionOverrides,
         IMemoryStore memoryStore,
         IRunHistoryStore runHistoryStore,
         ISessionStore sessionStore,
@@ -50,7 +52,14 @@ internal static class InteractiveCommandHandler
                 return true;
 
             case "/settings":
-                ConsoleUi.RenderRunSettings(provider, model, sessionKey.Value, profile, noEvents, skillsLoaded);
+                ConsoleUi.RenderRunSettings(
+                    provider,
+                    model,
+                    sessionKey.Value,
+                    profile,
+                    noEvents,
+                    skillsLoaded,
+                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides));
                 return true;
 
             case "/provider":
@@ -67,7 +76,14 @@ internal static class InteractiveCommandHandler
                     model = CliDefaults.ProviderDefaultModels[provider];
                 }
 
-                ConsoleUi.RenderRunSettings(provider, model, sessionKey.Value, profile, noEvents, skillsLoaded);
+                ConsoleUi.RenderRunSettings(
+                    provider,
+                    model,
+                    sessionKey.Value,
+                    profile,
+                    noEvents,
+                    skillsLoaded,
+                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides));
                 return true;
             }
 
@@ -85,7 +101,14 @@ internal static class InteractiveCommandHandler
                 }
 
                 model = selectedModel.Trim();
-                ConsoleUi.RenderRunSettings(provider, model, sessionKey.Value, profile, noEvents, skillsLoaded);
+                ConsoleUi.RenderRunSettings(
+                    provider,
+                    model,
+                    sessionKey.Value,
+                    profile,
+                    noEvents,
+                    skillsLoaded,
+                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides));
                 return true;
             }
 
@@ -103,7 +126,14 @@ internal static class InteractiveCommandHandler
                 }
 
                 sessionKey = new SessionKey(selectedSession.Trim());
-                ConsoleUi.RenderRunSettings(provider, model, sessionKey.Value, profile, noEvents, skillsLoaded);
+                ConsoleUi.RenderRunSettings(
+                    provider,
+                    model,
+                    sessionKey.Value,
+                    profile,
+                    noEvents,
+                    skillsLoaded,
+                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides));
                 return true;
             }
 

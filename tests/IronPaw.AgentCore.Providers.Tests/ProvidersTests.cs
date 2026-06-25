@@ -10,6 +10,64 @@ namespace IronPaw.AgentCore.Providers.Tests;
 public sealed class ProvidersTests
 {
     [Fact]
+    public void LlmClientFactory_ResolveOpenAiCompatibleOptions_ReturnsProviderSpecificDefaults()
+    {
+        using var _ = BeginLlmBudgetEnvironmentScope();
+
+        var openAi = LlmClientFactory.ResolveOpenAiCompatibleOptions("openai");
+        var ollama = LlmClientFactory.ResolveOpenAiCompatibleOptions("ollama");
+        var lmStudio = LlmClientFactory.ResolveOpenAiCompatibleOptions("lmstudio");
+        var nonCompatible = LlmClientFactory.ResolveOpenAiCompatibleOptions("anthropic");
+
+        Assert.NotNull(openAi);
+        Assert.Equal(128_000, openAi!.ContextWindowTokens);
+        Assert.Equal(2_048, openAi.SafetyMarginTokens);
+        Assert.Equal(256, openAi.MinimumOutputTokensPerRequest);
+        Assert.Equal(2, openAi.MaxAutoContinuationPasses);
+
+        Assert.NotNull(ollama);
+        Assert.Equal(8_192, ollama!.ContextWindowTokens);
+        Assert.Equal(768, ollama.SafetyMarginTokens);
+        Assert.Equal(128, ollama.MinimumOutputTokensPerRequest);
+        Assert.Equal(1, ollama.MaxAutoContinuationPasses);
+
+        Assert.NotNull(lmStudio);
+        Assert.Equal(8_192, lmStudio!.ContextWindowTokens);
+        Assert.Null(nonCompatible);
+    }
+
+    [Fact]
+    public void LlmClientFactory_ResolveOpenAiCompatibleOptions_RuntimeOverridesBeatEnvironment()
+    {
+        using var _ = BeginLlmBudgetEnvironmentScope(
+            contextWindow: "4096",
+            safetyMargin: "400",
+            minOutput: "64",
+            maxAutoContinuationPasses: "1");
+
+        var fromEnvironmentOnly = LlmClientFactory.ResolveOpenAiCompatibleOptions("openai");
+        var fromRuntimeOverride = LlmClientFactory.ResolveOpenAiCompatibleOptions(
+            "openai",
+            new OpenAiClientOptionOverrides(
+                ContextWindowTokens: 32768,
+                SafetyMarginTokens: 1024,
+                MinimumOutputTokensPerRequest: 512,
+                MaxAutoContinuationPasses: 3));
+
+        Assert.NotNull(fromEnvironmentOnly);
+        Assert.Equal(4096, fromEnvironmentOnly!.ContextWindowTokens);
+        Assert.Equal(400, fromEnvironmentOnly.SafetyMarginTokens);
+        Assert.Equal(64, fromEnvironmentOnly.MinimumOutputTokensPerRequest);
+        Assert.Equal(1, fromEnvironmentOnly.MaxAutoContinuationPasses);
+
+        Assert.NotNull(fromRuntimeOverride);
+        Assert.Equal(32768, fromRuntimeOverride!.ContextWindowTokens);
+        Assert.Equal(1024, fromRuntimeOverride.SafetyMarginTokens);
+        Assert.Equal(512, fromRuntimeOverride.MinimumOutputTokensPerRequest);
+        Assert.Equal(3, fromRuntimeOverride.MaxAutoContinuationPasses);
+    }
+
+    [Fact]
     public async Task RuleBasedLlmClient_NoMessages_ReturnsNoMessagesDelta()
     {
         var client = new RuleBasedLlmClient();
@@ -109,6 +167,80 @@ public sealed class ProvidersTests
     }
 
     [Fact]
+    public async Task OpenAiLlmClient_LengthFinishReason_AutoContinuesStreamingText()
+    {
+        const string firstResponseBody =
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Part one \"},\"finish_reason\":null}]}\n" +
+            "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n" +
+            "data: {\"usage\":{\"prompt_tokens\":21,\"completion_tokens\":6}}\n" +
+            "data: [DONE]\n";
+        const string secondResponseBody =
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Part two.\"},\"finish_reason\":null}]}\n" +
+            "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n" +
+            "data: {\"usage\":{\"prompt_tokens\":28,\"completion_tokens\":5}}\n" +
+            "data: [DONE]\n";
+
+        var handler = new RecordingSequenceHandler(
+            (HttpStatusCode.OK, firstResponseBody),
+            (HttpStatusCode.OK, secondResponseBody));
+        var client = new OpenAiLlmClient(
+            new HttpClient(handler),
+            apiKeyResolver: () => "test-key",
+            options: new OpenAiClientOptions(
+                ContextWindowTokens: 8_192,
+                SafetyMarginTokens: 512,
+                MinimumOutputTokensPerRequest: 64,
+                MaxAutoContinuationPasses: 2));
+
+        var request = CreateRequest(
+            provider: "openai",
+            model: "gpt-4o-mini",
+            messages: [new ChatMessage(ChatRole.User, "Tell me a long answer.")],
+            maxOutputTokens: 256);
+        var deltas = await CollectAsync(client.StreamAsync(request, CancellationToken.None));
+
+        var combinedText = string.Concat(deltas.OfType<AssistantTextDelta>().Select(delta => delta.Text));
+        Assert.Equal("Part one Part two.", combinedText);
+        Assert.Equal(2, handler.RequestBodies.Count);
+
+        using var secondRequestDocument = JsonDocument.Parse(handler.RequestBodies[1]);
+        var messages = secondRequestDocument.RootElement.GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal("assistant", messages[^2].GetProperty("role").GetString());
+        Assert.Equal("Part one ", messages[^2].GetProperty("content").GetString());
+        Assert.Equal("user", messages[^1].GetProperty("role").GetString());
+        Assert.Contains(
+            "Continue exactly where you left off",
+            messages[^1].GetProperty("content").GetString(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OpenAiLlmClient_NoOutputBudget_ReturnsErrorWithoutCallingApi()
+    {
+        var handler = new RecordingSequenceHandler();
+        var client = new OpenAiLlmClient(
+            new HttpClient(handler),
+            apiKeyResolver: () => "test-key",
+            options: new OpenAiClientOptions(
+                ContextWindowTokens: 1_024,
+                SafetyMarginTokens: 256,
+                MinimumOutputTokensPerRequest: 64,
+                MaxAutoContinuationPasses: 0));
+
+        var oversizedPrompt = new string('x', 10_000);
+        var request = CreateRequest(
+            provider: "openai",
+            model: "gpt-4o-mini",
+            messages: [new ChatMessage(ChatRole.User, oversizedPrompt)],
+            maxOutputTokens: 512);
+        var deltas = await CollectAsync(client.StreamAsync(request, CancellationToken.None));
+
+        var error = Assert.IsType<LlmErrorDelta>(Assert.Single(deltas));
+        Assert.Contains("No output token budget available", error.Error, StringComparison.Ordinal);
+        Assert.Empty(handler.RequestBodies);
+    }
+
+    [Fact]
     public async Task AnthropicLlmClient_ParsesTextAndToolUse()
     {
         // SSE format matching Anthropic's event stream protocol
@@ -159,7 +291,8 @@ public sealed class ProvidersTests
         string provider = "local",
         string model = "rule-based-v1",
         IReadOnlyList<ChatMessage>? messages = null,
-        IReadOnlyList<LlmToolDefinition>? tools = null)
+        IReadOnlyList<LlmToolDefinition>? tools = null,
+        int maxOutputTokens = 4096)
     {
         return new LlmRequest(
             RunId: new RunId("run-1"),
@@ -169,7 +302,8 @@ public sealed class ProvidersTests
             SystemPrompt: "system",
             Messages: messages ?? [new ChatMessage(ChatRole.User, "hello")],
             Tools: tools ?? [],
-            Timeout: TimeSpan.FromSeconds(10));
+            Timeout: TimeSpan.FromSeconds(10),
+            MaxOutputTokens: maxOutputTokens);
     }
 
     private static async Task<List<LlmDelta>> CollectAsync(IAsyncEnumerable<LlmDelta> stream)
@@ -230,11 +364,77 @@ public sealed class ProvidersTests
         }
     }
 
+    private sealed class RecordingSequenceHandler : HttpMessageHandler
+    {
+        private readonly Queue<(HttpStatusCode StatusCode, string Body)> _responses;
+
+        public RecordingSequenceHandler(params (HttpStatusCode StatusCode, string Body)[] responses)
+        {
+            _responses = new Queue<(HttpStatusCode StatusCode, string Body)>(responses);
+        }
+
+        public List<string> RequestBodies { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestBodies.Add(request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken));
+
+            if (_responses.Count == 0)
+            {
+                throw new InvalidOperationException("No queued HTTP responses were configured.");
+            }
+
+            var (statusCode, body) = _responses.Dequeue();
+            return new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
+        }
+    }
+
     private sealed class ThrowingHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             throw new InvalidOperationException("Handler should not be invoked.");
+        }
+    }
+
+    private static IDisposable BeginLlmBudgetEnvironmentScope(
+        string? contextWindow = null,
+        string? safetyMargin = null,
+        string? minOutput = null,
+        string? maxAutoContinuationPasses = null)
+    {
+        return new EnvironmentVariableScope(
+            ("IRONPAW_LLM_CONTEXT_WINDOW_TOKENS", contextWindow),
+            ("IRONPAW_LLM_SAFETY_MARGIN_TOKENS", safetyMargin),
+            ("IRONPAW_LLM_MIN_OUTPUT_TOKENS_PER_REQUEST", minOutput),
+            ("IRONPAW_LLM_MAX_AUTO_CONTINUATION_PASSES", maxAutoContinuationPasses));
+    }
+
+    private sealed class EnvironmentVariableScope : IDisposable
+    {
+        private readonly IReadOnlyDictionary<string, string?> _previousValues;
+
+        public EnvironmentVariableScope(params (string Name, string? Value)[] updates)
+        {
+            var previousValues = new Dictionary<string, string?>(StringComparer.Ordinal);
+            foreach (var (name, value) in updates)
+            {
+                previousValues[name] = Environment.GetEnvironmentVariable(name);
+                Environment.SetEnvironmentVariable(name, value);
+            }
+
+            _previousValues = previousValues;
+        }
+
+        public void Dispose()
+        {
+            foreach (var (name, value) in _previousValues)
+            {
+                Environment.SetEnvironmentVariable(name, value);
+            }
         }
     }
 }
