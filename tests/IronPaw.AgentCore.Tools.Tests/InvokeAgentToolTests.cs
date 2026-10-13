@@ -107,7 +107,8 @@ public sealed class InvokeAgentToolTests
             SubagentDepth: 1,
             AgentId: "supervisor",
             ParentRunId: new RunId("root-run"),
-            ParentSessionKey: new SessionKey("root-session"));
+            ParentSessionKey: new SessionKey("root-session"),
+            ToolPolicy: new ToolSelectionPolicy(ToolProfile.Coding));
 
         var call = CreateToolCall(new { agent_id = "coder", task = "do work" });
         await tool.ExecuteAsync(call, parentContext, CancellationToken.None);
@@ -178,7 +179,8 @@ public sealed class InvokeAgentToolTests
             new SessionKey("parent"),
             "openai",
             "gpt-4",
-            CallerIdentity.LocalOwner());
+            CallerIdentity.LocalOwner(),
+            ToolPolicy: new ToolSelectionPolicy(ToolProfile.Coding));
 
         var call = CreateToolCall(new { agent_id = "coder", task = "do work" });
         await tool.ExecuteAsync(call, parentContext, CancellationToken.None);
@@ -186,6 +188,77 @@ public sealed class InvokeAgentToolTests
         Assert.NotNull(capturedRequest);
         Assert.Equal("openai", capturedRequest.Provider);
         Assert.Equal("gpt-4", capturedRequest.Model);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ChildPolicyPreservesParentRestrictions()
+    {
+        var registry = new InMemoryAgentRegistry();
+        registry.Register(CreateAgentDef("coder") with { ToolPolicy = new ToolSelectionPolicy(ToolProfile.Full) });
+        AgentRunRequest? captured = null;
+        var orchestrator = new StubOrchestrator("done", onRun: request => captured = request);
+        var parentPolicy = new ToolSelectionPolicy(ToolProfile.Coding, SenderIsOwner: true,
+            DenyList: ["write_file"], AllowedGroups: ["group:fs"]);
+        await new InvokeAgentTool(registry, orchestrator).ExecuteAsync(
+            CreateToolCall(new { agent_id = "coder", task = "inspect only" }),
+            CreateContext() with { ToolPolicy = parentPolicy }, CancellationToken.None);
+        Assert.NotNull(captured);
+        var tools = BuiltInToolFactory.CreateDefault(Path.GetTempPath());
+        var available = new InMemoryToolRegistry(tools).ResolveTools(captured.ToolPolicy);
+        Assert.Contains(available, tool => tool.Descriptor.Name == "read_file");
+        Assert.DoesNotContain(available, tool => tool.Descriptor.Name == "write_file");
+        Assert.DoesNotContain(available, tool => tool.Descriptor.Group != "group:fs");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MissingParentPolicyFailsClosed()
+    {
+        var registry = new InMemoryAgentRegistry();
+        registry.Register(CreateAgentDef("coder"));
+        var invoked = false;
+        var orchestrator = new StubOrchestrator("done", onRun: _ => invoked = true);
+        var result = await new InvokeAgentTool(registry, orchestrator).ExecuteAsync(
+            CreateToolCall(new { agent_id = "coder", task = "do work" }),
+            CreateContext() with { ToolPolicy = null }, CancellationToken.None);
+        Assert.True(result.IsError);
+        Assert.False(invoked);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ForwardsChildEventsToParentSink()
+    {
+        var registry = new InMemoryAgentRegistry();
+        registry.Register(CreateAgentDef("coder"));
+        var sink = new CapturingSink();
+        await new InvokeAgentTool(registry, new StubOrchestrator("done")).ExecuteAsync(
+            CreateToolCall(new { agent_id = "coder", task = "do work" }),
+            CreateContext() with { EventSink = sink }, CancellationToken.None);
+        Assert.Equal("coder", Assert.Single(sink.Events).AgentId);
+    }
+
+    [Theory]
+    [InlineData(AgentRunStatus.RoundLimitReached)]
+    [InlineData(AgentRunStatus.Failed)]
+    [InlineData(AgentRunStatus.Cancelled)]
+    [InlineData(AgentRunStatus.AwaitingInput)]
+    public async Task ExecuteAsync_IncompleteChildResultIsAnError(AgentRunStatus status)
+    {
+        var registry = new InMemoryAgentRegistry();
+        registry.Register(CreateAgentDef("coder"));
+        var result = await new InvokeAgentTool(registry, new StubOrchestrator("incomplete", status: status)).ExecuteAsync(
+            CreateToolCall(new { agent_id = "coder", task = "do work" }), CreateContext(), CancellationToken.None);
+        Assert.True(result.IsError);
+        Assert.Equal(status.ToString(), result.Details!["status"]);
+    }
+
+    private sealed class CapturingSink : IAgentEventSink
+    {
+        public List<AgentEvent> Events { get; } = [];
+        public ValueTask PublishAsync(AgentEvent evt, CancellationToken ct)
+        {
+            Events.Add(evt);
+            return ValueTask.CompletedTask;
+        }
     }
 
     private static ToolExecutionContext CreateContext(int subagentDepth = 0)
@@ -196,7 +269,8 @@ public sealed class InvokeAgentToolTests
             "local",
             "rule-based-v1",
             CallerIdentity.LocalOwner(),
-            SubagentDepth: subagentDepth);
+            SubagentDepth: subagentDepth,
+            ToolPolicy: new ToolSelectionPolicy(ToolProfile.Coding));
     }
 
     private static ToolCall CreateToolCall(object args)
@@ -226,19 +300,24 @@ public sealed class InvokeAgentToolTests
     {
         private readonly string _response;
         private readonly Action<AgentRunRequest>? _onRun;
+        private readonly AgentRunStatus _status;
 
-        public StubOrchestrator(string response, Action<AgentRunRequest>? onRun = null)
+        public StubOrchestrator(string response, Action<AgentRunRequest>? onRun = null, AgentRunStatus status = AgentRunStatus.Succeeded)
         {
             _response = response;
             _onRun = onRun;
+            _status = status;
         }
 
-        public Task<AgentRunResult> RunAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct)
+        public async Task<AgentRunResult> RunAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct)
         {
             _onRun?.Invoke(request);
 
-            return Task.FromResult(new AgentRunResult(
-                RunId.New(),
+            var runId = RunId.New();
+            await sink.PublishAsync(new AgentEvent(runId, request.SessionKey, AgentEventStream.Lifecycle,
+                "run_started", DateTimeOffset.UtcNow, EventData.Of()), ct);
+            return new AgentRunResult(
+                runId,
                 request.SessionKey,
                 _response,
                 [],
@@ -247,7 +326,7 @@ public sealed class InvokeAgentToolTests
                     ["rounds"] = 1,
                     ["toolCount"] = 0,
                     ["totalTokens"] = 100L
-                }));
+                }, Status: _status);
         }
     }
 }

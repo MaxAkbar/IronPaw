@@ -114,7 +114,8 @@ public sealed record ToolSelectionPolicy(
     IReadOnlyCollection<string>? AllowList = null,
     IReadOnlyCollection<string>? DenyList = null,
     IReadOnlyCollection<string>? AllowedGroups = null,
-    int SubagentDepth = 0);
+    int SubagentDepth = 0,
+    ToolSelectionPolicy? InheritedPolicy = null);
 
 public sealed record ToolDescriptor(
     string Name,
@@ -137,7 +138,9 @@ public sealed record ToolExecutionContext(
     int SubagentDepth = 0,
     string? AgentId = null,
     RunId? ParentRunId = null,
-    SessionKey? ParentSessionKey = null)
+    SessionKey? ParentSessionKey = null,
+    ToolSelectionPolicy? ToolPolicy = null,
+    IAgentEventSink? EventSink = null)
 {
     public RunId ScopeRunId => ParentRunId ?? RunId;
 
@@ -407,12 +410,23 @@ public sealed record AgentRunRequest(
     RunId? ParentRunId = null,
     SessionKey? ParentSessionKey = null);
 
+/// <summary>Tracks completion of the execution loop. Artifact verification is separate.</summary>
+public enum AgentRunStatus
+{
+    Succeeded,
+    Failed,
+    Cancelled,
+    RoundLimitReached,
+    AwaitingInput
+}
+
 public sealed record AgentRunResult(
     RunId RunId,
     SessionKey SessionKey,
     string FinalAssistantMessage,
     IReadOnlyList<ChatMessage> Transcript,
-    IReadOnlyDictionary<string, object?> Metadata);
+    IReadOnlyDictionary<string, object?> Metadata,
+    AgentRunStatus Status = AgentRunStatus.Succeeded);
 
 public interface IAgentOrchestrator
 {
@@ -460,7 +474,9 @@ public sealed record RunSummary(
     string FinalAssistantMessage,
     int Rounds,
     long TotalTokens,
-    IReadOnlyList<string> ToolsUsed);
+    IReadOnlyList<string> ToolsUsed,
+    AgentRunStatus Status = AgentRunStatus.Succeeded,
+    string? Error = null);
 
 public interface IRunHistoryStore
 {

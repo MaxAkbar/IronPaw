@@ -7,6 +7,19 @@ namespace IronPaw.AgentCore.Tools.Tests;
 public sealed class ToolPolicyEvaluatorTests
 {
     [Fact]
+    public void Apply_DelegationPreservesRestrictionsFromEveryAncestor()
+    {
+        var root = new ToolSelectionPolicy(ToolProfile.Full, SenderIsOwner: true,
+            AllowList: ["read_file", "write_file", "current_time"], DenyList: ["write_file"]);
+        var parent = new ToolSelectionPolicy(ToolProfile.Coding, SenderIsOwner: true,
+            DenyList: ["read_file"], InheritedPolicy: root);
+        var child = new ToolSelectionPolicy(ToolProfile.Full, SenderIsOwner: true,
+            SubagentDepth: 2, InheritedPolicy: parent);
+        var tools = BuiltInToolFactory.CreateDefault(Path.GetTempPath());
+        Assert.Equal("current_time", Assert.Single(ToolPolicyEvaluator.Apply(tools, child)).Descriptor.Name);
+    }
+
+    [Fact]
     public void Apply_CodingProfile_AllowsFsSystemAndSkills()
     {
         var tools = new ITool[]

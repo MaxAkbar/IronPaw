@@ -61,12 +61,14 @@ internal static class DesktopBootstrapper
 
         services.AddSingleton(sessionStore);
         services.AddSingleton(transcriptStore);
+        services.AddSingleton<IRunHistoryStore>(new JsonRunHistoryStore(Path.Combine(paths.StateRoot, "run-history.jsonl")));
 
         services.AddSingleton<InMemoryToolRegistry>(sp =>
         {
             var tools = BuiltInToolFactory.CreateDefault(
                 paths.WorkspaceRoot,
                 sp.GetRequiredService<SkillAddinLoadResult>().SkillTools,
+                runHistoryStore: sp.GetRequiredService<IRunHistoryStore>(),
                 webBrowserService: sp.GetRequiredService<IWebBrowserService>());
             return new InMemoryToolRegistry(tools);
         });
@@ -95,7 +97,8 @@ internal static class DesktopBootstrapper
                 sp.GetRequiredService<ILlmClient>(),
                 sp.GetRequiredService<ITranscriptSanitizer>(),
                 sp.GetRequiredService<IToolResultTruncator>(),
-                sp.GetRequiredService<ISystemPromptBuilder>());
+                sp.GetRequiredService<ISystemPromptBuilder>(),
+                runHistoryStore: sp.GetRequiredService<IRunHistoryStore>());
 
             RegisterRuntimeTools(sp, paths.AppSkillsDirectory, orchestrator);
             return orchestrator;
@@ -158,6 +161,8 @@ internal static class DesktopBootstrapper
                           """,
             ToolPolicy: new ToolSelectionPolicy(
                 Profile: ToolProfile.Full,
+                AllowList: new[] { "read_file", "list_files", "current_time", "recall_memory",
+                    "review_runs", "review_run_detail", "send_agent_message", "read_agent_messages" },
                 DenyList: new[] { "invoke_agent", "list_agents", "create_skill", "web_navigate", "web_extract_structured" }),
             Provider: reviewerProvider,
             Model: reviewerModel,

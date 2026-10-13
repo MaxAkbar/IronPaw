@@ -135,18 +135,6 @@ public sealed class JsonTranscriptStore : ITranscriptStore
 
     private string ResolvePath(SessionKey key)
     {
-        var safeId = string.Concat(key.Value.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_'));
-        if (string.IsNullOrWhiteSpace(safeId))
-        {
-            throw new InvalidOperationException($"Session id '{key.Value}' does not contain valid filename characters.");
-        }
-
-        var fullPath = Path.GetFullPath(Path.Combine(_sessionsDirectory, $"{safeId}.jsonl"));
-        if (!fullPath.StartsWith(_sessionsDirectory, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Session transcript path escapes configured root: {fullPath}");
-        }
-
-        return fullPath;
+        return SessionFileName.Resolve(_sessionsDirectory, key, ".jsonl");
     }
 }

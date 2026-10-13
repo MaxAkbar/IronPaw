@@ -46,6 +46,8 @@ public sealed class ReviewRunDetailTool : ITool
         {
             run_id = summary.RunId,
             session_id = summary.SessionId,
+            status = summary.Status.ToString(),
+            error = summary.Error,
             started_at = summary.StartedAt.ToString("O"),
             completed_at = summary.CompletedAt.ToString("O"),
             user_prompt = summary.UserPrompt,

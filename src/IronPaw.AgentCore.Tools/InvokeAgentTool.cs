@@ -73,13 +73,19 @@ public sealed class InvokeAgentTool : ITool
             return ToolResult.Error($"Maximum agent delegation depth ({_maxDepth}) exceeded.");
         }
 
+        if (context.ToolPolicy is null)
+        {
+            return ToolResult.Error("Delegation requires the parent tool policy.");
+        }
+
         // Ephemeral session key for transcript isolation.
         var childSessionKey = new SessionKey($"{context.RunId.Value}::{agentId}::{Guid.NewGuid():N}");
 
         var childPolicy = agentDef.ToolPolicy with
         {
             SubagentDepth = childDepth,
-            SenderIsOwner = context.Caller.IsOwner
+            SenderIsOwner = context.Caller.IsOwner,
+            InheritedPolicy = context.ToolPolicy
         };
 
         var childRequest = new AgentRunRequest(
@@ -97,17 +103,19 @@ public sealed class InvokeAgentTool : ITool
             ParentSessionKey: context.ScopeSessionKey);
 
         // Wrap the event sink to tag child events with the agent ID.
-        var childSink = new AgentPrefixedEventSink(NullAgentEventSink.Instance, agentDef.AgentId);
+        var childSink = new AgentPrefixedEventSink(context.EventSink ?? NullAgentEventSink.Instance, agentDef.AgentId);
 
         var result = await _orchestrator.RunAsync(childRequest, childSink, ct);
 
-        return ToolResult.Success(
-            result.FinalAssistantMessage,
-            ContentTrust.Trusted,
-            new Dictionary<string, object?>
+        return new ToolResult(
+            IsError: result.Status != AgentRunStatus.Succeeded,
+            Content: result.FinalAssistantMessage,
+            Trust: ContentTrust.Local,
+            Details: new Dictionary<string, object?>
             {
                 ["agent_id"] = agentId,
                 ["child_run_id"] = result.RunId.Value,
+                ["status"] = result.Status.ToString(),
                 ["rounds"] = result.Metadata.GetValueOrDefault("rounds"),
                 ["total_tokens"] = result.Metadata.GetValueOrDefault("totalTokens")
             });

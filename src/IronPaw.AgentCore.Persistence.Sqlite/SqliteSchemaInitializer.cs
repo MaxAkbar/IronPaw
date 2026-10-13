@@ -12,6 +12,27 @@ public static class SqliteSchemaInitializer
         using var command = connection.CreateCommand();
         command.CommandText = Schema;
         command.ExecuteNonQuery();
+
+        using var transaction = connection.BeginTransaction();
+        using var columnsCommand = connection.CreateCommand();
+        columnsCommand.Transaction = transaction;
+        columnsCommand.CommandText = "PRAGMA table_info(run_history)";
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (var reader = columnsCommand.ExecuteReader())
+        {
+            while (reader.Read()) columns.Add(reader.GetString(1));
+        }
+        if (!columns.Contains("status"))
+        {
+            columnsCommand.CommandText = "ALTER TABLE run_history ADD COLUMN status TEXT NOT NULL DEFAULT 'Succeeded'";
+            columnsCommand.ExecuteNonQuery();
+        }
+        if (!columns.Contains("error"))
+        {
+            columnsCommand.CommandText = "ALTER TABLE run_history ADD COLUMN error TEXT";
+            columnsCommand.ExecuteNonQuery();
+        }
+        transaction.Commit();
     }
 
     public static string BuildConnectionString(string databasePath)
@@ -76,7 +97,9 @@ public static class SqliteSchemaInitializer
             final_assistant_message TEXT NOT NULL,
             rounds                  INTEGER NOT NULL,
             total_tokens            INTEGER NOT NULL,
-            tools_used_json         TEXT NOT NULL
+            tools_used_json         TEXT NOT NULL,
+            status                  TEXT NOT NULL DEFAULT 'Succeeded',
+            error                   TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_run_history_session
             ON run_history(session_id);

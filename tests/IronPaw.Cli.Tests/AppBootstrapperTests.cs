@@ -36,5 +36,10 @@ public sealed class AppBootstrapperTests
         Assert.Contains("web_extract_structured", reviewer.ToolPolicy.DenyList ?? []);
         Assert.Contains("web_browser", codegen.AllowedMessageSenders ?? []);
         Assert.Contains("web_browser", reviewer.AllowedMessageSenders ?? []);
+        var tools = IronPaw.AgentCore.Tools.BuiltInToolFactory.CreateDefault(Path.GetTempPath());
+        var available = new IronPaw.AgentCore.Tools.InMemoryToolRegistry(tools).ResolveTools(
+            reviewer.ToolPolicy with { SenderIsOwner = true });
+        Assert.Contains(available, tool => tool.Descriptor.Name == "read_file");
+        Assert.DoesNotContain(available, tool => tool.Descriptor.Name == "write_file");
     }
 }

@@ -48,23 +48,64 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _runHistoryStore = runHistoryStore;
     }
 
-    public Task<AgentRunResult> RunAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct)
+    public async Task<AgentRunResult> RunAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.MaxRounds < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "MaxRounds must be at least one.");
+        }
         var effectiveSink = sink ?? NullAgentEventSink.Instance;
-        return _laneScheduler.EnqueueAsync(request.SessionKey, laneCt => RunInLaneAsync(request, effectiveSink, laneCt), ct);
+        var progress = new RunProgress(request);
+        try
+        {
+            return await _laneScheduler.EnqueueAsync(request.SessionKey, async laneCt =>
+            {
+                progress.EnteredLane = true;
+                AgentRunResult result;
+                try
+                {
+                    await PublishAsync(effectiveSink, new AgentEvent(
+                        progress.RunId, request.SessionKey, AgentEventStream.Lifecycle,
+                        "run_started", DateTimeOffset.UtcNow,
+                        EventData.Of(("provider", request.Provider), ("model", request.Model)),
+                        AgentId: request.AgentId), laneCt);
+                    result = await RunInLaneAsync(request, effectiveSink, progress, laneCt);
+                    await RecordSummaryAsync(progress, error: null, laneCt);
+                }
+                catch (Exception error)
+                {
+                    await RecordFailureAsync(progress, effectiveSink, error, laneCt.IsCancellationRequested);
+                    throw;
+                }
+
+                // Observer failures must not turn committed work into a second, failed run.
+                using var terminalCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                try
+                {
+                    await PublishTerminalAsync(progress, effectiveSink, error: null, terminalCt.Token);
+                }
+                catch (Exception error)
+                {
+                    var metadata = result.Metadata.ToDictionary(pair => pair.Key, pair => pair.Value);
+                    metadata["eventDeliveryError"] = error.Message;
+                    result = result with { Metadata = metadata };
+                }
+                return result;
+            }, ct);
+        }
+        catch (Exception error) when (!progress.EnteredLane)
+        {
+            await RecordFailureAsync(progress, effectiveSink, error, ct.IsCancellationRequested);
+            throw;
+        }
     }
 
-    private async Task<AgentRunResult> RunInLaneAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct)
+    private async Task<AgentRunResult> RunInLaneAsync(
+        AgentRunRequest request, IAgentEventSink sink, RunProgress progress, CancellationToken ct)
     {
-        var runId = RunId.New();
-        var startedAt = DateTimeOffset.UtcNow;
-        var rounds = 0;
-        long aggregatedInput = 0;
-        long aggregatedOutput = 0;
-        long lastCacheRead = 0;
-        long lastCacheWrite = 0;
-        var finalAssistantMessage = string.Empty;
-        var toolsUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var runId = progress.RunId;
+        var toolsUsed = progress.ToolsUsed;
 
         // Pre-load memories and enrich the request (skip for sub-agents — they start fresh).
         var effectiveRequest = request;
@@ -82,23 +123,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             ToolPolicy = effectiveRequest.ToolPolicy with { SenderIsOwner = effectiveRequest.Caller.IsOwner }
         };
 
-        await PublishAsync(
-            sink,
-            new AgentEvent(
-                runId,
-                effectiveRequest.SessionKey,
-                AgentEventStream.Lifecycle,
-                Type: "run_started",
-                Timestamp: DateTimeOffset.UtcNow,
-                Data: EventData.Of(
-                    ("provider", effectiveRequest.Provider),
-                    ("model", effectiveRequest.Model)),
-                AgentId: effectiveRequest.AgentId),
-            ct);
+        progress.Request = effectiveRequest;
 
         var loadedTranscript = await _transcriptStore.LoadAsync(effectiveRequest.SessionKey, ct);
         var repairedTranscript = _transcriptSanitizer.Repair(loadedTranscript);
-        var transcript = repairedTranscript.ToList();
+        var transcript = progress.Transcript = repairedTranscript.ToList();
+        progress.TranscriptLoaded = true;
 
         transcript.Add(new ChatMessage(ChatRole.User, effectiveRequest.UserInput));
 
@@ -117,10 +147,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             runId,
             toolsUsed,
             ct);
-        aggregatedInput += routeResult.InputTokens;
-        aggregatedOutput += routeResult.OutputTokens;
-        lastCacheRead += routeResult.CacheReadTokens;
-        lastCacheWrite += routeResult.CacheWriteTokens;
+        progress.InputTokens += routeResult.InputTokens;
+        progress.OutputTokens += routeResult.OutputTokens;
+        progress.CacheReadTokens += routeResult.CacheReadTokens;
+        progress.CacheWriteTokens += routeResult.CacheWriteTokens;
 
         var initialPrompt = _promptBuilder.BuildPrompt(effectiveRequest, initialTools);
 
@@ -143,10 +173,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         var lastToolCount = initialTools.Count;
         var lastSystemPromptLength = initialPrompt.Length;
 
-        while (rounds < maxRounds)
+        while (progress.Rounds < maxRounds)
         {
             ct.ThrowIfCancellationRequested();
-            rounds++;
+            progress.Rounds++;
             savedInLastIteration = false;
 
             // Re-resolve tools every round so dynamically registered tools become visible.
@@ -170,7 +200,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 MaxOutputTokens: effectiveRequest.MaxOutputTokens);
 
             var assistantBuffer = new StringBuilder();
+            progress.PartialAssistant = assistantBuffer;
             var pendingToolCalls = new List<ToolCall>();
+            var streamCompleted = false;
 
             await PublishAsync(
                 sink,
@@ -180,7 +212,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     AgentEventStream.Lifecycle,
                     Type: "llm_round_started",
                     Timestamp: DateTimeOffset.UtcNow,
-                    Data: EventData.Of(("round", rounds)),
+                    Data: EventData.Of(("round", progress.Rounds)),
                     AgentId: effectiveRequest.AgentId),
                 ct);
 
@@ -222,23 +254,31 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         break;
 
                     case UsageDelta usage:
-                        aggregatedInput += usage.InputTokens ?? 0;
-                        aggregatedOutput += usage.OutputTokens ?? 0;
+                        progress.InputTokens += usage.InputTokens ?? 0;
+                        progress.OutputTokens += usage.OutputTokens ?? 0;
                         if (usage.CacheReadTokens.HasValue)
                         {
-                            lastCacheRead += usage.CacheReadTokens.Value;
+                            progress.CacheReadTokens += usage.CacheReadTokens.Value;
                         }
 
                         if (usage.CacheWriteTokens.HasValue)
                         {
-                            lastCacheWrite += usage.CacheWriteTokens.Value;
+                            progress.CacheWriteTokens += usage.CacheWriteTokens.Value;
                         }
 
                         break;
 
                     case LlmErrorDelta error:
                         throw new InvalidOperationException($"LLM returned an error: {error.Error}");
+                    case CompletedDelta:
+                        streamCompleted = true;
+                        break;
                 }
+            }
+
+            if (!streamCompleted)
+            {
+                throw new InvalidOperationException("The model stream ended before a completion marker.");
             }
 
             // Add text first, then tool-call messages, so the transcript never has two
@@ -249,6 +289,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 transcript.Add(new ChatMessage(ChatRole.Assistant, assistantText));
             }
 
+            progress.PartialAssistant = null;
+
             foreach (var toolCall in pendingToolCalls)
             {
                 transcript.Add(new ChatMessage(ChatRole.Assistant, toolCall.Arguments.GetRawText(), toolCall.ToolCallId, toolCall.ToolName));
@@ -256,11 +298,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
             if (pendingToolCalls.Count == 0)
             {
-                if (!string.IsNullOrWhiteSpace(assistantText))
+                if (string.IsNullOrWhiteSpace(assistantText))
                 {
-                    finalAssistantMessage = assistantText;
+                    throw new InvalidOperationException("The model stream ended without a final assistant response.");
                 }
-
+                progress.FinalAssistantMessage = assistantText;
                 break;
             }
 
@@ -284,7 +326,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         SubagentDepth: effectiveRequest.ToolPolicy.SubagentDepth,
                         AgentId: effectiveRequest.AgentId,
                         ParentRunId: effectiveRequest.ParentRunId,
-                        ParentSessionKey: effectiveRequest.ParentSessionKey);
+                        ParentSessionKey: effectiveRequest.ParentSessionKey,
+                        ToolPolicy: effectiveRequest.ToolPolicy,
+                        EventSink: sink);
                     result = await _toolExecutor.ExecuteAsync(tool, toolCall, execContext, ct);
                 }
 
@@ -293,17 +337,28 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 await PublishToolResultEventsAsync(sink, runId, effectiveRequest, toolCall, result, ct);
             }
 
-            transcript = _toolResultTruncator.Truncate(transcript, effectiveRequest.ContextWindowChars).ToList();
-            transcript = _transcriptSanitizer.Repair(transcript).ToList();
+            transcript = progress.Transcript = _toolResultTruncator.Truncate(transcript, effectiveRequest.ContextWindowChars).ToList();
+            transcript = progress.Transcript = _transcriptSanitizer.Repair(transcript).ToList();
             await _transcriptStore.ReplaceAsync(effectiveRequest.SessionKey, transcript, ct);
             savedInLastIteration = true;
         }
 
-        if (string.IsNullOrWhiteSpace(finalAssistantMessage))
+        if (routeResult.HaltAfterClarification)
         {
-            finalAssistantMessage = transcript.LastOrDefault(
-                message => message.Role is ChatRole.Assistant && string.IsNullOrWhiteSpace(message.ToolCallId))
-                ?.Content ?? "Run completed with no assistant output.";
+            progress.Status = AgentRunStatus.AwaitingInput;
+            progress.FinalAssistantMessage = transcript[^1].Content;
+        }
+        else if (string.IsNullOrWhiteSpace(progress.FinalAssistantMessage))
+        {
+            if (progress.Rounds >= maxRounds)
+            {
+                progress.Status = AgentRunStatus.RoundLimitReached;
+                progress.FinalAssistantMessage = "Round limit reached before a final response. Completed tool results are preserved; the task remains incomplete.";
+            }
+            else
+            {
+                throw new InvalidOperationException("The model stream ended without a final assistant response.");
+            }
         }
 
         // Only save when the loop exited cleanly (no tool calls in last round).
@@ -313,7 +368,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             await _transcriptStore.ReplaceAsync(effectiveRequest.SessionKey, transcript, ct);
         }
 
-        var totalTokens = aggregatedInput + aggregatedOutput + lastCacheRead + lastCacheWrite;
+        var totalTokens = progress.InputTokens + progress.OutputTokens + progress.CacheReadTokens + progress.CacheWriteTokens;
         await _sessionStore.UpsertAsync(
             effectiveRequest.SessionKey,
             existing =>
@@ -328,65 +383,134 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     UpdatedAt = DateTimeOffset.UtcNow,
                     ProviderOverride = effectiveRequest.Provider,
                     ModelOverride = effectiveRequest.Model,
-                    InputTokens = previous.InputTokens + aggregatedInput,
-                    OutputTokens = previous.OutputTokens + aggregatedOutput,
+                    InputTokens = previous.InputTokens + progress.InputTokens,
+                    OutputTokens = previous.OutputTokens + progress.OutputTokens,
                     TotalTokens = previous.TotalTokens + totalTokens,
                     TotalTokensFresh = true,
                     Diagnostics = new Dictionary<string, object?>
                     {
                         ["toolCount"] = lastToolCount,
                         ["systemPromptChars"] = lastSystemPromptLength,
-                        ["rounds"] = rounds
+                        ["rounds"] = progress.Rounds
                     }
                 };
             },
             ct);
 
-        // Record run history.
-        if (_runHistoryStore is not null)
-        {
-            var summary = new RunSummary(
-                RunId: runId.Value,
-                SessionId: effectiveRequest.SessionKey.Value,
-                StartedAt: startedAt,
-                CompletedAt: DateTimeOffset.UtcNow,
-                UserPrompt: effectiveRequest.UserInput,
-                FinalAssistantMessage: finalAssistantMessage,
-                Rounds: rounds,
-                TotalTokens: totalTokens,
-                ToolsUsed: toolsUsed.ToList());
-
-            await _runHistoryStore.RecordAsync(summary, ct);
-        }
-
-        await PublishAsync(
-            sink,
-            new AgentEvent(
-                runId,
-                effectiveRequest.SessionKey,
-                AgentEventStream.Lifecycle,
-                Type: "run_completed",
-                Timestamp: DateTimeOffset.UtcNow,
-                Data: EventData.Of(
-                    ("rounds", rounds),
-                    ("inputTokens", aggregatedInput),
-                    ("outputTokens", aggregatedOutput),
-                    ("cacheReadTokens", lastCacheRead),
-                    ("cacheWriteTokens", lastCacheWrite)),
-                AgentId: effectiveRequest.AgentId),
-            ct);
-
         return new AgentRunResult(
             runId,
             effectiveRequest.SessionKey,
-            finalAssistantMessage,
+            progress.FinalAssistantMessage,
             transcript,
             new Dictionary<string, object?>
             {
-                ["rounds"] = rounds,
+                ["rounds"] = progress.Rounds,
                 ["toolCount"] = lastToolCount,
-                ["totalTokens"] = totalTokens
-            });
+                ["totalTokens"] = progress.TotalTokens,
+                ["status"] = progress.Status.ToString()
+            },
+            Status: progress.Status);
+    }
+
+    private Task RecordSummaryAsync(RunProgress progress, string? error, CancellationToken ct)
+    {
+        if (_runHistoryStore is null) return Task.CompletedTask;
+        return _runHistoryStore.RecordAsync(new RunSummary(
+            progress.RunId.Value, progress.Request.SessionKey.Value, progress.StartedAt,
+            DateTimeOffset.UtcNow, progress.Request.UserInput, progress.FinalAssistantMessage,
+            progress.Rounds, progress.TotalTokens, progress.ToolsUsed.ToList(),
+            Status: progress.Status, Error: error), ct);
+    }
+
+    private async Task RecordFailureAsync(
+        RunProgress progress, IAgentEventSink sink, Exception error, bool cancellationRequested)
+    {
+        progress.Status = error is OperationCanceledException && cancellationRequested
+            ? AgentRunStatus.Cancelled
+            : AgentRunStatus.Failed;
+        progress.FinalAssistantMessage = progress.Status == AgentRunStatus.Cancelled
+            ? "Run cancelled before completion."
+            : $"Run failed: {error.Message}";
+        using var cleanupCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        if (progress.TranscriptLoaded)
+        {
+            if (progress.PartialAssistant is { Length: > 0 })
+            {
+                progress.Transcript.Add(new ChatMessage(ChatRole.Assistant,
+                    "[Interrupted response]\n" + progress.PartialAssistant.ToString()));
+            }
+            try
+            {
+                await _transcriptStore.ReplaceAsync(progress.Request.SessionKey,
+                    _transcriptSanitizer.Repair(progress.Transcript), cleanupCt.Token);
+            }
+            catch (Exception persistenceError)
+            {
+                error.Data["IronPaw.TranscriptPersistenceError"] = persistenceError.Message;
+            }
+        }
+        try
+        {
+            await RecordSummaryAsync(progress, error.Message, cleanupCt.Token);
+        }
+        catch (Exception historyError)
+        {
+            error.Data["IronPaw.RunHistoryError"] = historyError.Message;
+        }
+        try
+        {
+            await PublishTerminalAsync(progress, sink, error.Message, cleanupCt.Token);
+        }
+        catch (Exception observerError)
+        {
+            error.Data["IronPaw.EventDeliveryError"] = observerError.Message;
+        }
+    }
+
+    private static ValueTask PublishTerminalAsync(
+        RunProgress progress, IAgentEventSink sink, string? error, CancellationToken ct)
+    {
+        var type = progress.Status switch
+        {
+            AgentRunStatus.Succeeded => "run_completed",
+            AgentRunStatus.Cancelled => "run_cancelled",
+            AgentRunStatus.RoundLimitReached => "run_round_limit_reached",
+            AgentRunStatus.AwaitingInput => "run_awaiting_input",
+            _ => "run_failed"
+        };
+        var severity = progress.Status switch
+        {
+            AgentRunStatus.Failed => AgentEventSeverity.Error,
+            AgentRunStatus.Cancelled or AgentRunStatus.RoundLimitReached => AgentEventSeverity.Warning,
+            _ => AgentEventSeverity.Info
+        };
+        return PublishAsync(sink, new AgentEvent(
+            progress.RunId, progress.Request.SessionKey, AgentEventStream.Lifecycle,
+            type, DateTimeOffset.UtcNow,
+            EventData.Of(("status", progress.Status.ToString()), ("rounds", progress.Rounds),
+                ("inputTokens", progress.InputTokens), ("outputTokens", progress.OutputTokens),
+                ("cacheReadTokens", progress.CacheReadTokens), ("cacheWriteTokens", progress.CacheWriteTokens),
+                ("error", error)), severity, progress.Request.AgentId), ct);
+    }
+
+    private sealed class RunProgress(AgentRunRequest request)
+    {
+        public RunId RunId { get; } = RunId.New();
+        public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+        public AgentRunRequest Request { get; set; } = request;
+        public bool EnteredLane { get; set; }
+        public bool TranscriptLoaded { get; set; }
+        public List<ChatMessage> Transcript { get; set; } = [];
+        public StringBuilder? PartialAssistant { get; set; }
+        public HashSet<string> ToolsUsed { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public int Rounds { get; set; }
+        public long InputTokens { get; set; }
+        public long OutputTokens { get; set; }
+        public long CacheReadTokens { get; set; }
+        public long CacheWriteTokens { get; set; }
+        public long TotalTokens => InputTokens + OutputTokens + CacheReadTokens + CacheWriteTokens;
+        public string FinalAssistantMessage { get; set; } = string.Empty;
+        public AgentRunStatus Status { get; set; } = AgentRunStatus.Succeeded;
     }
 
     private static ValueTask PublishAsync(IAgentEventSink sink, AgentEvent evt, CancellationToken ct)
@@ -514,7 +638,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             SubagentDepth: request.ToolPolicy.SubagentDepth,
             AgentId: request.AgentId,
             ParentRunId: request.ParentRunId,
-            ParentSessionKey: request.ParentSessionKey);
+            ParentSessionKey: request.ParentSessionKey,
+            ToolPolicy: request.ToolPolicy,
+            EventSink: sink);
 
         var listResult = await _toolExecutor.ExecuteAsync(listAgentsTool, listCall, execContext, ct);
         if (listResult.IsError)
@@ -558,6 +684,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         long cacheReadTokens = 0;
         long cacheWriteTokens = 0;
 
+        var streamCompleted = false;
         await foreach (var delta in _llmClient.StreamAsync(plannerRequest, ct))
         {
             switch (delta)
@@ -583,7 +710,15 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
                 case LlmErrorDelta error:
                     throw new InvalidOperationException($"LLM returned an error: {error.Error}");
+                case CompletedDelta:
+                    streamCompleted = true;
+                    break;
             }
+        }
+
+        if (!streamCompleted)
+        {
+            throw new InvalidOperationException("The model stream ended before a completion marker.");
         }
 
         var plan = ParseRoutePlan(plannerBuffer.ToString(), availableAgents);
@@ -704,6 +839,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         var pendingToolCalls = new List<ToolCall>();
 
+        var streamCompleted = false;
         await foreach (var delta in _llmClient.StreamAsync(llmRequest, ct))
         {
             switch (delta)
@@ -727,7 +863,15 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
                 case LlmErrorDelta error:
                     throw new InvalidOperationException($"LLM returned an error: {error.Error}");
+                case CompletedDelta:
+                    streamCompleted = true;
+                    break;
             }
+        }
+
+        if (!streamCompleted)
+        {
+            throw new InvalidOperationException("The model stream ended before a completion marker.");
         }
 
         if (pendingToolCalls.Count == 0)
@@ -749,7 +893,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 SubagentDepth: request.ToolPolicy.SubagentDepth,
                 AgentId: request.AgentId,
                 ParentRunId: request.ParentRunId,
-                ParentSessionKey: request.ParentSessionKey);
+                ParentSessionKey: request.ParentSessionKey,
+                ToolPolicy: request.ToolPolicy,
+                EventSink: sink);
             var result = await _toolExecutor.ExecuteAsync(createSkillTool, toolCall, execContext, ct);
 
             var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);

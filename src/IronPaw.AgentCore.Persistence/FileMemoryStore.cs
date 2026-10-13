@@ -187,18 +187,6 @@ public sealed class FileMemoryStore : IMemoryStore
 
     private string ResolveSessionMemoryPath(SessionKey key)
     {
-        var safeId = string.Concat(key.Value.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_'));
-        if (string.IsNullOrWhiteSpace(safeId))
-        {
-            throw new InvalidOperationException($"Session id '{key.Value}' does not contain valid filename characters.");
-        }
-
-        var fullPath = Path.GetFullPath(Path.Combine(_options.SessionMemoriesDirectory, $"{safeId}.memories.json"));
-        if (!fullPath.StartsWith(_options.SessionMemoriesDirectory, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Session memory path escapes configured root: {fullPath}");
-        }
-
-        return fullPath;
+        return SessionFileName.Resolve(Path.GetFullPath(_options.SessionMemoriesDirectory), key, ".memories.json");
     }
 }

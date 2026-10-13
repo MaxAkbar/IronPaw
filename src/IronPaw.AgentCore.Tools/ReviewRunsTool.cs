@@ -59,6 +59,8 @@ public sealed class ReviewRunsTool : ITool
             {
                 run_id = r.RunId,
                 session_id = r.SessionId,
+                status = r.Status.ToString(),
+                error = r.Error,
                 started_at = r.StartedAt.ToString("O"),
                 prompt = r.UserPrompt.Length > 100 ? r.UserPrompt[..100] + "..." : r.UserPrompt,
                 rounds = r.Rounds,

@@ -21,9 +21,9 @@ public sealed class SqliteRunHistoryStore : IRunHistoryStore
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO run_history (run_id, session_id, started_at, completed_at,
-                user_prompt, final_assistant_message, rounds, total_tokens, tools_used_json)
+                user_prompt, final_assistant_message, rounds, total_tokens, tools_used_json, status, error)
             VALUES (@runId, @sessionId, @startedAt, @completedAt,
-                @userPrompt, @finalMessage, @rounds, @totalTokens, @toolsUsedJson)
+                @userPrompt, @finalMessage, @rounds, @totalTokens, @toolsUsedJson, @status, @error)
             """;
 
         command.Parameters.AddWithValue("@runId", summary.RunId);
@@ -35,6 +35,8 @@ public sealed class SqliteRunHistoryStore : IRunHistoryStore
         command.Parameters.AddWithValue("@rounds", summary.Rounds);
         command.Parameters.AddWithValue("@totalTokens", summary.TotalTokens);
         command.Parameters.AddWithValue("@toolsUsedJson", JsonSerializer.Serialize(summary.ToolsUsed));
+        command.Parameters.AddWithValue("@status", summary.Status.ToString());
+        command.Parameters.AddWithValue("@error", (object?)summary.Error ?? DBNull.Value);
 
         await command.ExecuteNonQueryAsync(ct);
     }
@@ -47,7 +49,7 @@ public sealed class SqliteRunHistoryStore : IRunHistoryStore
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT run_id, session_id, started_at, completed_at,
-                   user_prompt, final_assistant_message, rounds, total_tokens, tools_used_json
+                   user_prompt, final_assistant_message, rounds, total_tokens, tools_used_json, status, error
             FROM run_history
             ORDER BY started_at
             """;
@@ -63,7 +65,7 @@ public sealed class SqliteRunHistoryStore : IRunHistoryStore
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT run_id, session_id, started_at, completed_at,
-                   user_prompt, final_assistant_message, rounds, total_tokens, tools_used_json
+                   user_prompt, final_assistant_message, rounds, total_tokens, tools_used_json, status, error
             FROM run_history
             WHERE session_id = @sessionId
             ORDER BY started_at
@@ -81,7 +83,7 @@ public sealed class SqliteRunHistoryStore : IRunHistoryStore
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT run_id, session_id, started_at, completed_at,
-                   user_prompt, final_assistant_message, rounds, total_tokens, tools_used_json
+                   user_prompt, final_assistant_message, rounds, total_tokens, tools_used_json, status, error
             FROM run_history
             WHERE run_id = @runId
             """;
@@ -122,6 +124,8 @@ public sealed class SqliteRunHistoryStore : IRunHistoryStore
             FinalAssistantMessage: reader.GetString(5),
             Rounds: reader.GetInt32(6),
             TotalTokens: reader.GetInt64(7),
-            ToolsUsed: toolsUsed);
+            ToolsUsed: toolsUsed,
+            Status: Enum.Parse<AgentRunStatus>(reader.GetString(9)),
+            Error: reader.IsDBNull(10) ? null : reader.GetString(10));
     }
 }

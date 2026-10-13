@@ -254,9 +254,9 @@ static async Task<int> RunSingleAsync(
 
         var result = await orchestrator.RunAsync(request, eventSink, ct);
         ConsoleUi.RenderFinal(result);
-        return 0;
+        return result.Status is AgentRunStatus.Succeeded or AgentRunStatus.AwaitingInput ? 0 : 2;
     }
-    catch (OperationCanceledException)
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
         ConsoleUi.RenderWarning("Run canceled.");
         return 130;

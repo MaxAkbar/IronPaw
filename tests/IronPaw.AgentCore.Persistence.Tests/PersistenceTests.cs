@@ -107,41 +107,79 @@ public sealed class PersistenceTests
         }
     }
 
-    [Fact]
-    public async Task JsonTranscriptStore_RejectsSessionKeysWithoutSafeCharacters()
+    [Theory]
+    [InlineData("a:b", "ab")]
+    [InlineData("Default", "default")]
+    [InlineData("abc/../../def", "abcdef")]
+    [InlineData("***", "con")]
+    public async Task JsonTranscriptStore_DistinctOpaqueKeysRemainIsolated(string first, string second)
     {
         var root = CreateTempDirectory();
         try
         {
             var store = new JsonTranscriptStore(root);
-            var key = new SessionKey("***");
-
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                store.AppendAsync(key, [new ChatMessage(ChatRole.User, "test")], CancellationToken.None));
+            await store.AppendAsync(new SessionKey(first), [new ChatMessage(ChatRole.User, "first")], CancellationToken.None);
+            await store.ReplaceAsync(new SessionKey(second), [new ChatMessage(ChatRole.User, "second")], CancellationToken.None);
+            Assert.Equal("first", Assert.Single(await store.LoadAsync(new SessionKey(first), CancellationToken.None)).Content);
+            Assert.Equal("second", Assert.Single(await store.LoadAsync(new SessionKey(second), CancellationToken.None)).Content);
+            Assert.Equal(2, Directory.GetFiles(root, "*.jsonl").Length);
         }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     [Fact]
-    public async Task JsonTranscriptStore_NormalizesSessionFileName()
+    public async Task JsonTranscriptStore_PreservesConventionalLegacyFile()
     {
         var root = CreateTempDirectory();
         try
         {
+            await File.WriteAllTextAsync(Path.Combine(root, "default.jsonl"),
+                "{\"Role\":\"User\",\"Content\":\"legacy\"}\n");
             var store = new JsonTranscriptStore(root);
-            var key = new SessionKey("abc/../../def");
-            await store.AppendAsync(key, [new ChatMessage(ChatRole.User, "x")], CancellationToken.None);
+            Assert.Equal("legacy", Assert.Single(await store.LoadAsync(new SessionKey("default"), CancellationToken.None)).Content);
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.LoadAsync(new SessionKey("de:fault"), CancellationToken.None));
+            Assert.Contains("ambiguous legacy", error.Message);
+            Assert.Equal("legacy", Assert.Single(await store.LoadAsync(new SessionKey("default"), CancellationToken.None)).Content);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
 
-            var expectedPath = Path.Combine(root, "abcdef.jsonl");
-            Assert.True(File.Exists(expectedPath));
-        }
-        finally
+    [Fact]
+    public async Task FileSessionStore_IndependentCachedInstancesPreserveUpdates()
+    {
+        var root = CreateTempDirectory();
+        try
         {
-            Directory.Delete(root, recursive: true);
+            var options = new FileSessionStoreOptions(Path.Combine(root, "sessions.json"), TimeSpan.FromMinutes(5));
+            var first = new FileSessionStore(options);
+            var second = new FileSessionStore(options);
+            await first.UpsertAsync(new SessionKey("a"), _ => new SessionEntry("a", DateTimeOffset.UtcNow), CancellationToken.None);
+            await second.LoadAllAsync(CancellationToken.None);
+            await first.UpsertAsync(new SessionKey("b"), _ => new SessionEntry("b", DateTimeOffset.UtcNow), CancellationToken.None);
+            await second.UpsertAsync(new SessionKey("c"), _ => new SessionEntry("c", DateTimeOffset.UtcNow), CancellationToken.None);
+            var fresh = new FileSessionStore(options with { CacheTtl = TimeSpan.Zero });
+            Assert.Equal(3, (await fresh.LoadAllAsync(CancellationToken.None)).Count);
         }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task FileSessionStore_ConcurrentIndependentWritersPreserveAllUpdates()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var options = new FileSessionStoreOptions(Path.Combine(root, "sessions.json"), TimeSpan.FromMinutes(5));
+            await Task.WhenAll(Enumerable.Range(0, 20).Select(async index =>
+            {
+                var key = new SessionKey($"session-{index}");
+                var store = new FileSessionStore(options);
+                await store.UpsertAsync(key, _ => new SessionEntry(key.Value, DateTimeOffset.UtcNow), CancellationToken.None);
+            }));
+            Assert.Equal(20, (await new FileSessionStore(options).LoadAllAsync(CancellationToken.None)).Count);
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     private static string CreateTempDirectory()

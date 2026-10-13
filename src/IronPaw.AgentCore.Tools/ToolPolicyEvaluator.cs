@@ -85,7 +85,13 @@ public static class ToolPolicyEvaluator
             filtered.Add(tool);
         }
 
-        return filtered;
+        return policy.InheritedPolicy is null
+            ? filtered
+            : Apply(filtered, policy.InheritedPolicy with
+            {
+                SenderIsOwner = policy.SenderIsOwner,
+                SubagentDepth = Math.Max(policy.SubagentDepth, policy.InheritedPolicy.SubagentDepth)
+            });
     }
 
     private static HashSet<string> ToLookup(IReadOnlyCollection<string>? values)

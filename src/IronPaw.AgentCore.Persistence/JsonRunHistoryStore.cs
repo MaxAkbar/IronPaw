@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text;
 using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Persistence;
@@ -25,8 +26,21 @@ public sealed class JsonRunHistoryStore : IRunHistoryStore
         await _gate.WaitAsync(ct);
         try
         {
+            await using var storeLock = await FileStoreLock.AcquireAsync(_historyFilePath, ct);
             var line = JsonSerializer.Serialize(summary, _serializerOptions);
-            await File.AppendAllTextAsync(_historyFilePath, line + Environment.NewLine, ct);
+            await using var stream = new FileStream(_historyFilePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+            var originalLength = stream.Length;
+            stream.Position = originalLength;
+            try
+            {
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(line + Environment.NewLine), ct);
+                await stream.FlushAsync(ct);
+            }
+            catch
+            {
+                stream.SetLength(originalLength);
+                throw;
+            }
         }
         finally
         {
@@ -44,6 +58,7 @@ public sealed class JsonRunHistoryStore : IRunHistoryStore
         await _gate.WaitAsync(ct);
         try
         {
+            await using var storeLock = await FileStoreLock.AcquireAsync(_historyFilePath, ct);
             var lines = await File.ReadAllLinesAsync(_historyFilePath, ct);
             return lines
                 .Where(l => !string.IsNullOrWhiteSpace(l))

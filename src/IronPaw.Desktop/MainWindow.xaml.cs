@@ -72,9 +72,9 @@ public partial class MainWindow : Window
                 _runCancellationTokenSource.Token);
 
             AssistantOutputTextBox.Text = result.FinalAssistantMessage;
-            AppendLog($"Run completed: {result.RunId.Value}");
+            AppendLog($"Run status: {result.Status}. run_id={result.RunId.Value}");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (_runCancellationTokenSource?.IsCancellationRequested == true)
         {
             AppendLog("Run canceled.");
         }

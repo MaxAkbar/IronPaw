@@ -182,6 +182,25 @@ public sealed class FileMemoryStoreTests
         }
     }
 
+    [Theory]
+    [InlineData("a:b", "ab")]
+    [InlineData("Default", "default")]
+    public async Task SessionMemories_DistinctKeysRemainIsolated(string first, string second)
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var store = CreateStore(root);
+            await store.AddAsync(new MemoryEntry("first", "first memory", MemoryScope.Session,
+                DateTimeOffset.UtcNow, SessionId: first), CancellationToken.None);
+            await store.AddAsync(new MemoryEntry("second", "second memory", MemoryScope.Session,
+                DateTimeOffset.UtcNow, SessionId: second), CancellationToken.None);
+            Assert.Equal("first", Assert.Single(await store.LoadSessionAsync(new SessionKey(first), CancellationToken.None)).Id);
+            Assert.Equal("second", Assert.Single(await store.LoadSessionAsync(new SessionKey(second), CancellationToken.None)).Id);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static FileMemoryStore CreateStore(string root, int maxGlobal = 100, int maxSession = 50, int maxContentChars = 500)
     {
         return new FileMemoryStore(new FileMemoryStoreOptions(

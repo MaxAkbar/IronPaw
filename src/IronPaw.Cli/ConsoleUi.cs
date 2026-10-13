@@ -121,10 +121,11 @@ internal static class ConsoleUi
     {
         AnsiConsole.WriteLine();
 
+        var color = result.Status == AgentRunStatus.Succeeded ? Color.Green3_1 : Color.Yellow;
         var panel = new Panel(new Text(result.FinalAssistantMessage))
-            .Header("[bold green3_1]Final Assistant Message[/]")
+            .Header($"[bold]{result.Status}[/]")
             .RoundedBorder()
-            .BorderColor(Color.Green3_1);
+            .BorderColor(color);
         AnsiConsole.Write(panel);
 
         AnsiConsole.MarkupLine(
@@ -210,7 +211,8 @@ internal static class ConsoleUi
             .AddColumn("[bold]When[/]")
             .AddColumn("[bold]Prompt[/]")
             .AddColumn("[bold]Rounds[/]")
-            .AddColumn("[bold]Tokens[/]");
+            .AddColumn("[bold]Tokens[/]")
+            .AddColumn("[bold]Status[/]");
 
         foreach (var r in runs)
         {
@@ -224,7 +226,8 @@ internal static class ConsoleUi
                 $"[grey70]{Markup.Escape(r.StartedAt.ToLocalTime().ToString("g"))}[/]",
                 $"[white]{Markup.Escape(promptTruncated)}[/]",
                 $"[white]{r.Rounds}[/]",
-                $"[white]{r.TotalTokens}[/]");
+                $"[white]{r.TotalTokens}[/]",
+                Markup.Escape(r.Status.ToString()));
         }
 
         AnsiConsole.Write(table);
@@ -245,6 +248,8 @@ internal static class ConsoleUi
         infoTable.AddRow("Completed", $"[white]{Markup.Escape(summary.CompletedAt.ToLocalTime().ToString("O"))}[/]");
         infoTable.AddRow("Rounds", $"[white]{summary.Rounds}[/]");
         infoTable.AddRow("Total Tokens", $"[white]{summary.TotalTokens}[/]");
+        infoTable.AddRow("Status", Markup.Escape(summary.Status.ToString()));
+        if (summary.Error is not null) infoTable.AddRow("Error", Markup.Escape(summary.Error));
         infoTable.AddRow("Tools Used", $"[white]{Markup.Escape(string.Join(", ", summary.ToolsUsed))}[/]");
 
         AnsiConsole.Write(infoTable);

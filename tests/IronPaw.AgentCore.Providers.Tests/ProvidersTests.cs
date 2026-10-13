@@ -287,6 +287,123 @@ public sealed class ProvidersTests
         Assert.Contains("ANTHROPIC_API_KEY", error.Error, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("openai")]
+    [InlineData("anthropic")]
+    public async Task Provider_SerializesMultipleCallsAsOneAssistantTurn(string provider)
+    {
+        var handler = new RecordingSequenceHandler((HttpStatusCode.OK,
+            provider == "openai" ? "data: [DONE]\n" : "data: {\"type\":\"message_stop\"}\n"));
+        ILlmClient client = provider == "openai"
+            ? new OpenAiLlmClient(new HttpClient(handler), () => "test-key")
+            : new AnthropicLlmClient(new HttpClient(handler), () => "test-key");
+        var transcript = new ChatMessage[]
+        {
+            new(ChatRole.User, "inspect"),
+            new(ChatRole.Assistant, "Checking two files."),
+            new(ChatRole.Assistant, "{}", "call-1", "read_file"),
+            new(ChatRole.Assistant, "{}", "call-2", "read_file"),
+            new(ChatRole.Tool, "first", "call-1", "read_file"),
+            new(ChatRole.Tool, "second", "call-2", "read_file")
+        };
+        await CollectAsync(client.StreamAsync(CreateRequest(provider: provider, messages: transcript), CancellationToken.None));
+        using var payload = JsonDocument.Parse(Assert.Single(handler.RequestBodies));
+        var messages = payload.RootElement.GetProperty("messages").EnumerateArray().ToList();
+        var assistant = Assert.Single(messages, message => message.GetProperty("role").GetString() == "assistant");
+        if (provider == "openai")
+        {
+            Assert.Equal("Checking two files.", assistant.GetProperty("content").GetString());
+            Assert.Equal(2, assistant.GetProperty("tool_calls").GetArrayLength());
+            Assert.Equal(new[] { "call-1", "call-2" }, messages.Where(message => message.GetProperty("role").GetString() == "tool")
+                .Select(message => message.GetProperty("tool_call_id").GetString()));
+        }
+        else
+        {
+            var blocks = assistant.GetProperty("content").EnumerateArray().ToList();
+            Assert.Equal(2, blocks.Count(block => block.GetProperty("type").GetString() == "tool_use"));
+            var results = messages[^1].GetProperty("content").EnumerateArray().ToList();
+            Assert.Equal(new[] { "call-1", "call-2" }, results.Select(block => block.GetProperty("tool_use_id").GetString()));
+        }
+    }
+
+    [Theory]
+    [InlineData("openai", "data: {\"error\":{\"message\":\"overloaded\"}}\ndata: [DONE]\n")]
+    [InlineData("anthropic", "data: {\"type\":\"error\",\"error\":{\"message\":\"overloaded\"}}\n")]
+    public async Task Provider_StreamErrorNeverEmitsCompletion(string provider, string body)
+    {
+        ILlmClient client = provider == "openai"
+            ? new OpenAiLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key")
+            : new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
+        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: provider), CancellationToken.None));
+        Assert.Contains(deltas, delta => delta is LlmErrorDelta error && error.Error.Contains("overloaded"));
+        Assert.DoesNotContain(deltas, delta => delta is CompletedDelta);
+    }
+
+    [Theory]
+    [InlineData("openai", "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n")]
+    [InlineData("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n")]
+    [InlineData("openai", "data: invalid-json\ndata: [DONE]\n")]
+    [InlineData("anthropic", "data: invalid-json\ndata: {\"type\":\"message_stop\"}\n")]
+    public async Task Provider_InterruptedOrMalformedStreamNeverEmitsCompletion(string provider, string body)
+    {
+        ILlmClient client = provider == "openai"
+            ? new OpenAiLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key")
+            : new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
+        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: provider), CancellationToken.None));
+        Assert.Contains(deltas, delta => delta is LlmErrorDelta);
+        Assert.DoesNotContain(deltas, delta => delta is CompletedDelta);
+    }
+
+    [Fact]
+    public async Task Anthropic_CumulativeUsageIsReportedAsIncrements()
+    {
+        const string body =
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\n" +
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":3}}\n" +
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5}}\n" +
+            "data: {\"type\":\"message_stop\"}\n";
+        var client = new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
+        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "anthropic"), CancellationToken.None));
+        Assert.Equal(10L, deltas.OfType<UsageDelta>().Sum(usage => usage.InputTokens ?? 0));
+        Assert.Equal(5L, deltas.OfType<UsageDelta>().Sum(usage => usage.OutputTokens ?? 0));
+    }
+
+    [Theory]
+    [InlineData("openai")]
+    [InlineData("anthropic")]
+    public async Task Provider_EnforcesRequestTimeout(string provider)
+    {
+        using var httpClient = new HttpClient(new BlockingHandler());
+        ILlmClient client = provider == "openai"
+            ? new OpenAiLlmClient(httpClient, () => "test-key")
+            : new AnthropicLlmClient(httpClient, () => "test-key");
+        var task = CollectAsync(client.StreamAsync(CreateRequest(provider: provider) with { Timeout = TimeSpan.FromMilliseconds(30) }, CancellationToken.None));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task.WaitAsync(TimeSpan.FromSeconds(3)));
+    }
+
+    private sealed class BlockingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Unreachable");
+        }
+    }
+
+    [Theory]
+    [InlineData("openai", "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}\ndata: [DONE]\n")]
+    [InlineData("anthropic", "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":10}}\ndata: {\"type\":\"message_stop\"}\n")]
+    public async Task Provider_OutputLimitNeverEmitsCompletion(string provider, string body)
+    {
+        ILlmClient client = provider == "openai"
+            ? new OpenAiLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key",
+                options: new OpenAiClientOptions(MaxAutoContinuationPasses: 0))
+            : new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
+        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: provider), CancellationToken.None));
+        Assert.Contains(deltas, delta => delta is LlmErrorDelta error && error.Error.Contains("output limit"));
+        Assert.DoesNotContain(deltas, delta => delta is CompletedDelta);
+    }
+
     private static LlmRequest CreateRequest(
         string provider = "local",
         string model = "rule-based-v1",

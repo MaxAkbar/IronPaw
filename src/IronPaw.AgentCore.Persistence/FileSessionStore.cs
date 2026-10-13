@@ -14,7 +14,7 @@ public sealed class FileSessionStore : ISessionStore
 
     public FileSessionStore(FileSessionStoreOptions options)
     {
-        _options = options;
+        _options = options with { StoreFilePath = Path.GetFullPath(options.StoreFilePath) };
         _jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true
@@ -32,7 +32,8 @@ public sealed class FileSessionStore : ISessionStore
         await _gate.WaitAsync(ct);
         try
         {
-            var all = await LoadInternalCoreAsync(ct);
+            await using var storeLock = await FileStoreLock.AcquireAsync(_options.StoreFilePath, ct);
+            var all = await LoadInternalCoreAsync(ct, forceReload: true);
             all.TryGetValue(key.Value, out var existing);
             var updated = mutate(existing is null ? null : Clone(existing));
             all[key.Value] = Clone(updated) with { UpdatedAt = DateTimeOffset.UtcNow };
@@ -67,9 +68,9 @@ public sealed class FileSessionStore : ISessionStore
         }
     }
 
-    private async Task<Dictionary<string, SessionEntry>> LoadInternalCoreAsync(CancellationToken ct)
+    private async Task<Dictionary<string, SessionEntry>> LoadInternalCoreAsync(CancellationToken ct, bool forceReload = false)
     {
-        if (DateTimeOffset.UtcNow < _cacheExpiresAt)
+        if (!forceReload && DateTimeOffset.UtcNow < _cacheExpiresAt)
         {
             return CloneMap(_cache);
         }
@@ -118,15 +119,22 @@ public sealed class FileSessionStore : ISessionStore
 
         var tempPath = $"{filePath}.{Guid.NewGuid():N}.tmp";
         var content = JsonSerializer.Serialize(data, _jsonOptions);
-        await File.WriteAllTextAsync(tempPath, content, ct);
-
-        if (File.Exists(filePath))
+        try
         {
-            File.Replace(tempPath, filePath, destinationBackupFileName: null);
-            return;
+            await File.WriteAllTextAsync(tempPath, content, ct);
+            if (File.Exists(filePath))
+            {
+                File.Replace(tempPath, filePath, destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(tempPath, filePath);
+            }
         }
-
-        File.Move(tempPath, filePath);
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
     }
 
     private static bool ShouldRetryRead(Exception ex)

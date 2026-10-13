@@ -217,6 +217,8 @@ internal static class AppBootstrapper
                           """,
             ToolPolicy: new ToolSelectionPolicy(
                 Profile: ToolProfile.Full,
+                AllowList: new[] { "read_file", "list_files", "current_time", "recall_memory",
+                    "review_runs", "review_run_detail", "send_agent_message", "read_agent_messages" },
                 DenyList: new[] { "invoke_agent", "list_agents", "create_skill", "web_navigate", "web_extract_structured" }),
             Provider: reviewerProvider,
             Model: reviewerModel,

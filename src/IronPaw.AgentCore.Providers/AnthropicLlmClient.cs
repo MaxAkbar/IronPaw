@@ -34,6 +34,9 @@ public sealed class AnthropicLlmClient : ILlmClient
         }
 
         var payload = BuildPayload(request);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(request.Timeout);
+        ct = timeout.Token;
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _messagesEndpoint);
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         httpRequest.Headers.Add("x-api-key", apiKey);
@@ -53,20 +56,25 @@ public sealed class AnthropicLlmClient : ILlmClient
         var contentBlocks = new Dictionary<int, ContentBlockState>();
         long inputTokens = 0;
         long outputTokens = 0;
+        long reportedInputTokens = 0;
+        long reportedOutputTokens = 0;
+        string? stopReason = null;
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
         await foreach (var dataLine in ReadSseDataLinesAsync(reader, ct))
         {
-            JsonDocument doc;
+            JsonDocument? doc = null;
             try
             {
                 doc = JsonDocument.Parse(dataLine);
             }
-            catch (JsonException)
+            catch (JsonException) { }
+            if (doc is null)
             {
-                continue;
+                yield return new LlmErrorDelta("Anthropic stream contained malformed JSON.");
+                yield break;
             }
 
             using (doc)
@@ -77,6 +85,9 @@ public sealed class AnthropicLlmClient : ILlmClient
 
                 switch (eventType)
                 {
+                    case "error":
+                        yield return new LlmErrorDelta($"Anthropic stream failed: {ExtractErrorMessage(dataLine)}");
+                        yield break;
                     case "message_start":
                         if (root.TryGetProperty("message", out var msgEl) &&
                             msgEl.TryGetProperty("usage", out var startUsageEl))
@@ -147,22 +158,37 @@ public sealed class AnthropicLlmClient : ILlmClient
                     }
 
                     case "message_delta":
+                        if (root.TryGetProperty("delta", out var messageDelta) &&
+                            messageDelta.TryGetProperty("stop_reason", out var reason) && reason.ValueKind == JsonValueKind.String)
+                        {
+                            stopReason = reason.GetString();
+                        }
                         if (root.TryGetProperty("usage", out var deltaUsageEl))
                         {
                             outputTokens = TryReadLong(deltaUsageEl, "output_tokens") ?? 0;
                         }
 
-                        yield return new UsageDelta(inputTokens, outputTokens, CacheReadTokens: null, CacheWriteTokens: null);
+                        yield return new UsageDelta(
+                            Math.Max(0, inputTokens - reportedInputTokens),
+                            Math.Max(0, outputTokens - reportedOutputTokens),
+                            CacheReadTokens: null, CacheWriteTokens: null);
+                        reportedInputTokens = Math.Max(reportedInputTokens, inputTokens);
+                        reportedOutputTokens = Math.Max(reportedOutputTokens, outputTokens);
                         break;
 
                     case "message_stop":
+                        if (stopReason == "max_tokens")
+                        {
+                            yield return new LlmErrorDelta("Anthropic output limit reached before the response completed.");
+                            yield break;
+                        }
                         yield return new CompletedDelta();
                         yield break;
                 }
             }
         }
 
-        yield return new CompletedDelta();
+        yield return new LlmErrorDelta("Anthropic stream ended before message_stop.");
     }
 
     private static object BuildPayload(LlmRequest request)
@@ -188,63 +214,49 @@ public sealed class AnthropicLlmClient : ILlmClient
 
     private static IReadOnlyList<object> BuildMessages(IReadOnlyList<ChatMessage> transcript)
     {
-        var messages = new List<object>(transcript.Count);
-        foreach (var message in transcript)
+        var messages = new List<object>();
+        for (var i = 0; i < transcript.Count; i++)
         {
-            switch (message.Role)
+            var message = transcript[i];
+            if (message.Role is ChatRole.Assistant or ChatRole.Tool)
             {
-                case ChatRole.User:
-                    messages.Add(new Dictionary<string, object?>
+                var role = message.Role;
+                var blocks = new List<object>();
+                do
+                {
+                    message = transcript[i];
+                    if (role == ChatRole.Tool)
                     {
-                        ["role"] = "user",
-                        ["content"] = message.Content
-                    });
-                    break;
-
-                case ChatRole.Assistant when !string.IsNullOrWhiteSpace(message.ToolCallId) &&
-                                             !string.IsNullOrWhiteSpace(message.ToolName):
-                    messages.Add(new Dictionary<string, object?>
-                    {
-                        ["role"] = "assistant",
-                        ["content"] = new object[]
+                        blocks.Add(new Dictionary<string, object?>
                         {
-                            new Dictionary<string, object?>
-                            {
-                                ["type"] = "tool_use",
-                                ["id"] = message.ToolCallId,
-                                ["name"] = message.ToolName,
-                                ["input"] = ParseArgumentsAsObject(message.Content)
-                            }
-                        }
-                    });
-                    break;
-
-                case ChatRole.Assistant:
-                    messages.Add(new Dictionary<string, object?>
+                            ["type"] = "tool_result", ["tool_use_id"] = message.ToolCallId, ["content"] = message.Content
+                        });
+                    }
+                    else if (!string.IsNullOrWhiteSpace(message.ToolCallId) && !string.IsNullOrWhiteSpace(message.ToolName))
                     {
-                        ["role"] = "assistant",
-                        ["content"] = message.Content
-                    });
-                    break;
-
-                case ChatRole.Tool:
-                    messages.Add(new Dictionary<string, object?>
-                    {
-                        ["role"] = "user",
-                        ["content"] = new object[]
+                        blocks.Add(new Dictionary<string, object?>
                         {
-                            new Dictionary<string, object?>
-                            {
-                                ["type"] = "tool_result",
-                                ["tool_use_id"] = message.ToolCallId,
-                                ["content"] = message.Content
-                            }
-                        }
-                    });
-                    break;
+                            ["type"] = "tool_use", ["id"] = message.ToolCallId,
+                            ["name"] = message.ToolName, ["input"] = ParseArgumentsAsObject(message.Content)
+                        });
+                    }
+                    else
+                    {
+                        blocks.Add(new Dictionary<string, object?> { ["type"] = "text", ["text"] = message.Content });
+                    }
+                    if (i + 1 >= transcript.Count || transcript[i + 1].Role != role) break;
+                    i++;
+                } while (true);
+                messages.Add(new Dictionary<string, object?>
+                {
+                    ["role"] = role == ChatRole.Assistant ? "assistant" : "user", ["content"] = blocks
+                });
+            }
+            else if (message.Role == ChatRole.User)
+            {
+                messages.Add(new Dictionary<string, object?> { ["role"] = "user", ["content"] = message.Content });
             }
         }
-
         return messages;
     }
 

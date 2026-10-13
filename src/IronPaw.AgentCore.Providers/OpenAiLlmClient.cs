@@ -40,6 +40,9 @@ public sealed class OpenAiLlmClient : ILlmClient
         }
 
         var conversationMessages = request.Messages.ToList();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(request.Timeout);
+        ct = timeout.Token;
         var continuationPassesRemaining = _options.MaxAutoContinuationPasses;
         long consumedOutputTokensByUsage = 0;
         long consumedOutputTokensByEstimate = 0;
@@ -82,6 +85,12 @@ public sealed class OpenAiLlmClient : ILlmClient
             {
                 yield return delta;
             }
+            if (passState.Failed) yield break;
+            if (passState.LastFinishReason == "content_filter")
+            {
+                yield return new LlmErrorDelta("OpenAI response was interrupted by a content filter.");
+                yield break;
+            }
 
             consumedOutputTokensByEstimate += passState.EstimatedOutputTokens;
             if (passState.OutputTokensFromUsage.HasValue)
@@ -92,6 +101,11 @@ public sealed class OpenAiLlmClient : ILlmClient
             consumedOutputTokens = Math.Max(consumedOutputTokensByUsage, consumedOutputTokensByEstimate);
             if (!ShouldAutoContinue(passState, continuationPassesRemaining, consumedOutputTokens, request.MaxOutputTokens))
             {
+                if (passState.LastFinishReason == "length")
+                {
+                    yield return new LlmErrorDelta("OpenAI output limit reached before the response completed.");
+                    yield break;
+                }
                 break;
             }
 
@@ -110,27 +124,37 @@ public sealed class OpenAiLlmClient : ILlmClient
     {
         // Accumulate tool-call argument fragments per index; emit complete calls at finish.
         var toolCallBuilders = new Dictionary<int, ToolCallBuilder>();
+        var sawDone = false;
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream, Encoding.UTF8);
 
         await foreach (var dataLine in ReadSseDataLinesAsync(reader, ct))
         {
-            if (dataLine == "[DONE]") break;
+            if (dataLine == "[DONE]") { sawDone = true; break; }
 
-            JsonDocument doc;
+            JsonDocument? doc = null;
             try
             {
                 doc = JsonDocument.Parse(dataLine);
             }
-            catch (JsonException)
+            catch (JsonException) { }
+            if (doc is null)
             {
-                continue;
+                passState.Failed = true;
+                yield return new LlmErrorDelta("OpenAI stream contained malformed JSON.");
+                yield break;
             }
 
             using (doc)
             {
                 var root = doc.RootElement;
+                if (root.TryGetProperty("error", out _))
+                {
+                    passState.Failed = true;
+                    yield return new LlmErrorDelta($"OpenAI stream failed: {ExtractErrorMessage(dataLine)}");
+                    yield break;
+                }
 
                 // Usage-only chunk emitted by stream_options: include_usage
                 if (!root.TryGetProperty("choices", out var choicesEl) || choicesEl.GetArrayLength() == 0)
@@ -234,6 +258,13 @@ public sealed class OpenAiLlmClient : ILlmClient
             }
         }
 
+        if (!sawDone && passState.LastFinishReason is null)
+        {
+            passState.Failed = true;
+            yield return new LlmErrorDelta("OpenAI stream ended before a completion marker.");
+            yield break;
+        }
+
         // Emit any remaining tool calls (some local models omit a finish_reason chunk).
         foreach (var builder in toolCallBuilders.Values.OrderBy(b => b.Index))
         {
@@ -288,66 +319,58 @@ public sealed class OpenAiLlmClient : ILlmClient
     {
         var messages = new List<object>
         {
-            new Dictionary<string, object?>
-            {
-                ["role"] = "system",
-                ["content"] = systemPrompt
-            }
+            new Dictionary<string, object?> { ["role"] = "system", ["content"] = systemPrompt }
         };
-
-        foreach (var message in transcript)
+        for (var i = 0; i < transcript.Count; i++)
         {
-            switch (message.Role)
+            var message = transcript[i];
+            if (message.Role == ChatRole.Assistant)
             {
-                case ChatRole.User:
-                    messages.Add(new Dictionary<string, object?>
+                var text = new List<string>();
+                var calls = new List<object>();
+                do
+                {
+                    message = transcript[i];
+                    if (!string.IsNullOrWhiteSpace(message.ToolCallId) && !string.IsNullOrWhiteSpace(message.ToolName))
                     {
-                        ["role"] = "user",
-                        ["content"] = message.Content
-                    });
-                    break;
-
-                case ChatRole.Assistant when !string.IsNullOrWhiteSpace(message.ToolCallId) &&
-                                             !string.IsNullOrWhiteSpace(message.ToolName):
-                    messages.Add(new Dictionary<string, object?>
-                    {
-                        ["role"] = "assistant",
-                        ["content"] = null,
-                        ["tool_calls"] = new object[]
+                        calls.Add(new Dictionary<string, object?>
                         {
-                            new Dictionary<string, object?>
+                            ["id"] = message.ToolCallId,
+                            ["type"] = "function",
+                            ["function"] = new Dictionary<string, object?>
                             {
-                                ["id"] = message.ToolCallId,
-                                ["type"] = "function",
-                                ["function"] = new Dictionary<string, object?>
-                                {
-                                    ["name"] = message.ToolName,
-                                    ["arguments"] = CoerceJsonString(message.Content)
-                                }
+                                ["name"] = message.ToolName,
+                                ["arguments"] = CoerceJsonString(message.Content)
                             }
-                        }
-                    });
-                    break;
-
-                case ChatRole.Assistant:
-                    messages.Add(new Dictionary<string, object?>
+                        });
+                    }
+                    else if (!string.IsNullOrWhiteSpace(message.Content))
                     {
-                        ["role"] = "assistant",
-                        ["content"] = message.Content
-                    });
-                    break;
-
-                case ChatRole.Tool:
-                    messages.Add(new Dictionary<string, object?>
-                    {
-                        ["role"] = "tool",
-                        ["tool_call_id"] = message.ToolCallId,
-                        ["content"] = message.Content
-                    });
-                    break;
+                        text.Add(message.Content);
+                    }
+                    if (i + 1 >= transcript.Count || transcript[i + 1].Role != ChatRole.Assistant) break;
+                    i++;
+                } while (true);
+                var turn = new Dictionary<string, object?>
+                {
+                    ["role"] = "assistant",
+                    ["content"] = text.Count == 0 ? null : string.Join("\n", text)
+                };
+                if (calls.Count > 0) turn["tool_calls"] = calls;
+                messages.Add(turn);
+            }
+            else if (message.Role == ChatRole.Tool)
+            {
+                messages.Add(new Dictionary<string, object?>
+                {
+                    ["role"] = "tool", ["tool_call_id"] = message.ToolCallId, ["content"] = message.Content
+                });
+            }
+            else if (message.Role == ChatRole.User)
+            {
+                messages.Add(new Dictionary<string, object?> { ["role"] = "user", ["content"] = message.Content });
             }
         }
-
         return messages;
     }
 
@@ -467,6 +490,7 @@ public sealed class OpenAiLlmClient : ILlmClient
         public StringBuilder AssistantText { get; } = new();
         public string? LastFinishReason { get; set; }
         public bool HasToolCalls { get; set; }
+        public bool Failed { get; set; }
         public long? OutputTokensFromUsage { get; set; }
         public int EstimatedOutputCharacters { get; set; }
         public int EstimatedOutputTokens => OpenAiOutputTokenBudgetPlanner.EstimateTokensFromCharacters(EstimatedOutputCharacters);

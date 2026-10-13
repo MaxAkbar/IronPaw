@@ -64,6 +64,59 @@ public sealed class SessionLaneSchedulerTests
         Assert.True(Volatile.Read(ref maxConcurrent) >= 2);
     }
 
+    [Fact]
+    public async Task EnqueueAsync_CancelledWaiterReleasesLaneReference()
+    {
+        using var scheduler = new SessionLaneScheduler();
+        var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var key = new SessionKey("cancelled-waiter");
+        var running = scheduler.EnqueueAsync(key, _ => release.Task, CancellationToken.None);
+        using var cancellation = new CancellationTokenSource();
+        var waiting = scheduler.EnqueueAsync(key, _ => Task.FromResult(2), cancellation.Token);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
+        release.SetResult(1);
+        await running;
+        Assert.Equal(0, scheduler.ActiveLaneCount);
+        Assert.Equal(3, await scheduler.EnqueueAsync(key, _ => Task.FromResult(3), CancellationToken.None));
+        Assert.Equal(0, scheduler.ActiveLaneCount);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_ConcurrentReusePreservesSerialization()
+    {
+        using var scheduler = new SessionLaneScheduler();
+        var key = new SessionKey("reused");
+        var active = 0;
+        var maximum = 0;
+        await Task.WhenAll(Enumerable.Range(0, 500).Select(_ => scheduler.EnqueueAsync(key, async ct =>
+        {
+            UpdateMax(ref maximum, Interlocked.Increment(ref active));
+            await Task.Yield();
+            Interlocked.Decrement(ref active);
+            return 1;
+        }, CancellationToken.None)));
+        Assert.Equal(1, maximum);
+        Assert.Equal(0, scheduler.ActiveLaneCount);
+    }
+
+    [Fact]
+    public async Task Dispose_AllowsExistingCallersToDrain()
+    {
+        var scheduler = new SessionLaneScheduler();
+        var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var key = new SessionKey("drain");
+        var running = scheduler.EnqueueAsync(key, _ => release.Task, CancellationToken.None);
+        var queued = scheduler.EnqueueAsync(key, _ => Task.FromResult(2), CancellationToken.None);
+        scheduler.Dispose();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            scheduler.EnqueueAsync(key, _ => Task.FromResult(3), CancellationToken.None));
+        release.SetResult(1);
+        Assert.Equal(1, await running);
+        Assert.Equal(2, await queued);
+        Assert.Equal(0, scheduler.ActiveLaneCount);
+    }
+
     private static void UpdateMax(ref int maxConcurrent, int value)
     {
         while (true)
