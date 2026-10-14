@@ -24,7 +24,16 @@ internal sealed record CliOptions(
     bool ListWorkflows = false,
     string? ReconcileToolExecutionId = null,
     string? ReconcileResultFile = null,
-    string? ReconcileNote = null)
+    string? ReconcileNote = null,
+    string? PauseRunId = null,
+    string? CancelRunId = null,
+    string? AnswerRequestId = null,
+    string? Answer = null,
+    string? ApproveRequestId = null,
+    string? DenyRequestId = null,
+    IReadOnlyCollection<string>? ApprovalRequiredTools = null,
+    long? MaxTotalTokens = null,
+    int? MaxExecutionSeconds = null)
 {
     public static CliOptions Parse(string[] args)
     {
@@ -49,6 +58,15 @@ internal sealed record CliOptions(
         string? reconcileToolExecutionId = null;
         string? reconcileResultFile = null;
         string? reconcileNote = null;
+        string? pauseRunId = null;
+        string? cancelRunId = null;
+        string? answerRequestId = null;
+        string? answer = null;
+        string? approveRequestId = null;
+        string? denyRequestId = null;
+        IReadOnlyCollection<string>? approvalRequiredTools = null;
+        long? maxTotalTokens = null;
+        int? maxExecutionSeconds = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -126,6 +144,14 @@ internal sealed record CliOptions(
                     llmMaxAutoContinuationPasses = ReadIntOption(args, ref i, arg, minInclusive: 0);
                     break;
 
+                case "--max-total-tokens":
+                    maxTotalTokens = ReadPositiveLongOption(args, ref i, arg);
+                    break;
+
+                case "--max-execution-seconds":
+                    maxExecutionSeconds = ReadIntOption(args, ref i, arg, minInclusive: 1);
+                    break;
+
                 case "--auto-create-skills":
                     autoCreateSkills = true;
                     break;
@@ -144,6 +170,34 @@ internal sealed record CliOptions(
 
                 case "--list-workflows":
                     listWorkflows = true;
+                    break;
+
+                case "--pause":
+                    pauseRunId = ReadValue(args, ref i, arg);
+                    break;
+
+                case "--cancel":
+                    cancelRunId = ReadValue(args, ref i, arg);
+                    break;
+
+                case "--answer-request":
+                    answerRequestId = ReadValue(args, ref i, arg);
+                    break;
+
+                case "--answer":
+                    answer = ReadValue(args, ref i, arg);
+                    break;
+
+                case "--approve-request":
+                    approveRequestId = ReadValue(args, ref i, arg);
+                    break;
+
+                case "--deny-request":
+                    denyRequestId = ReadValue(args, ref i, arg);
+                    break;
+
+                case "--require-approval":
+                    approvalRequiredTools = ReadValue(args, ref i, arg).Split(',').Select(name => name.Trim()).ToArray();
                     break;
 
                 case "--reconcile-tool":
@@ -192,35 +246,92 @@ internal sealed record CliOptions(
             listWorkflows,
             reconcileToolExecutionId,
             reconcileResultFile,
-            reconcileNote);
+            reconcileNote,
+            pauseRunId,
+            cancelRunId,
+            answerRequestId,
+            answer,
+            approveRequestId,
+            denyRequestId,
+            approvalRequiredTools,
+            maxTotalTokens,
+            maxExecutionSeconds);
     }
 
     public bool TryValidate(out string? error)
     {
-        if (ResumeRunId is not null && string.IsNullOrWhiteSpace(ResumeRunId))
+        if ((ResumeRunId is not null && string.IsNullOrWhiteSpace(ResumeRunId)) ||
+            (PauseRunId is not null && string.IsNullOrWhiteSpace(PauseRunId)) ||
+            (CancelRunId is not null && string.IsNullOrWhiteSpace(CancelRunId)))
         {
-            error = "--resume requires a workflow run ID.";
+            error = "--resume, --pause, and --cancel require a workflow run ID.";
             return false;
         }
 
-        if (ListWorkflows && ResumeRunId is not null)
+        var workflowCommandCount = (ListWorkflows ? 1 : 0) + (ResumeRunId is not null ? 1 : 0) +
+            (PauseRunId is not null ? 1 : 0) + (CancelRunId is not null ? 1 : 0);
+        if (workflowCommandCount > 1)
         {
-            error = "Use either --list-workflows or --resume, not both.";
+            error = "Use only one of --list-workflows, --resume, --pause, or --cancel.";
             return false;
         }
 
-        if ((ListWorkflows || ResumeRunId is not null) &&
-            (!string.IsNullOrWhiteSpace(Prompt) || !string.IsNullOrWhiteSpace(PromptFile) || ListSkills))
+        if (workflowCommandCount > 0 && (MaxTotalTokens is not null || MaxExecutionSeconds is not null))
         {
-            error = "Workflow commands cannot be combined with a prompt or --list-skills.";
+            error = "--max-total-tokens and --max-execution-seconds apply only to new workflows. Saved limits cannot change during recovery.";
+            return false;
+        }
+
+        if (MaxTotalTokens is <= 0 || MaxExecutionSeconds is <= 0)
+        {
+            error = "--max-total-tokens and --max-execution-seconds must be positive integers.";
+            return false;
+        }
+
+        if (workflowCommandCount > 0 &&
+            (!string.IsNullOrWhiteSpace(Prompt) || !string.IsNullOrWhiteSpace(PromptFile) || ListSkills ||
+             ApprovalRequiredTools is not null || AutoCreateSkills))
+        {
+            error = "Workflow commands cannot be combined with a prompt, --list-skills, --auto-create-skills, or --require-approval. Saved permissions remain in effect.";
             return false;
         }
 
         var hasReconciliation = ReconcileToolExecutionId is not null || ReconcileResultFile is not null || ReconcileNote is not null;
+        var hasAnswer = AnswerRequestId is not null || Answer is not null;
+        if (hasAnswer && (ResumeRunId is null || string.IsNullOrWhiteSpace(AnswerRequestId) || string.IsNullOrWhiteSpace(Answer)))
+        {
+            error = "Answering requires --resume, --answer-request, and a nonempty --answer.";
+            return false;
+        }
+
+        if ((ApproveRequestId is not null || DenyRequestId is not null) &&
+            (ResumeRunId is null || (ApproveRequestId is not null && string.IsNullOrWhiteSpace(ApproveRequestId)) ||
+             (DenyRequestId is not null && string.IsNullOrWhiteSpace(DenyRequestId))))
+        {
+            error = "Approval decisions require --resume and a nonempty --approve-request or --deny-request ID.";
+            return false;
+        }
+
+        var responseCount = (hasAnswer ? 1 : 0) + (ApproveRequestId is not null ? 1 : 0) +
+            (DenyRequestId is not null ? 1 : 0) + (hasReconciliation ? 1 : 0);
+        if (responseCount > 1)
+        {
+            error = "Supply only one answer, approval decision, or tool reconciliation per resume command.";
+            return false;
+        }
+
         if (hasReconciliation && (ResumeRunId is null || string.IsNullOrWhiteSpace(ReconcileToolExecutionId) ||
             string.IsNullOrWhiteSpace(ReconcileResultFile) || string.IsNullOrWhiteSpace(ReconcileNote)))
         {
             error = "Reconciliation requires --resume, --reconcile-tool, --reconcile-result, and --reconcile-note.";
+            return false;
+        }
+
+        if (ApprovalRequiredTools is not null && (ApprovalRequiredTools.Count == 0 ||
+            ApprovalRequiredTools.Any(string.IsNullOrWhiteSpace) ||
+            ApprovalRequiredTools.Distinct(StringComparer.OrdinalIgnoreCase).Count() != ApprovalRequiredTools.Count))
+        {
+            error = "--require-approval requires distinct, nonempty tool names separated by commas.";
             return false;
         }
 
@@ -297,6 +408,11 @@ internal sealed record CliOptions(
         return AnsiConsole.Prompt(new TextPrompt<string>("[green]Prompt[/]>").AllowEmpty());
     }
 
+    public WorkflowBudget? ResolveWorkflowBudget() => MaxTotalTokens is null && MaxExecutionSeconds is null
+        ? null
+        : new WorkflowBudget(MaxTotalTokens: MaxTotalTokens,
+            MaxExecutionTime: MaxExecutionSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null);
+
     public static void PrintHelp()
     {
         var table = new Table()
@@ -315,6 +431,15 @@ internal sealed record CliOptions(
         table.AddRow("--list-skills", "List discovered add-in skills and exit");
         table.AddRow("--list-workflows", "List saved workflows and unresolved tool execution IDs for this workspace");
         table.AddRow("--resume <run-id>", "Resume a saved workflow using its original provider, model, session, and permissions");
+        table.AddRow("--pause <run-id>", "Persist a resumable pause request without provider credentials");
+        table.AddRow("--cancel <run-id>", "Permanently cancel a workflow without provider credentials");
+        table.AddRow("--answer-request <request-id>", "With --resume, answer a saved human input request");
+        table.AddRow("--answer <text>", "Text for --answer-request; recorded before resuming");
+        table.AddRow("--approve-request <request-id>", "With --resume, approve the exact saved tool operation");
+        table.AddRow("--deny-request <request-id>", "With --resume, deny the saved tool operation");
+        table.AddRow("--require-approval <tool-names>", "For new runs, require approval for comma-separated tool names (default: none)");
+        table.AddRow("--max-total-tokens <n>", "Persistent token limit shared by a new workflow and its descendants (default: unlimited)");
+        table.AddRow("--max-execution-seconds <n>", "Persistent execution time limit for a new workflow (default: unlimited; paused/input waiting excluded)");
         table.AddRow("--reconcile-tool <execution-id>", "With --resume, record an externally verified tool outcome before resuming");
         table.AddRow("--reconcile-result <path>", "JSON ToolResult file containing the verified outcome (never executes the tool)");
         table.AddRow("--reconcile-note <text>", "Evidence explaining how the uncertain tool outcome was established");
@@ -379,6 +504,17 @@ internal sealed record CliOptions(
         if (!int.TryParse(value, out var parsedValue) || parsedValue < minInclusive)
         {
             throw new ArgumentException($"Invalid {option} value '{value}'. Use an integer >= {minInclusive}.");
+        }
+
+        return parsedValue;
+    }
+
+    private static long ReadPositiveLongOption(string[] args, ref int index, string option)
+    {
+        var value = ReadValue(args, ref index, option);
+        if (!long.TryParse(value, out var parsedValue) || parsedValue <= 0)
+        {
+            throw new ArgumentException($"Invalid {option} value '{value}'. Use a positive integer.");
         }
 
         return parsedValue;

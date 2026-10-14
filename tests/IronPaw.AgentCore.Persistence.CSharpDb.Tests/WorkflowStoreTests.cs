@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Diagnostics;
 using CSharpDB.Engine;
 using IronPaw.AgentCore.Abstractions;
@@ -299,7 +300,7 @@ public sealed class WorkflowStoreTests : IDisposable
         var checkpoint = Checkpoint() with { Status = WorkflowStatus.Running, LeaseOwner = "dead-process" };
         await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath))
         {
-            await Assert.ThrowsAsync<NotSupportedException>(() => store.CreateAsync(checkpoint with { SchemaVersion = 2 }, Ct));
+            await Assert.ThrowsAsync<NotSupportedException>(() => store.CreateAsync(checkpoint with { SchemaVersion = 4 }, Ct));
             await store.CreateAsync(checkpoint, Ct);
         }
         string payload;
@@ -308,7 +309,7 @@ public sealed class WorkflowStoreTests : IDisposable
             await using (var result = await database.ExecuteAsync("SELECT payload FROM workflows WHERE id = 1"))
             {
                 Assert.True(await result.MoveNextAsync());
-                payload = result.Current[0].AsText.Replace("\"SchemaVersion\":1", "\"SchemaVersion\":2", StringComparison.Ordinal);
+                payload = result.Current[0].AsText.Replace("\"SchemaVersion\":3", "\"SchemaVersion\":4", StringComparison.Ordinal);
             }
             await using var update = await database.ExecuteAsync("UPDATE workflows SET payload = '" + payload.Replace("'", "''") + "' WHERE id = 1");
         }
@@ -362,6 +363,321 @@ public sealed class WorkflowStoreTests : IDisposable
         Assert.Empty(await store.ListAsync(Ct));
     }
 
+    [Fact]
+    public async Task LegacyClarificationMigratesIntoDurableInputWithoutRewritingEvidence()
+    {
+        var checkpoint = Checkpoint() with
+        {
+            ModelCalls = [new("auto-skill", [new("text", "noop")]),
+                new("planner", [new("text", "{\"needs_clarification\":true,\"questions\":[\"Which file?\"]}")])],
+            ToolExecutions = [Tool("confirmed", ToolResult.Success("receipt")), Tool("unknown")],
+            Status = WorkflowStatus.AwaitingInput,
+            Result = new(new RunId("run"), new SessionKey("session"), "Which file?", [],
+                new Dictionary<string, object?>(), AgentRunStatus.AwaitingInput)
+        };
+        await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath))
+            await store.CreateAsync(checkpoint, Ct);
+        await RewritePayloadAsync("run", payload =>
+        {
+            payload["SchemaVersion"] = 1;
+            foreach (var item in payload["ToolExecutions"]!.AsArray()) item!.AsObject().Remove("State");
+        });
+        await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var actual = (await reopened.GetAsync(new RunId("run"), Ct))!;
+        Assert.Equal(3, actual.SchemaVersion);
+        Assert.Null(actual.Result);
+        Assert.Equal("Which file?", actual.Suspension!.FinalAssistantMessage);
+        var request = Assert.Single(actual.HumanRequests!);
+        Assert.Equal("route:1", request.SourceKey);
+        Assert.Equal("Which file?", request.Prompt);
+        Assert.Null(request.Response);
+        Assert.Equal(WorkflowToolState.Completed, actual.ToolExecutions![0].State);
+        Assert.Equal(WorkflowToolState.Started, actual.ToolExecutions[1].State);
+        Assert.Equal("receipt", actual.ToolExecutions[0].Result!.Content);
+        Assert.Equal(new[] { "accepted", "migrated_v3" }, (await reopened.ReadJournalAsync(new RunId("run"), Ct)).Select(x => x.EventType));
+        await Assert.ThrowsAsync<WorkflowConflictException>(() => reopened.CreateAsync(Checkpoint("replacement"), Ct));
+    }
+
+    [Fact]
+    public async Task LegacyHistoricalQuestionDoesNotRewindNewerConversation()
+    {
+        var checkpoint = Checkpoint("old") with { Status = WorkflowStatus.AwaitingInput,
+            Result = new(new RunId("old"), new SessionKey("session"), "Old question", [],
+                new Dictionary<string, object?>(), AgentRunStatus.AwaitingInput) };
+        await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath))
+        {
+            await store.CreateAsync(checkpoint, Ct);
+            await store.CreateAsync(Checkpoint("new") with { CreatedAt = checkpoint.CreatedAt.AddSeconds(1) }, Ct);
+        }
+        await RewritePayloadAsync("old", payload => payload["SchemaVersion"] = 1);
+        await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var old = (await reopened.GetAsync(new RunId("old"), Ct))!;
+        Assert.Equal("Old question", old.Result!.FinalAssistantMessage);
+        Assert.Null(old.HumanRequests);
+        Assert.Null(old.Suspension);
+    }
+
+    [Fact]
+    public async Task FutureVersionPreventsAllLegacyMigrations()
+    {
+        await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath))
+        {
+            await store.CreateAsync(Checkpoint("legacy", "legacy-session"), Ct);
+            await store.CreateAsync(Checkpoint("future", "future-session"), Ct);
+        }
+        await RewritePayloadAsync("legacy", payload => payload["SchemaVersion"] = 1);
+        await RewritePayloadAsync("future", payload => payload["SchemaVersion"] = 4);
+        await Assert.ThrowsAsync<NotSupportedException>(() => CSharpDbWorkflowStore.OpenAsync(DatabasePath));
+        await using var database = await Database.OpenAsync(DatabasePath);
+        await using var result = await database.ExecuteAsync("SELECT payload FROM workflows WHERE run_id = 'legacy'");
+        Assert.True(await result.MoveNextAsync());
+        Assert.Equal(1, JsonNode.Parse(result.Current[0].AsText)!["SchemaVersion"]!.GetValue<int>());
+        await using var journal = await database.ExecuteAsync("SELECT revision FROM workflow_journal WHERE run_id = 'legacy'");
+        Assert.True(await journal.MoveNextAsync());
+        Assert.Equal(0, journal.Current[0].AsInteger);
+        Assert.False(await journal.MoveNextAsync());
+    }
+
+    [Fact]
+    public async Task MigrationJournalFailureRollsBackEveryCheckpoint()
+    {
+        await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath))
+        {
+            await store.CreateAsync(Checkpoint("first", "first-session"), Ct);
+            await store.CreateAsync(Checkpoint("second", "second-session"), Ct);
+        }
+        await RewritePayloadAsync("first", payload => payload["SchemaVersion"] = 1);
+        await RewritePayloadAsync("second", payload => payload["SchemaVersion"] = 1);
+        await using (var database = await Database.OpenAsync(DatabasePath))
+        {
+            await using var conflict = await database.ExecuteAsync(
+                $"INSERT INTO workflow_journal VALUES (3, 'second', 1, '{DateTimeOffset.UtcNow:O}', 'injected-conflict')");
+        }
+        await Assert.ThrowsAnyAsync<Exception>(() => CSharpDbWorkflowStore.OpenAsync(DatabasePath));
+        await using var inspect = await Database.OpenAsync(DatabasePath);
+        await using var actual = await inspect.ExecuteAsync("SELECT payload FROM workflows ORDER BY id");
+        for (var i = 0; i < 2; i++)
+        {
+            Assert.True(await actual.MoveNextAsync());
+            var payload = JsonNode.Parse(actual.Current[0].AsText)!;
+            Assert.Equal(1, payload["SchemaVersion"]!.GetValue<int>());
+            Assert.Equal(0, payload["Revision"]!.GetValue<int>());
+        }
+    }
+
+    [Theory]
+    [InlineData(WorkflowHumanRequestKind.Input)]
+    [InlineData(WorkflowHumanRequestKind.ToolApproval)]
+    public async Task HumanResponsesAreDurableAndImmutable(WorkflowHumanRequestKind kind)
+    {
+        var checkpoint = Checkpoint() with { ToolExecutions = [Tool("operation") with { State = WorkflowToolState.Planned }],
+            HumanRequests = [new("human", kind, "Question", "tool:operation", DateTimeOffset.UtcNow,
+                kind == WorkflowHumanRequestKind.ToolApproval ? "operation" : null,
+                kind == WorkflowHumanRequestKind.ToolApproval ? "exact-operation-hash" : null)],
+            Status = WorkflowStatus.AwaitingInput };
+        await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath))
+        {
+            await store.CreateAsync(checkpoint, Ct);
+            var response = new WorkflowHumanResponse(kind == WorkflowHumanRequestKind.Input ? "Answer" : null,
+                kind == WorkflowHumanRequestKind.ToolApproval ? true : null, "owner", DateTimeOffset.UtcNow);
+            checkpoint = await store.SaveAsync(checkpoint with {
+                HumanRequests = [checkpoint.HumanRequests![0] with { Response = response }] }, 0, "human_answered", Ct);
+            await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(checkpoint with {
+                HumanRequests = [checkpoint.HumanRequests![0] with { Response = response with { CallerId = "other" } }] }, 1, "spoof", Ct));
+            await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(checkpoint with {
+                HumanRequests = [checkpoint.HumanRequests![0] with { Prompt = "Other operation" }] }, 1, "rewrite", Ct));
+            await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(checkpoint with {
+                HumanRequests = [checkpoint.HumanRequests![0] with { Response = null }] }, 1, "clear", Ct));
+        }
+        await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var actual = (await reopened.GetAsync(new RunId("run"), Ct))!;
+        Assert.Equal(checkpoint.HumanRequests![0], Assert.Single(actual.HumanRequests!));
+    }
+
+    [Theory]
+    [InlineData(WorkflowControl.Pause)]
+    [InlineData(WorkflowControl.Cancel)]
+    public async Task RootControlRejectsNewDescendantWorkButAllowsInflightOutcomes(WorkflowControl control)
+    {
+        await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var root = Checkpoint("root", "root-session");
+        var child = Checkpoint("child", "child-session") with { RootRunId = "root", ParentRunId = "root",
+            ModelCalls = [new("inflight")], Usage = new(1, 1),
+            ToolExecutions = [Tool("inflight"), Tool("planned") with { State = WorkflowToolState.Planned }] };
+        await store.CreateAsync(root, Ct);
+        await store.CreateAsync(child, Ct);
+        root = await store.SaveAsync(root with { Control = control }, 0, "control_requested", Ct);
+        async Task RejectAdmission(WorkflowCheckpoint next)
+        {
+            if (control == WorkflowControl.Cancel)
+                await Assert.ThrowsAsync<WorkflowCancelledException>(() => store.SaveAsync(next, child.Revision, "admission", Ct));
+            else await Assert.ThrowsAsync<WorkflowSuspendedException>(() => store.SaveAsync(next, child.Revision, "admission", Ct));
+        }
+        await RejectAdmission(child with { Usage = new(2, 1) });
+        await RejectAdmission(child with { ToolExecutions = [child.ToolExecutions![0], child.ToolExecutions[1] with { State = WorkflowToolState.Started }] });
+        child = await store.SaveAsync(child with {
+            ModelCalls = [new("inflight", [new("text", "response")])],
+            ToolExecutions = [child.ToolExecutions![0] with { State = WorkflowToolState.Completed, Result = ToolResult.Success("receipt") }, child.ToolExecutions[1]],
+            Usage = child.Usage! with { InputTokens = 11 } }, 0, "inflight_completed", Ct);
+        Assert.Equal("receipt", child.ToolExecutions![0].Result!.Content);
+        if (control == WorkflowControl.Cancel)
+            await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(root with { Control = WorkflowControl.None }, root.Revision, "undo_cancel", Ct));
+        else await store.SaveAsync(root with { Control = WorkflowControl.None }, root.Revision, "resume", Ct);
+    }
+
+    [Theory]
+    [InlineData(WorkflowHumanRequestKind.Input)]
+    [InlineData(WorkflowHumanRequestKind.ToolApproval)]
+    public async Task RootCancellationAtomicallyRejectsDescendantHumanResponse(WorkflowHumanRequestKind kind)
+    {
+        await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var root = Checkpoint("root", "root-session");
+        var child = Checkpoint("child", "child-session") with { RootRunId = "root", ParentRunId = "root",
+            ToolExecutions = [Tool("operation") with { State = WorkflowToolState.Planned }, Tool("inflight")],
+            HumanRequests = [new("human", kind, "Question", "tool:operation", DateTimeOffset.UtcNow,
+                kind == WorkflowHumanRequestKind.ToolApproval ? "operation" : null,
+                kind == WorkflowHumanRequestKind.ToolApproval ? "operation-hash" : null)] };
+        await store.CreateAsync(root, Ct);
+        await store.CreateAsync(child, Ct);
+        // A child command may have read its unchanged revision before root
+        // cancellation committed. Only an in-transaction root check closes it.
+        await store.SaveAsync(root with { Control = WorkflowControl.Cancel }, 0, "cancel_requested", Ct);
+        var response = new WorkflowHumanResponse(kind == WorkflowHumanRequestKind.Input ? "Answer" : null,
+            kind == WorkflowHumanRequestKind.ToolApproval ? true : null, "owner", DateTimeOffset.UtcNow);
+        await Assert.ThrowsAsync<WorkflowCancelledException>(() => store.SaveAsync(child with {
+            HumanRequests = [child.HumanRequests![0] with { Response = response }] }, 0, "human_answered", Ct));
+        child = await store.SaveAsync(child with { ToolExecutions = [child.ToolExecutions![0], child.ToolExecutions[1] with {
+            Result = ToolResult.Success("known receipt"), State = WorkflowToolState.Completed }] }, 0, "tool_completed", Ct);
+        Assert.Null(child.HumanRequests![0].Response);
+        Assert.Equal("known receipt", child.ToolExecutions![1].Result!.Content);
+        Assert.Equal(new[] { "accepted", "tool_completed" }, (await store.ReadJournalAsync(new RunId("child"), Ct)).Select(x => x.EventType));
+    }
+
+    [Theory]
+    [InlineData(WorkflowControl.Pause, AgentRunStatus.Succeeded)]
+    [InlineData(WorkflowControl.Cancel, AgentRunStatus.Succeeded)]
+    [InlineData(WorkflowControl.Pause, AgentRunStatus.BudgetExhausted)]
+    [InlineData(WorkflowControl.Cancel, AgentRunStatus.BudgetExhausted)]
+    public async Task RootControlAtomicallyRejectsDescendantTerminalResultButAllowsSettling(WorkflowControl control, AgentRunStatus resultStatus)
+    {
+        await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var root = Checkpoint("root", "root-session");
+        var child = Checkpoint("child", "child-session") with { RootRunId = "root", ParentRunId = "root",
+            LeaseOwner = "live-child", Status = WorkflowStatus.Running,
+            ModelCalls = [new("saved", [new("text", "completed response")])] };
+        await store.CreateAsync(root, Ct);
+        await store.CreateAsync(child, Ct);
+        await store.SaveAsync(root with { Control = control }, 0, "control_requested", Ct);
+        var success = new AgentRunResult(new RunId("child"), child.Request.SessionKey, "Completed", [], new Dictionary<string, object?>(), resultStatus);
+        var proposed = child with { Result = success, Status = resultStatus == AgentRunStatus.Succeeded ? WorkflowStatus.Succeeded : WorkflowStatus.BudgetExhausted, LeaseOwner = null };
+        if (control == WorkflowControl.Cancel)
+            await Assert.ThrowsAsync<WorkflowCancelledException>(() => store.SaveAsync(proposed, 0, "run_finished", Ct));
+        else await Assert.ThrowsAsync<WorkflowSuspendedException>(() => store.SaveAsync(proposed, 0, "run_finished", Ct));
+        var settledResult = success with { Status = control == WorkflowControl.Cancel ? AgentRunStatus.Cancelled : AgentRunStatus.Paused };
+        var settled = await store.SaveAsync(child with {
+            Result = control == WorkflowControl.Cancel ? settledResult : null,
+            Suspension = control == WorkflowControl.Pause ? settledResult : null,
+            Status = control == WorkflowControl.Cancel ? WorkflowStatus.Cancelled : WorkflowStatus.Paused,
+            LeaseOwner = null }, 0, "control_settled", Ct);
+        Assert.Null(settled.LeaseOwner);
+        Assert.Equal("completed response", settled.ModelCalls![0].Response![0].Text);
+    }
+
+    [Theory]
+    [InlineData(WorkflowControl.Pause, WorkflowStatus.Paused)]
+    [InlineData(WorkflowControl.Cancel, WorkflowStatus.Cancelled)]
+    public async Task RecoveryPreservesControlAndClearsStaleLeases(WorkflowControl control, WorkflowStatus expected)
+    {
+        var checkpoint = Checkpoint() with { Control = control, Status = WorkflowStatus.Running, LeaseOwner = "dead-host",
+            ToolExecutions = [Tool("planned") with { State = WorkflowToolState.Planned }] };
+        await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath))
+            await store.CreateAsync(checkpoint, Ct);
+        await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var actual = (await reopened.GetAsync(new RunId("run"), Ct))!;
+        Assert.Equal(control, actual.Control);
+        Assert.Equal(expected, actual.Status);
+        Assert.Null(actual.LeaseOwner);
+        Assert.False(WorkflowIdentity.HasUnknownEffects(actual));
+    }
+
+    [Fact]
+    public async Task RootPauseIsAppliedWhenRecoveringDescendantLease()
+    {
+        await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath))
+        {
+            var root = Checkpoint("root", "root-session");
+            await store.CreateAsync(root, Ct);
+            await store.CreateAsync(Checkpoint("child", "child-session") with { RootRunId = "root", ParentRunId = "root",
+                LeaseOwner = "dead-child", Status = WorkflowStatus.Running }, Ct);
+            await store.SaveAsync(root with { Control = WorkflowControl.Pause, Status = WorkflowStatus.Paused }, 0, "root_paused", Ct);
+        }
+        await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var child = (await reopened.GetAsync(new RunId("child"), Ct))!;
+        Assert.Equal(WorkflowStatus.Paused, child.Status);
+        Assert.Null(child.LeaseOwner);
+    }
+
+    [Fact]
+    public async Task CancellationRequestKeepsSessionReservedUntilActiveLeaseSettles()
+    {
+        await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var checkpoint = Checkpoint() with { LeaseOwner = "live-host", Status = WorkflowStatus.Running };
+        await store.CreateAsync(checkpoint, Ct);
+        checkpoint = await store.SaveAsync(checkpoint with { Control = WorkflowControl.Cancel }, 0, "cancel_requested", Ct);
+        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.CreateAsync(Checkpoint("next"), Ct));
+        await store.SaveAsync(checkpoint with { LeaseOwner = null, Status = WorkflowStatus.Cancelled }, checkpoint.Revision, "cancel_settled", Ct);
+        await store.CreateAsync(Checkpoint("next"), Ct);
+    }
+
+    [Fact]
+    public async Task CancelledUnknownEffectsRemainReconcilableWithoutRestoringExecution()
+    {
+        var checkpoint = Checkpoint() with { Control = WorkflowControl.Cancel, Status = WorkflowStatus.Running,
+            LeaseOwner = "dead-host", ToolExecutions = [Tool("unknown")], Usage = new(1, 1) };
+        await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath))
+        {
+            // Cancellation races with an already admitted tool, not acceptance.
+            await store.CreateAsync(checkpoint with { Control = WorkflowControl.None }, Ct);
+            checkpoint = await store.SaveAsync(checkpoint, 0, "cancel_requested", Ct);
+        }
+        await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var actual = (await reopened.GetAsync(new RunId("run"), Ct))!;
+        Assert.Equal(WorkflowStatus.NeedsReconciliation, actual.Status);
+        actual = await reopened.SaveAsync(actual with { ToolExecutions = [actual.ToolExecutions![0] with {
+            State = WorkflowToolState.Completed, Result = ToolResult.Success("verified receipt"), ReconciliationNote = "Inspected destination" }],
+            Status = WorkflowStatus.Cancelled }, actual.Revision, "tool_reconciled", Ct);
+        Assert.Equal(WorkflowControl.Cancel, actual.Control);
+        await Assert.ThrowsAsync<WorkflowCancelledException>(() => reopened.SaveAsync(actual with { Usage = new(2, 1) }, actual.Revision, "model_started", Ct));
+        await reopened.CreateAsync(Checkpoint("next"), Ct);
+    }
+
+    [Fact]
+    public async Task OrderedIntentAndHumanRequestRecordsCannotBeReordered()
+    {
+        await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+        var checkpoint = Checkpoint() with { ToolExecutions = [Tool("a"), Tool("b")],
+            HumanRequests = [new("a", WorkflowHumanRequestKind.Input, "Question A", "route:0", DateTimeOffset.UtcNow),
+                new("b", WorkflowHumanRequestKind.Input, "Question B", "route:1", DateTimeOffset.UtcNow)] };
+        await store.CreateAsync(checkpoint, Ct);
+        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(checkpoint with {
+            ToolExecutions = checkpoint.ToolExecutions!.Reverse().ToArray() }, 0, "reordered_tools", Ct));
+        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(checkpoint with {
+            HumanRequests = checkpoint.HumanRequests!.Reverse().ToArray() }, 0, "reordered_questions", Ct));
+    }
+
+    private async Task RewritePayloadAsync(string runId, Action<JsonObject> edit)
+    {
+        await using var database = await Database.OpenAsync(DatabasePath);
+        JsonObject payload;
+        await using (var query = await database.ExecuteAsync($"SELECT payload FROM workflows WHERE run_id = '{runId}'"))
+        {
+            Assert.True(await query.MoveNextAsync());
+            payload = JsonNode.Parse(query.Current[0].AsText)!.AsObject();
+        }
+        edit(payload);
+        await using var update = await database.ExecuteAsync($"UPDATE workflows SET payload = '{payload.ToJsonString().Replace("'", "''")}' WHERE run_id = '{runId}'");
+    }
+
     private static WorkflowCheckpoint Checkpoint(string runId = "run", string session = "session") =>
         new(runId, runId, null, "task-" + runId, Request(session), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
@@ -369,7 +685,8 @@ public sealed class WorkflowStoreTests : IDisposable
         new ToolSelectionPolicy(ToolProfile.Full), new CallerIdentity("owner", "Owner", true));
 
     private static WorkflowToolExecution Tool(string executionId, ToolResult? result = null) =>
-        new(executionId, new ToolCall("call-" + executionId, "fake-tool", JsonSerializer.SerializeToElement(new { path = "a'b" })), result);
+        new(executionId, new ToolCall("call-" + executionId, "fake-tool", JsonSerializer.SerializeToElement(new { path = "a'b" })), result,
+            State: result is null ? WorkflowToolState.Started : WorkflowToolState.Completed);
 
     public void Dispose()
     {

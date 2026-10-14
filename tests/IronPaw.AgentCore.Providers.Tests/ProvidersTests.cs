@@ -214,6 +214,84 @@ public sealed class ProvidersTests
             StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(0, 2, 1)]
+    [InlineData(1, 2, 2)]
+    [InlineData(4, 1, 2)]
+    public async Task OpenAi_RequestContinuationCapBoundsHttpAttempts(
+        int requestCap, int configuredCap, int expectedRequests)
+    {
+        const string body =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}\n" +
+            "data: {\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n" +
+            "data: [DONE]\n";
+        var handler = new RecordingSequenceHandler(
+            Enumerable.Repeat((HttpStatusCode.OK, body), expectedRequests).ToArray());
+        var client = new OpenAiLlmClient(new HttpClient(handler), () => "test-key",
+            options: new OpenAiClientOptions(MaxAutoContinuationPasses: configuredCap));
+
+        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "openai") with {
+            MaxAutoContinuationPasses = requestCap }, CancellationToken.None));
+
+        Assert.Equal(expectedRequests, handler.RequestBodies.Count);
+        Assert.Contains(deltas, delta => delta is LlmErrorDelta error && error.Error.Contains("output limit"));
+        Assert.DoesNotContain(deltas, delta => delta is CompletedDelta);
+    }
+
+    [Fact]
+    public async Task OpenAi_NegativeRequestContinuationCapFailsBeforeHttp()
+    {
+        var handler = new RecordingSequenceHandler();
+        var client = new OpenAiLlmClient(new HttpClient(handler), () => "test-key");
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => CollectAsync(client.StreamAsync(
+            CreateRequest(provider: "openai") with { MaxAutoContinuationPasses = -1 }, CancellationToken.None)));
+        Assert.Empty(handler.RequestBodies);
+    }
+
+    [Fact]
+    public async Task OpenAi_CumulativeUsageNormalizesWithinEachContinuationPass()
+    {
+        const string firstBody =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}\n" +
+            "data: {\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3}}\n" +
+            "data: {\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3}}\n" +
+            "data: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":5}}\n" +
+            "data: {\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":4}}\n" +
+            "data: [DONE]\n";
+        const string secondBody =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"finished\"},\"finish_reason\":\"stop\"}]}\n" +
+            "data: {\"usage\":{\"prompt_tokens\":40,\"completion_tokens\":7}}\n" +
+            "data: {\"usage\":{\"prompt_tokens\":40,\"completion_tokens\":7}}\n" +
+            "data: [DONE]\n";
+        var handler = new RecordingSequenceHandler((HttpStatusCode.OK, firstBody), (HttpStatusCode.OK, secondBody));
+        var client = new OpenAiLlmClient(new HttpClient(handler), () => "test-key");
+        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "openai", maxOutputTokens: 256)
+            with { MaxAutoContinuationPasses = 1 }, CancellationToken.None));
+
+        Assert.Equal(52, deltas.OfType<UsageDelta>().Sum(delta => delta.InputTokens ?? 0));
+        Assert.Equal(12, deltas.OfType<UsageDelta>().Sum(delta => delta.OutputTokens ?? 0));
+        Assert.IsType<CompletedDelta>(deltas[^1]);
+        using var secondRequest = JsonDocument.Parse(handler.RequestBodies[1]);
+        Assert.Equal(251, secondRequest.RootElement.GetProperty("max_tokens").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("openai")]
+    [InlineData("anthropic")]
+    public async Task Provider_RequestOutputCapReachesHttpPayload(string provider)
+    {
+        var handler = new RecordingSequenceHandler((HttpStatusCode.OK, provider == "openai"
+            ? "data: [DONE]\n" : "data: {\"type\":\"message_stop\"}\n"));
+        ILlmClient client = provider == "openai"
+            ? new OpenAiLlmClient(new HttpClient(handler), () => "test-key")
+            : new AnthropicLlmClient(new HttpClient(handler), () => "test-key");
+
+        await CollectAsync(client.StreamAsync(CreateRequest(provider: provider, maxOutputTokens: 37), CancellationToken.None));
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.RequestBodies));
+        Assert.Equal(37, payload.RootElement.GetProperty("max_tokens").GetInt32());
+    }
+
     [Fact]
     public async Task OpenAiLlmClient_NoOutputBudget_ReturnsErrorWithoutCallingApi()
     {
@@ -366,6 +444,63 @@ public sealed class ProvidersTests
         var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "anthropic"), CancellationToken.None));
         Assert.Equal(10L, deltas.OfType<UsageDelta>().Sum(usage => usage.InputTokens ?? 0));
         Assert.Equal(5L, deltas.OfType<UsageDelta>().Sum(usage => usage.OutputTokens ?? 0));
+    }
+
+    [Fact]
+    public async Task Anthropic_StartCacheUsageCountsOnceAcrossRepeatedUsageChunks()
+    {
+        const string body =
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"cache_read_input_tokens\":30,\"cache_creation_input_tokens\":20}}}\n" +
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":3}}\n" +
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":3}}\n" +
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5}}\n" +
+            "data: {\"type\":\"message_stop\"}\n";
+        var client = new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
+        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "anthropic"), CancellationToken.None));
+
+        Assert.Equal(10, deltas.OfType<UsageDelta>().Sum(delta => delta.InputTokens ?? 0));
+        Assert.Equal(5, deltas.OfType<UsageDelta>().Sum(delta => delta.OutputTokens ?? 0));
+        Assert.Equal(30, deltas.OfType<UsageDelta>().Sum(delta => delta.CacheReadTokens ?? 0));
+        Assert.Equal(20, deltas.OfType<UsageDelta>().Sum(delta => delta.CacheWriteTokens ?? 0));
+        Assert.IsType<CompletedDelta>(deltas[^1]);
+    }
+
+    [Theory]
+    [InlineData("{\"input_tokens\":10}", "{}", true)]
+    [InlineData("{}", "{\"output_tokens\":3}", false)]
+    public async Task Anthropic_PartialUsageReceiptPreservesMissingTokenFields(
+        string startUsage, string finalUsage, bool inputReported)
+    {
+        var body = "data: {\"type\":\"message_start\",\"message\":{\"usage\":" + startUsage + "}}\n" +
+            "data: {\"type\":\"message_delta\",\"usage\":" + finalUsage + "}\n" +
+            "data: {\"type\":\"message_stop\"}\n";
+        var client = new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
+
+        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "anthropic"), CancellationToken.None));
+
+        var usage = Assert.Single(deltas.OfType<UsageDelta>());
+        if (inputReported) { Assert.Equal(10, usage.InputTokens); Assert.Null(usage.OutputTokens); }
+        else { Assert.Null(usage.InputTokens); Assert.Equal(3, usage.OutputTokens); }
+        Assert.IsType<CompletedDelta>(deltas[^1]);
+    }
+
+    [Theory]
+    [InlineData("openai", "data: {\"usage\":{\"prompt_tokens\":-1,\"completion_tokens\":0}}\ndata: [DONE]\n")]
+    [InlineData("openai", "data: {\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":-1}}\ndata: [DONE]\n")]
+    [InlineData("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":-1}}}\ndata: {\"type\":\"message_stop\"}\n")]
+    [InlineData("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_read_input_tokens\":-1}}}\ndata: {\"type\":\"message_stop\"}\n")]
+    [InlineData("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_creation_input_tokens\":-1}}}\ndata: {\"type\":\"message_stop\"}\n")]
+    [InlineData("anthropic", "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":-1}}\ndata: {\"type\":\"message_stop\"}\n")]
+    public async Task Provider_NegativeUsageFailsWithoutFabricatingZeroReceipt(string provider, string body)
+    {
+        ILlmClient client = provider == "openai"
+            ? new OpenAiLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key")
+            : new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
+
+        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: provider), CancellationToken.None));
+
+        Assert.Contains(deltas, delta => delta is LlmErrorDelta error && error.Error.Contains("negative token usage"));
+        Assert.DoesNotContain(deltas, delta => delta is UsageDelta or CompletedDelta);
     }
 
     [Theory]

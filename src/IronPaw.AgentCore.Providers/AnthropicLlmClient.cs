@@ -54,10 +54,14 @@ public sealed class AnthropicLlmClient : ILlmClient
 
         // Track content blocks by their index; tool_use blocks accumulate partial JSON.
         var contentBlocks = new Dictionary<int, ContentBlockState>();
-        long inputTokens = 0;
-        long outputTokens = 0;
+        long? inputTokens = null;
+        long? outputTokens = null;
         long reportedInputTokens = 0;
         long reportedOutputTokens = 0;
+        long? cacheReadTokens = null;
+        long? cacheWriteTokens = null;
+        long reportedCacheReadTokens = 0;
+        long reportedCacheWriteTokens = 0;
         string? stopReason = null;
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -92,7 +96,14 @@ public sealed class AnthropicLlmClient : ILlmClient
                         if (root.TryGetProperty("message", out var msgEl) &&
                             msgEl.TryGetProperty("usage", out var startUsageEl))
                         {
-                            inputTokens = TryReadLong(startUsageEl, "input_tokens") ?? 0;
+                            inputTokens = TryReadLong(startUsageEl, "input_tokens");
+                            cacheReadTokens = TryReadLong(startUsageEl, "cache_read_input_tokens");
+                            cacheWriteTokens = TryReadLong(startUsageEl, "cache_creation_input_tokens");
+                            if (inputTokens is < 0 || cacheReadTokens is < 0 || cacheWriteTokens is < 0)
+                            {
+                                yield return new LlmErrorDelta("Anthropic stream reported negative token usage.");
+                                yield break;
+                            }
                         }
 
                         break;
@@ -165,15 +176,23 @@ public sealed class AnthropicLlmClient : ILlmClient
                         }
                         if (root.TryGetProperty("usage", out var deltaUsageEl))
                         {
-                            outputTokens = TryReadLong(deltaUsageEl, "output_tokens") ?? 0;
+                            outputTokens = TryReadLong(deltaUsageEl, "output_tokens");
+                            if (outputTokens is < 0)
+                            {
+                                yield return new LlmErrorDelta("Anthropic stream reported negative token usage.");
+                                yield break;
+                            }
                         }
 
                         yield return new UsageDelta(
-                            Math.Max(0, inputTokens - reportedInputTokens),
-                            Math.Max(0, outputTokens - reportedOutputTokens),
-                            CacheReadTokens: null, CacheWriteTokens: null);
-                        reportedInputTokens = Math.Max(reportedInputTokens, inputTokens);
-                        reportedOutputTokens = Math.Max(reportedOutputTokens, outputTokens);
+                            inputTokens.HasValue ? Math.Max(0, inputTokens.Value - reportedInputTokens) : null,
+                            outputTokens.HasValue ? Math.Max(0, outputTokens.Value - reportedOutputTokens) : null,
+                            CacheReadTokens: cacheReadTokens.HasValue ? Math.Max(0, cacheReadTokens.Value - reportedCacheReadTokens) : null,
+                            CacheWriteTokens: cacheWriteTokens.HasValue ? Math.Max(0, cacheWriteTokens.Value - reportedCacheWriteTokens) : null);
+                        reportedInputTokens = Math.Max(reportedInputTokens, inputTokens ?? 0);
+                        reportedOutputTokens = Math.Max(reportedOutputTokens, outputTokens ?? 0);
+                        reportedCacheReadTokens = Math.Max(reportedCacheReadTokens, cacheReadTokens ?? 0);
+                        reportedCacheWriteTokens = Math.Max(reportedCacheWriteTokens, cacheWriteTokens ?? 0);
                         break;
 
                     case "message_stop":

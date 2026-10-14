@@ -71,6 +71,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.AgentCore.Persisten
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.Workflow.CrashHarness", "tests\IronPaw.Workflow.CrashHarness\IronPaw.Workflow.CrashHarness.csproj", "{01AE74F4-A81C-4B9F-8870-B266D028B808}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.Desktop.Tests", "tests\IronPaw.Desktop.Tests\IronPaw.Desktop.Tests.csproj", "{D17EDC79-581C-4F46-927B-20830632B70D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -81,6 +83,18 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Debug|x64.Build.0 = Debug|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Debug|x86.Build.0 = Debug|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Release|x64.ActiveCfg = Release|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Release|x64.Build.0 = Release|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Release|x86.ActiveCfg = Release|Any CPU
+		{D17EDC79-581C-4F46-927B-20830632B70D}.Release|x86.Build.0 = Release|Any CPU
 		{1C88FCBF-C9A3-47E4-A78E-FAAE3B800F1C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{1C88FCBF-C9A3-47E4-A78E-FAAE3B800F1C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1C88FCBF-C9A3-47E4-A78E-FAAE3B800F1C}.Debug|x64.ActiveCfg = Debug|Any CPU
@@ -314,6 +328,7 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{D17EDC79-581C-4F46-927B-20830632B70D} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{1C88FCBF-C9A3-47E4-A78E-FAAE3B800F1C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{D2B16682-9CF1-44BE-99AE-7C147E716E7E} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{DA0EAD1D-6B30-4F9E-AD78-67006A4C5B3A} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}

@@ -2,6 +2,8 @@ using IronPaw.AgentCore.Abstractions;
 using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
 using Spectre.Console;
+using System.Globalization;
+using System.Text.Json;
 
 namespace IronPaw.Cli;
 
@@ -117,20 +119,43 @@ internal static class ConsoleUi
         AnsiConsole.Write(table);
     }
 
-    public static void RenderFinal(AgentRunResult result)
+    public static void RenderFinal(AgentRunResult result, IAnsiConsole? console = null)
     {
-        AnsiConsole.WriteLine();
+        console ??= AnsiConsole.Console;
+        console.WriteLine();
 
         var color = result.Status == AgentRunStatus.Succeeded ? Color.Green3_1 : Color.Yellow;
         var panel = new Panel(new Text(result.FinalAssistantMessage))
             .Header($"[bold]{result.Status}[/]")
+            .Expand()
             .RoundedBorder()
             .BorderColor(color);
-        AnsiConsole.Write(panel);
+        console.Write(panel);
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"[grey70]run_id[/]: [deepskyblue1]{Markup.Escape(result.RunId.Value)}[/]");
+        if (result.Metadata.TryGetValue("rootWorkflowBudget", out var value))
+        {
+            var budget = value as WorkflowBudgetSnapshot;
+            if (budget is null && value is JsonElement json)
+                budget = json.Deserialize<WorkflowBudgetSnapshot>();
+            if (budget is not null) RenderWorkflowBudget(budget, console);
+        }
     }
+
+    public static void RenderWorkflowBudget(WorkflowBudgetSnapshot budget, IAnsiConsole? console = null)
+    {
+        console ??= AnsiConsole.Console;
+        var tokenLimit = budget.Limits.MaxTotalTokens?.ToString(CultureInfo.InvariantCulture) ?? "unlimited";
+        var remainingTokens = budget.RemainingTokens?.ToString(CultureInfo.InvariantCulture) ?? "unlimited";
+        var timeLimit = budget.Limits.MaxExecutionTime is { } limit ? FormatSeconds(limit) + "s" : "unlimited";
+        var remainingTime = budget.RemainingExecutionTime is { } remaining ? FormatSeconds(remaining) + "s" : "unlimited";
+        console.Write(new Text($"Root budget {budget.RootRunId}: tokens charged={budget.ChargedTokens}, " +
+            $"reserved={budget.ReservedTokens}, remaining={remainingTokens}, limit={tokenLimit}; " +
+            $"execution consumed={FormatSeconds(budget.ExecutionTime)}s, remaining={remainingTime}, limit={timeLimit}\n"));
+    }
+
+    private static string FormatSeconds(TimeSpan value) => value.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
 
     public static void RenderMemoryList(
         IReadOnlyList<MemoryEntry> globalMemories,

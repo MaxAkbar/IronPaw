@@ -74,8 +74,10 @@ internal static class DesktopBootstrapper
         services.AddSingleton(sessionStore);
         services.AddSingleton(transcriptStore);
         services.AddSingleton<IRunHistoryStore>(new JsonRunHistoryStore(Path.Combine(paths.StateRoot, "run-history.jsonl")));
-        services.AddSingleton<IWorkflowStore>(_ => CSharpDbWorkflowStore.OpenAsync(
-            ResolveWorkflowDatabasePath(paths.StateRoot, paths.WorkspaceRoot)).GetAwaiter().GetResult());
+        // CSharpDB startup may await library operations that capture their caller's context.
+        // Resolve it off the dispatcher so synchronous DI construction cannot deadlock WPF.
+        services.AddSingleton<IWorkflowStore>(_ => Task.Run(() => CSharpDbWorkflowStore.OpenAsync(
+            ResolveWorkflowDatabasePath(paths.StateRoot, paths.WorkspaceRoot))).GetAwaiter().GetResult());
 
         services.AddSingleton<InMemoryToolRegistry>(sp =>
         {
@@ -258,8 +260,11 @@ internal sealed class DesktopBootstrap : IDisposable
 
     public SkillAddinLoadResult SkillLoadResult { get; }
 
+    public IWorkflowStore WorkflowStore => _serviceProvider.GetRequiredService<IWorkflowStore>();
+
     public void Dispose()
     {
-        _serviceProvider.Dispose();
+        // Mirror the startup boundary when CSharpDB drains asynchronous storage work.
+        Task.Run(_serviceProvider.Dispose).GetAwaiter().GetResult();
     }
 }

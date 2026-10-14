@@ -63,11 +63,26 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
             throw new ArgumentOutOfRangeException(nameof(request), "MaxRounds must be at least one.");
         }
         var effectiveSink = sink ?? NullAgentEventSink.Instance;
-        if (request.Budget is { } budget && (budget.MaxModelCalls < 1 || budget.MaxToolCalls < 0))
+        if (_workflowStore is not null && checkpoint is null && request.RequestedRunId is { } requestedId)
+        {
+            var existing = await _workflowStore.GetAsync(requestedId, ct);
+            if (existing is not null)
+            {
+                if (existing.ParentRunId != request.ParentRunId?.Value || existing.RootRunId != request.RootRunId?.Value ||
+                    existing.Request.SessionKey != request.SessionKey || existing.Request.UserInput != request.UserInput ||
+                    existing.Request.AgentId != request.AgentId)
+                    throw new WorkflowConflictException("The child invocation identity does not match its saved request.");
+                return await ResumeAsync(requestedId, request.Caller, effectiveSink, ct);
+            }
+        }
+        if (request.MaxOutputTokens < 1)
+            throw new ArgumentOutOfRangeException(nameof(request), "MaxOutputTokens must be positive.");
+        if (request.Budget is { } budget && (budget.MaxModelCalls < 1 || budget.MaxToolCalls < 0 ||
+            budget.MaxTotalTokens <= 0 || budget.MaxExecutionTime <= TimeSpan.Zero))
             throw new ArgumentOutOfRangeException(nameof(request), "Workflow budgets must allow a model call and cannot be negative.");
         if (_workflowStore is not null && checkpoint is null)
         {
-            var id = RunId.New();
+            var id = request.RequestedRunId ?? RunId.New();
             var now = DateTimeOffset.UtcNow;
             checkpoint = new WorkflowCheckpoint(id.Value, (request.RootRunId ?? id).Value,
                 request.ParentRunId?.Value, Guid.NewGuid().ToString("n"), request, now, now,
@@ -76,20 +91,34 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
         }
         var progress = new RunProgress(request, checkpoint,
             checkpoint is null ? null : new WorkflowExecution(_workflowStore!, checkpoint));
+        using var budgetCt = new CancellationTokenSource();
+        using var stopBudgetTimer = new CancellationTokenSource();
+        Task budgetTimer = Task.CompletedTask;
+        using var executionCt = CancellationTokenSource.CreateLinkedTokenSource(ct, budgetCt.Token);
+        var active = new ActiveWorkflow(checkpoint?.RootRunId ?? progress.RunId.Value, executionCt);
+        if (progress.Execution is not null && !_activeWorkflows.TryAdd(progress.RunId.Value, active))
+            throw new WorkflowConflictException("This workflow is already executing in this host.");
         try
         {
             return await _laneScheduler.EnqueueAsync(request.SessionKey, async laneCt =>
             {
                 progress.EnteredLane = true;
-                if (progress.Execution is not null)
-                {
-                    if (progress.Execution.Checkpoint.LeaseOwner is not null)
-                        throw new WorkflowConflictException("This workflow is already running.");
-                    await progress.Execution.ClaimAsync(laneCt);
-                }
                 AgentRunResult result;
                 try
                 {
+                    if (progress.Execution is not null)
+                    {
+                        if (progress.Execution.Checkpoint.LeaseOwner is not null)
+                            throw new WorkflowConflictException("This workflow is already running.");
+                        await progress.Execution.ClaimAsync(laneCt);
+                        var resources = await progress.Execution.GetBudgetAsync(laneCt);
+                        if (resources.RemainingExecutionTime is { } remaining)
+                        {
+                            if (remaining <= TimeSpan.Zero)
+                                throw new WorkflowBudgetExceededException("The shared execution-time budget is exhausted.");
+                            budgetTimer = ApplyBudgetDeadlineAsync(remaining, budgetCt, stopBudgetTimer.Token);
+                        }
+                    }
                     await PublishAsync(effectiveSink, new AgentEvent(
                         progress.RunId, request.SessionKey, AgentEventStream.Lifecycle,
                         "run_started", DateTimeOffset.UtcNow,
@@ -99,9 +128,12 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
                     if (progress.Execution is not null)
                     {
                         using var commitCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        await progress.Execution.CheckControlAsync(commitCt.Token);
+                        await progress.Execution.CheckResourcesAsync(commitCt.Token, admittingWork: false);
                         var metadata = result.Metadata.ToDictionary(pair => pair.Key, pair => pair.Value);
                         metadata["rootWorkflowUsage"] = await _workflowStore!.GetUsageAsync(
                             new RunId(progress.Execution.Checkpoint.RootRunId), commitCt.Token);
+                        metadata["rootWorkflowBudget"] = await progress.Execution.GetBudgetAsync(commitCt.Token);
                         result = result with { Metadata = metadata };
                         await progress.Execution.FinishAsync(result, commitCt.Token);
                     }
@@ -110,6 +142,20 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
                 }
                 catch (Exception error)
                 {
+                    if (progress.Execution is not null)
+                    {
+                        if (error is WorkflowConflictException && progress.Execution.Checkpoint.LeaseOwner is null) throw;
+                        using var settleCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        var root = await progress.Execution.RootAsync(settleCt.Token);
+                        if (error is WorkflowSuspendedException suspension)
+                            return await SettleSuspensionAsync(progress, suspension.Status, suspension.Message, effectiveSink);
+                        if (root.Control != WorkflowControl.None)
+                            return await SettleSuspensionAsync(progress, WorkflowStatus.Paused,
+                                root.Control == WorkflowControl.Cancel ? "Workflow cancelled." : "Workflow paused.", effectiveSink);
+                        if (error is WorkflowBudgetExceededException || budgetCt.IsCancellationRequested)
+                            return await SettleBudgetAsync(progress, error is WorkflowBudgetExceededException
+                                ? error.Message : "The shared execution-time budget is exhausted.", effectiveSink);
+                    }
                     await RecordFailureAsync(progress, effectiveSink, error, laneCt.IsCancellationRequested);
                     throw;
                 }
@@ -137,17 +183,27 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
                     result = result with { Metadata = metadata };
                 }
                 return result;
-            }, ct);
+            }, executionCt.Token);
         }
         catch (Exception error) when (!progress.EnteredLane)
         {
             if (progress.Execution is not null)
             {
                 using var cleanupCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var root = await progress.Execution.RootAsync(cleanupCt.Token);
+                if (root.Control != WorkflowControl.None)
+                    return await SettleSuspensionAsync(progress, WorkflowStatus.Paused,
+                        root.Control == WorkflowControl.Cancel ? "Workflow cancelled." : "Workflow paused.", effectiveSink);
                 await progress.Execution.InterruptAsync(error, progress.Transcript, cleanupCt.Token);
             }
             await RecordFailureAsync(progress, effectiveSink, error, ct.IsCancellationRequested);
             throw;
+        }
+        finally
+        {
+            stopBudgetTimer.Cancel();
+            await budgetTimer;
+            if (progress.Execution is not null) _activeWorkflows.TryRemove(progress.RunId.Value, out _);
         }
     }
 
@@ -543,13 +599,15 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
             AgentRunStatus.Succeeded => "run_completed",
             AgentRunStatus.Cancelled => "run_cancelled",
             AgentRunStatus.RoundLimitReached => "run_round_limit_reached",
+            AgentRunStatus.BudgetExhausted => "run_budget_exhausted",
             AgentRunStatus.AwaitingInput => "run_awaiting_input",
+            AgentRunStatus.Paused => "run_paused",
             _ => "run_failed"
         };
         var severity = progress.Status switch
         {
             AgentRunStatus.Failed => AgentEventSeverity.Error,
-            AgentRunStatus.Cancelled or AgentRunStatus.RoundLimitReached => AgentEventSeverity.Warning,
+            AgentRunStatus.Cancelled or AgentRunStatus.RoundLimitReached or AgentRunStatus.BudgetExhausted => AgentEventSeverity.Warning,
             _ => AgentEventSeverity.Info
         };
         return PublishAsync(sink, new AgentEvent(
@@ -823,6 +881,15 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
 
         if (plan.NeedsClarification)
         {
+            if (progress.Execution is not null)
+            {
+                var prompt = BuildClarificationMessage(plan.ClarificationQuestions);
+                var input = await progress.Execution.AwaitHumanAsync("route:" + progress.Execution.CurrentModelIndex,
+                    WorkflowHumanRequestKind.Input, prompt, null, null, ct);
+                transcript.Add(new ChatMessage(ChatRole.Assistant, input.Prompt));
+                transcript.Add(new ChatMessage(ChatRole.User, input.Response!.Answer!));
+                return new RoutePlanExecutionResult(false, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens);
+            }
             transcript.Add(new ChatMessage(ChatRole.Assistant, BuildClarificationMessage(plan.ClarificationQuestions)));
             return new RoutePlanExecutionResult(
                 HaltAfterClarification: true,

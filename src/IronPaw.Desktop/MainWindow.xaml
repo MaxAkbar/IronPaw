@@ -109,10 +109,30 @@
                                    FontSize="12"
                                    Text="OpenAI: OPENAI_API_KEY | Anthropic: ANTHROPIC_API_KEY | Ollama: OLLAMA_BASE_URL (+ optional OLLAMA_API_KEY) | LM Studio: LMSTUDIO_BASE_URL (+ optional LMSTUDIO_API_KEY)." />
 
-                        <StackPanel Grid.Row="4" Orientation="Horizontal">
+                        <WrapPanel Grid.Row="4">
                             <Button x:Name="RunButton" Content="Run Agent" Click="RunButton_OnClick" />
-                            <Button x:Name="CancelButton" Content="Cancel" Click="CancelButton_OnClick" Background="#B85A2A" BorderBrush="#91461F" />
-                        </StackPanel>
+                            <Button x:Name="PauseActiveButton" Content="Pause" Click="PauseActiveButton_OnClick" IsEnabled="False" />
+                            <Button x:Name="CancelButton" Content="Cancel permanently" Click="CancelButton_OnClick" IsEnabled="False" Background="#B85A2A" BorderBrush="#91461F" />
+                        </WrapPanel>
+
+                        <Expander Grid.Row="5" Header="New workflow limits and approvals" Margin="0,10,0,0">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,8,0">
+                                        <TextBlock Text="Token limit (optional)" FontSize="12" />
+                                        <TextBox x:Name="TokenLimitTextBox" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="Execution seconds (optional)" FontSize="12" />
+                                        <TextBox x:Name="ExecutionLimitTextBox" />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Text="Tools requiring approval (comma-separated names)" TextWrapping="Wrap" FontSize="12" />
+                                <TextBox x:Name="ApprovalToolsTextBox" />
+                                <TextBlock Text="Limits cover the root and its agents. Paused time and waiting for answers do not consume execution time." TextWrapping="Wrap" FontSize="12" />
+                            </StackPanel>
+                        </Expander>
 
                         <Grid Grid.Row="6" Margin="0,12,0,0">
                             <Grid.RowDefinitions>
@@ -149,19 +169,60 @@
                         Background="{StaticResource PanelBrush}"
                         BorderBrush="{StaticResource PanelEdgeBrush}"
                         BorderThickness="1">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-                        <TextBlock Text="Run Event Stream" FontWeight="SemiBold" />
-                        <ListBox Grid.Row="1"
-                                 Margin="0,10,0,0"
-                                 x:Name="EventsListBox"
-                                 ItemsSource="{Binding Events}"
-                                 FontFamily="Cascadia Code"
-                                 FontSize="13" />
-                    </Grid>
+                    <TabControl x:Name="ActivityTabControl">
+                        <TabItem Header="Live events">
+                            <ListBox Margin="0,10,0,0" x:Name="EventsListBox" ItemsSource="{Binding Events}"
+                                     FontFamily="Cascadia Code" FontSize="13" />
+                        </TabItem>
+                        <TabItem Header="Workflow recovery">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel Margin="10">
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Content="Refresh" Click="RefreshWorkflows_OnClick" Margin="8,0,0,8" />
+                                        <TextBlock Text="Saved workflows" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    </DockPanel>
+                                    <ComboBox x:Name="WorkflowsComboBox" SelectionChanged="WorkflowSelection_OnChanged" DisplayMemberPath="Label" />
+                                    <TextBlock Text="Invocation (root or child)" FontWeight="SemiBold" />
+                                    <ComboBox x:Name="InvocationsComboBox" SelectionChanged="InvocationSelection_OnChanged" DisplayMemberPath="Label" />
+                                    <TextBlock x:Name="WorkflowSummaryTextBlock" TextWrapping="Wrap" Margin="0,0,0,8" />
+                                    <WrapPanel>
+                                        <Button x:Name="ResumeWorkflowButton" Content="Resume root" Click="ResumeWorkflow_OnClick" />
+                                        <Button x:Name="PauseWorkflowButton" Content="Pause root" Click="PauseWorkflow_OnClick" />
+                                        <Button x:Name="CancelWorkflowButton" Content="Cancel root permanently" Click="CancelWorkflow_OnClick" Background="#B85A2A" />
+                                    </WrapPanel>
+                                    <TextBlock x:Name="RecoveryStatusTextBlock" TextWrapping="Wrap" Foreground="#7B351E" Margin="0,10,0,10" />
+                                    <Expander Header="Lineage, tool outcomes, decisions and journal" IsExpanded="False" Margin="0,0,0,12">
+                                        <TextBox x:Name="WorkflowDetailTextBox" IsReadOnly="True" AcceptsReturn="True"
+                                                 TextWrapping="Wrap" Height="230" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" />
+                                    </Expander>
+                                    <TextBlock Text="Pending question or exact operation approval" FontWeight="SemiBold" />
+                                    <ComboBox x:Name="HumanRequestsComboBox" SelectionChanged="HumanRequestSelection_OnChanged" DisplayMemberPath="Label" />
+                                    <TextBox x:Name="HumanRequestTextBox" IsReadOnly="True" TextWrapping="Wrap"
+                                             AcceptsReturn="True" MaxHeight="130" VerticalScrollBarVisibility="Auto" />
+                                    <TextBox x:Name="AnswerTextBox" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="60"
+                                             MaxHeight="150" VerticalScrollBarVisibility="Auto" />
+                                    <WrapPanel>
+                                        <Button x:Name="AnswerButton" Content="Submit answer and resume" Click="AnswerWorkflow_OnClick" />
+                                        <Button x:Name="ApproveButton" Content="Approve and resume" Click="ApproveWorkflow_OnClick" />
+                                        <Button x:Name="DenyButton" Content="Deny" Click="DenyWorkflow_OnClick" Background="#B85A2A" />
+                                    </WrapPanel>
+                                    <Expander Header="Reconcile an unknown tool outcome" Margin="0,14,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Record an outcome you have independently verified. This action does not execute the tool." TextWrapping="Wrap" Margin="0,8,0,4" />
+                                            <ComboBox x:Name="UnknownToolsComboBox" DisplayMemberPath="Label" SelectionChanged="UnknownToolSelection_OnChanged" />
+                                            <TextBox x:Name="UnknownToolTextBox" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="120" VerticalScrollBarVisibility="Auto" />
+                                            <TextBlock Text="Established result" />
+                                            <TextBox x:Name="ReconcileResultTextBox" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="60" />
+                                            <CheckBox x:Name="ReconcileErrorCheckBox" Content="The established result is an error" Margin="0,0,0,8" />
+                                            <TextBlock Text="Verification evidence / note" />
+                                            <TextBox x:Name="ReconcileNoteTextBox" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="60" />
+                                            <Button x:Name="ReconcileButton" Content="Record result and resume root" Click="ReconcileWorkflow_OnClick" />
+                                        </StackPanel>
+                                    </Expander>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
+                    </TabControl>
                 </Border>
             </Grid>
         </Grid>

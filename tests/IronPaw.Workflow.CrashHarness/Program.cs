@@ -9,7 +9,7 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.Workflow.CrashHarness;
 
-public enum CrashPoint { AfterCompletedTool, AfterEffectBeforeToolResult }
+public enum CrashPoint { AfterCompletedTool, AfterEffectBeforeToolResult, AfterHumanWait, AfterReservedModelAttempt }
 
 public static class CrashFixture
 {
@@ -21,9 +21,9 @@ public static class CrashFixture
         SystemPromptOverride: "Stable subprocess crash recovery prompt", Budget: new WorkflowBudget(4, 2));
 
     public static AgentOrchestrator CreateOrchestrator(string root, IWorkflowStore store,
-        SessionLaneScheduler scheduler, ILlmClient client, ITool tool) => new(scheduler,
+        SessionLaneScheduler scheduler, ILlmClient client, params ITool[] tools) => new(scheduler,
         new FileSessionStore(new FileSessionStoreOptions(Path.Combine(root, "sessions.json"), TimeSpan.Zero)),
-        new JsonTranscriptStore(Path.Combine(root, "transcripts")), new InMemoryToolRegistry([tool]),
+        new JsonTranscriptStore(Path.Combine(root, "transcripts")), new InMemoryToolRegistry(tools),
         new ToolExecutor(), new ToolSchemaNormalizer(), client, new TranscriptSanitizer(), new ToolResultTruncator(),
         new DefaultSystemPromptBuilder(), workflowStore: store);
 
@@ -59,15 +59,33 @@ public sealed class CrashEffectTool(string root, CrashPoint? point = null) : ITo
     }
 }
 
-public sealed class CrashModel(string root) : ILlmClient
+public sealed class CrashHumanInputTool : IHumanInputTool
+{
+    public ToolDescriptor Descriptor { get; } = new("crash_input", "Requests durable human input",
+        JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{"question":{"type":"string"}},"required":["question"]}"""), "group:system");
+    public string GetQuestion(ToolCall call) => call.Arguments.GetProperty("question").GetString()!;
+    public Task<ToolResult> ExecuteAsync(ToolCall call, ToolExecutionContext context, CancellationToken ct) =>
+        throw new InvalidOperationException("The orchestrator must persist and suspend a human input request.");
+}
+
+public sealed class CrashModel(string root, CrashPoint point = CrashPoint.AfterCompletedTool) : ILlmClient
 {
     private int _calls;
     public async IAsyncEnumerable<LlmDelta> StreamAsync(LlmRequest request, [EnumeratorCancellation] CancellationToken ct)
     {
         if (++_calls == 1)
         {
+            if (point == CrashPoint.AfterReservedModelAttempt)
+                await CrashFixture.SignalAsync(root, request.RunId, ct);
             yield return new UsageDelta(7, 2, null, null);
             yield return new ToolCallDelta("first-effect", "crash_effect", JsonSerializer.SerializeToElement(new { }));
+            yield return new CompletedDelta();
+            yield break;
+        }
+        if (point == CrashPoint.AfterHumanWait)
+        {
+            yield return new ToolCallDelta("human-input", "crash_input",
+                JsonSerializer.SerializeToElement(new { question = "Which branch should receive the report?" }));
             yield return new CompletedDelta();
             yield break;
         }
@@ -99,7 +117,18 @@ internal static class Program
         var point = Enum.Parse<CrashPoint>(args[1]);
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(root));
         using var scheduler = new SessionLaneScheduler();
-        var orchestrator = CrashFixture.CreateOrchestrator(root, store, scheduler, new CrashModel(root), new CrashEffectTool(root, point));
-        await orchestrator.RunAsync(CrashFixture.Request, NullAgentEventSink.Instance, CancellationToken.None);
+        ITool[] tools = point == CrashPoint.AfterHumanWait
+            ? [new CrashEffectTool(root, point), new CrashHumanInputTool()]
+            : [new CrashEffectTool(root, point)];
+        var orchestrator = CrashFixture.CreateOrchestrator(root, store, scheduler, new CrashModel(root, point), tools);
+        var request = point == CrashPoint.AfterReservedModelAttempt ? CrashFixture.Request with {
+            Budget = new(MaxTotalTokens: 2048, MaxExecutionTime: TimeSpan.FromSeconds(30)) } : CrashFixture.Request;
+        var result = await orchestrator.RunAsync(request, NullAgentEventSink.Instance, CancellationToken.None);
+        if (point == CrashPoint.AfterHumanWait)
+        {
+            if (result.Status != AgentRunStatus.AwaitingInput)
+                throw new InvalidOperationException("The human input checkpoint was not reached.");
+            await CrashFixture.SignalAsync(root, result.RunId, CancellationToken.None);
+        }
     }
 }

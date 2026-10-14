@@ -32,6 +32,10 @@ public sealed class OpenAiLlmClient : ILlmClient
         LlmRequest request,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
+        if (request.MaxAutoContinuationPasses is < 0)
+            throw new ArgumentOutOfRangeException(nameof(request.MaxAutoContinuationPasses),
+                "The request continuation limit cannot be negative.");
+
         var apiKey = _apiKeyResolver();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -43,7 +47,8 @@ public sealed class OpenAiLlmClient : ILlmClient
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(request.Timeout);
         ct = timeout.Token;
-        var continuationPassesRemaining = _options.MaxAutoContinuationPasses;
+        var continuationPassesRemaining = Math.Min(_options.MaxAutoContinuationPasses,
+            request.MaxAutoContinuationPasses ?? _options.MaxAutoContinuationPasses);
         long consumedOutputTokensByUsage = 0;
         long consumedOutputTokensByEstimate = 0;
 
@@ -163,6 +168,12 @@ public sealed class OpenAiLlmClient : ILlmClient
                     {
                         var promptTokens = TryReadLong(topUsageEl, "prompt_tokens");
                         var completionTokens = TryReadLong(topUsageEl, "completion_tokens");
+                        if (promptTokens is < 0 || completionTokens is < 0)
+                        {
+                            passState.Failed = true;
+                            yield return new LlmErrorDelta("OpenAI stream reported negative token usage.");
+                            yield break;
+                        }
                         if (completionTokens.HasValue)
                         {
                             passState.OutputTokensFromUsage = Math.Max(
@@ -170,11 +181,15 @@ public sealed class OpenAiLlmClient : ILlmClient
                                 completionTokens.Value);
                         }
 
+                        // Each HTTP pass reports cumulative usage. Repeated chunks
+                        // and smaller interim totals must not count those tokens again.
                         yield return new UsageDelta(
-                            promptTokens,
-                            completionTokens,
+                            promptTokens.HasValue ? Math.Max(0, promptTokens.Value - passState.ReportedInputTokens) : null,
+                            completionTokens.HasValue ? Math.Max(0, completionTokens.Value - passState.ReportedOutputTokens) : null,
                             CacheReadTokens: null,
                             CacheWriteTokens: null);
+                        passState.ReportedInputTokens = Math.Max(passState.ReportedInputTokens, promptTokens ?? 0);
+                        passState.ReportedOutputTokens = Math.Max(passState.ReportedOutputTokens, completionTokens ?? 0);
                     }
 
                     continue;
@@ -492,6 +507,8 @@ public sealed class OpenAiLlmClient : ILlmClient
         public bool HasToolCalls { get; set; }
         public bool Failed { get; set; }
         public long? OutputTokensFromUsage { get; set; }
+        public long ReportedInputTokens { get; set; }
+        public long ReportedOutputTokens { get; set; }
         public int EstimatedOutputCharacters { get; set; }
         public int EstimatedOutputTokens => OpenAiOutputTokenBudgetPlanner.EstimateTokensFromCharacters(EstimatedOutputCharacters);
     }

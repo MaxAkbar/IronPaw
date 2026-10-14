@@ -193,8 +193,8 @@ public sealed class WorkflowRecoveryTests
             .RunAsync(request, NullAgentEventSink.Instance, CancellationToken.None));
         var checkpoint = Assert.Single(await scope.Store.ListAsync(CancellationToken.None));
         var client = new ScriptedClient(FinalResponse());
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => scope.CreateOrchestrator(client).ResumeAsync(
-            new RunId(checkpoint.RunId), request.Caller, NullAgentEventSink.Instance, CancellationToken.None));
+        Assert.Equal(AgentRunStatus.BudgetExhausted, (await scope.CreateOrchestrator(client).ResumeAsync(
+            new RunId(checkpoint.RunId), request.Caller, NullAgentEventSink.Instance, CancellationToken.None)).Status);
         Assert.Equal(0, client.CallCount);
         var saved = await scope.Store.GetAsync(new RunId(checkpoint.RunId), CancellationToken.None);
         Assert.Equal(1, saved!.Usage!.ModelCalls);
@@ -234,8 +234,8 @@ public sealed class WorkflowRecoveryTests
             .RunAsync(request, NullAgentEventSink.Instance, CancellationToken.None));
         var checkpoint = Assert.Single(await scope.Store.ListAsync(CancellationToken.None));
         var client = new ScriptedClient(ToolResponse("second-call"));
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => scope.CreateOrchestrator(client).ResumeAsync(
-            new RunId(checkpoint.RunId), request.Caller, NullAgentEventSink.Instance, CancellationToken.None));
+        Assert.Equal(AgentRunStatus.BudgetExhausted, (await scope.CreateOrchestrator(client).ResumeAsync(
+            new RunId(checkpoint.RunId), request.Caller, NullAgentEventSink.Instance, CancellationToken.None)).Status);
         Assert.Equal(1, client.CallCount);
         Assert.Equal(1, tool.CallCount);
         var saved = await scope.Store.GetAsync(new RunId(checkpoint.RunId), CancellationToken.None);

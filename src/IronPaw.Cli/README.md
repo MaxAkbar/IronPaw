@@ -43,6 +43,15 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 - `--profile <Minimal|Coding|Messaging|Web|Full>`
 - `--auto-create-skills` (requires `--profile Full`)
 - `--list-skills`
+- `--list-workflows` (saved states, child lineage, pending input/approval IDs, and uncertain tool outcomes)
+- `--resume <run-id>`
+- `--pause <run-id>` (resumable suspension)
+- `--cancel <run-id>` (permanent cancellation)
+- `--answer-request <request-id> --answer <text>` (with `--resume`)
+- `--approve-request <request-id>` or `--deny-request <request-id>` (with `--resume`)
+- `--require-approval <tool-name,tool-name>` (new runs only; default: none)
+- `--max-total-tokens <n>` (positive 64-bit token limit shared by a new workflow and its descendants)
+- `--max-execution-seconds <n>` (positive execution time limit for a new workflow)
 - `--no-events`
 - `--message-ttl-days <days>` (SQLite message retention window, default `30`)
 - `--llm-context-window-tokens <n>` (OpenAI-compatible budget override)
@@ -108,7 +117,7 @@ dotnet run --project src/IronPaw.Cli -- --list-workflows
 dotnet run --project src/IronPaw.Cli -- --resume <run-id>
 ```
 
-Listing requires no provider credentials. Resume uses the saved provider, model,
+Listing, pausing, and cancelling require no provider credentials. Resume uses the saved provider, model,
 session, permissions, responses, and receipts. The same workspace journal has
 one owning host at a time, so close its Desktop or CLI host before opening another.
 
@@ -128,6 +137,66 @@ dotnet run --project src/IronPaw.Cli -- --resume <run-id> --reconcile-tool <exec
 The listing shows unresolved execution IDs. Reconciliation records an outcome;
 it does not run the action. Model/tool call budgets and known usage remain
 consumed across recovery; incomplete provider billing can remain unknown.
+
+## Persistent workflow budgets
+
+Set token and execution time limits when starting a workflow:
+
+```powershell
+dotnet run --project src/IronPaw.Cli -- --prompt "Implement the change" --max-total-tokens 20000 --max-execution-seconds 300
+```
+
+These limits cover the root workflow and its descendants and survive restart,
+pause, and resume. Paused workflows and waiting for human input or approval do
+not consume execution time. Limits cannot be replaced by recovery commands.
+Omitting a limit leaves that resource unlimited; the existing model/tool call
+limits still apply.
+
+Before calling a provider, IronPaw reserves tokens from the shared budget.
+Reported usage settles that reservation; an interrupted attempt with unknown
+usage retains a conservative charge. `--list-workflows` and final results show
+charged and reserved tokens, remaining tokens, and consumed/remaining execution
+time for the shared root. Provider billing and the conservative budget charge
+can differ when usage is unavailable.
+
+Exhausting a budget returns `BudgetExhausted` and CLI exit code `2`. It does not
+reset the ledger or retry an uncertain tool action.
+
+## Human input, approvals, and workflow controls
+
+Use the request IDs shown by `--list-workflows` to answer a pending question or
+decide an approval. Each response is saved before execution resumes:
+
+```powershell
+dotnet run --project src/IronPaw.Cli -- --resume <run-id> --answer-request <request-id> --answer "Use CSharpDB"
+dotnet run --project src/IronPaw.Cli -- --resume <run-id> --approve-request <request-id>
+dotnet run --project src/IronPaw.Cli -- --resume <run-id> --deny-request <request-id>
+```
+
+An approval applies to the exact saved operation. It does not broaden the workflow's
+tool permissions. Supply one answer, approval decision, or reconciliation per command.
+For a request owned by a child run, respond using that child's run ID, then resume
+its parent to continue the delegated workflow. Resume with an unanswered request
+shows its saved suspension without asking for provider credentials.
+
+Opt into approvals when starting a new workflow by listing the tool names:
+
+```powershell
+dotnet run --project src/IronPaw.Cli -- --prompt "Update the project" --require-approval write_file,save_memory
+```
+
+Pause a workflow for later continuation, or permanently cancel it:
+
+```powershell
+dotnet run --project src/IronPaw.Cli -- --pause <run-id>
+dotnet run --project src/IronPaw.Cli -- --resume <run-id>
+dotnet run --project src/IronPaw.Cli -- --cancel <run-id>
+```
+
+Controls are durable requests. They take effect at safe execution boundaries; an
+already-started action may require outcome reconciliation. Root cancellation applies
+to its descendants. Controls require access to the workspace journal, which remains
+limited to one owning host at a time.
 
 ## Add-in skill discovery paths
 

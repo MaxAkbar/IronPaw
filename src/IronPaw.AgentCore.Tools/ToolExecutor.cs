@@ -19,6 +19,9 @@ public sealed class ToolExecutor : IToolExecutor
     {
         var middlewareContext = new ToolMiddlewareContext(call, context, tool);
         var effectiveCall = await _hooks.BeforeToolCallAsync(middlewareContext, ct);
+        if (context.ToolExecutionId is not null && (effectiveCall.ToolName != call.ToolName ||
+            effectiveCall.ToolCallId != call.ToolCallId || effectiveCall.Arguments.GetRawText() != call.Arguments.GetRawText()))
+            return ToolResult.Error("A durable tool hook cannot change the recorded operation. Submit a new operation for approval.");
         var effectiveContext = middlewareContext with { Call = effectiveCall };
 
         try
@@ -27,6 +30,7 @@ public sealed class ToolExecutor : IToolExecutor
             await _hooks.AfterToolCallAsync(effectiveContext, result, error: null, ct);
             return result;
         }
+        catch (WorkflowSuspendedException) { throw; }
         catch (OperationCanceledException)
         {
             await _hooks.AfterToolCallAsync(effectiveContext, result: null, new OperationCanceledException(), ct);

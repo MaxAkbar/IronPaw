@@ -40,8 +40,8 @@ public sealed class WorkflowDelegationTests
                 Assert.Equal(7, ((WorkflowUsage)result.Metadata["rootWorkflowUsage"]!).ModelCalls);
             }
             else
-                await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => runtime.RunAsync(request,
-                    NullAgentEventSink.Instance, CancellationToken.None));
+                Assert.Equal(AgentRunStatus.BudgetExhausted, (await runtime.RunAsync(request,
+                    NullAgentEventSink.Instance, CancellationToken.None)).Status);
 
             var checkpoints = await store.ListAsync(CancellationToken.None);
             Assert.Equal(4, checkpoints.Count);

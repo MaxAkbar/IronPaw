@@ -318,7 +318,8 @@ public sealed record LlmRequest(
     IReadOnlyList<ChatMessage> Messages,
     IReadOnlyList<LlmToolDefinition> Tools,
     TimeSpan Timeout,
-    int MaxOutputTokens = 4096);
+    int MaxOutputTokens = 4096,
+    int? MaxAutoContinuationPasses = null);
 
 public abstract record LlmDelta;
 
@@ -412,7 +413,9 @@ public sealed record AgentRunRequest(
     RunId? ParentRunId = null,
     SessionKey? ParentSessionKey = null,
     RunId? RootRunId = null,
-    WorkflowBudget? Budget = null);
+    WorkflowBudget? Budget = null,
+    IReadOnlyCollection<string>? ApprovalRequiredTools = null,
+    RunId? RequestedRunId = null);
 
 /// <summary>Tracks completion of the execution loop. Artifact verification is separate.</summary>
 public enum AgentRunStatus
@@ -421,7 +424,9 @@ public enum AgentRunStatus
     Failed,
     Cancelled,
     RoundLimitReached,
-    AwaitingInput
+    AwaitingInput,
+    Paused,
+    BudgetExhausted
 }
 
 public sealed record AgentRunResult(

@@ -3,7 +3,7 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tools;
 
-public sealed class InvokeAgentTool : ITool
+public sealed class InvokeAgentTool : IDurableDelegationTool
 {
     private readonly IAgentRegistry _agentRegistry;
     private readonly IAgentOrchestrator _orchestrator;
@@ -61,6 +61,21 @@ public sealed class InvokeAgentTool : ITool
         var agentId = agentIdProp.GetString()!;
         var task = taskProp.GetString()!;
 
+        var childRunId = context.ToolExecutionId is null ? (RunId?)null
+            : WorkflowIdentity.ChildRunId(context.RunId, context.ToolExecutionId);
+        if (childRunId is not null && _orchestrator is IResumableAgentOrchestrator resumable)
+        {
+            var acceptedChild = (await resumable.ListWorkflowsAsync(ct)).SingleOrDefault(child => child.RunId == childRunId.Value.Value);
+            if (acceptedChild is not null)
+            {
+                if (acceptedChild.ParentRunId != context.RunId.Value || acceptedChild.RootRunId != context.ScopeRunId.Value ||
+                    acceptedChild.Request.AgentId != agentId || acceptedChild.Request.UserInput != task)
+                    throw new WorkflowConflictException("The recorded child invocation does not match the delegated operation.");
+                return await RunChildAsync(() => resumable.ResumeAsync(childRunId.Value, context.Caller,
+                    new AgentPrefixedEventSink(context.EventSink ?? NullAgentEventSink.Instance, agentId), ct), agentId, childRunId);
+            }
+        }
+
         var agentDef = _agentRegistry.Get(agentId);
         if (agentDef is null)
         {
@@ -79,7 +94,7 @@ public sealed class InvokeAgentTool : ITool
         }
 
         // Ephemeral session key for transcript isolation.
-        var childSessionKey = new SessionKey($"{context.RunId.Value}::{agentId}::{Guid.NewGuid():N}");
+        var childSessionKey = new SessionKey($"{context.RunId.Value}::{agentId}::{childRunId?.Value ?? Guid.NewGuid().ToString("n")}");
 
         var childPolicy = agentDef.ToolPolicy with
         {
@@ -102,12 +117,24 @@ public sealed class InvokeAgentTool : ITool
             ParentRunId: context.RunId,
             ParentSessionKey: context.ScopeSessionKey,
             RootRunId: context.RootRunId ?? context.ScopeRunId,
-            Budget: new WorkflowBudget(MaxModelCalls: agentDef.MaxRounds + 2));
+            Budget: new WorkflowBudget(MaxModelCalls: agentDef.MaxRounds + 2),
+            RequestedRunId: childRunId);
 
         // Wrap the event sink to tag child events with the agent ID.
         var childSink = new AgentPrefixedEventSink(context.EventSink ?? NullAgentEventSink.Instance, agentDef.AgentId);
 
-        var result = await _orchestrator.RunAsync(childRequest, childSink, ct);
+        return await RunChildAsync(() => _orchestrator.RunAsync(childRequest, childSink, ct), agentId, childRunId);
+    }
+
+    private static async Task<ToolResult> RunChildAsync(Func<Task<AgentRunResult>> run, string agentId, RunId? childRunId)
+    {
+        AgentRunResult result;
+        try { result = await run(); }
+        catch (WorkflowReconciliationRequiredException error) when (childRunId is not null)
+        { throw new WorkflowSuspendedException(WorkflowStatus.NeedsReconciliation, error.Message, childRunId.Value.Value); }
+        if (childRunId is not null && result.Status is (AgentRunStatus.AwaitingInput or AgentRunStatus.Paused))
+            throw new WorkflowSuspendedException(result.Status == AgentRunStatus.AwaitingInput
+                ? WorkflowStatus.AwaitingInput : WorkflowStatus.Paused, result.FinalAssistantMessage, result.RunId.Value);
 
         return new ToolResult(
             IsError: result.Status != AgentRunStatus.Succeeded,

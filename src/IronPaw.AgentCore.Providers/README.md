@@ -51,5 +51,7 @@
 
 ## Notes
 
-- Provider parsing currently uses request/response JSON bodies (not true token-by-token SSE streaming).
+- OpenAI and Anthropic parse SSE streams and report usage as increments, including Anthropic cache read/write usage.
+- `LlmRequest.MaxAutoContinuationPasses` can lower OpenAI's configured continuation cap. A value of zero permits only the initial HTTP request; negative values are rejected.
+- `MaxOutputTokens` limits output across OpenAI continuation passes and is sent as Anthropic's `max_tokens`. OpenAI's context planning uses estimates, so these estimates are not exact input-token accounting.
 - Tool schema normalization is handled in `IronPaw.AgentCore.Tools`.

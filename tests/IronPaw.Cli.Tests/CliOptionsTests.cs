@@ -104,6 +104,52 @@ public sealed class CliOptionsTests
         Assert.False(string.IsNullOrWhiteSpace(error));
     }
 
+    [Theory]
+    [InlineData("--pause", "run")]
+    [InlineData("--cancel", "run")]
+    [InlineData("--resume", "run", "--answer-request", "question", "--answer", "Use CSharpDB")]
+    [InlineData("--resume", "run", "--approve-request", "approval")]
+    [InlineData("--resume", "run", "--deny-request", "approval")]
+    public void Parse_RecognizesDurableHumanControls(params string[] args)
+    {
+        var options = CliOptions.Parse(args);
+        Assert.True(options.TryValidate(out var error), error);
+        Assert.True(WorkflowCommands.IsWorkflowCommand(options));
+    }
+
+    [Theory]
+    [InlineData("--pause", "run", "--resume", "run")]
+    [InlineData("--cancel", "run", "--pause", "run")]
+    [InlineData("--pause", " ")]
+    [InlineData("--cancel", "run", "--prompt", "hello")]
+    [InlineData("--list-workflows", "--cancel", "run")]
+    [InlineData("--answer-request", "request", "--answer", "text")]
+    [InlineData("--resume", "run", "--answer", "text")]
+    [InlineData("--resume", "run", "--answer-request", "request")]
+    [InlineData("--resume", "run", "--answer-request", "request", "--answer", " ")]
+    [InlineData("--approve-request", "request")]
+    [InlineData("--resume", "run", "--deny-request", " ")]
+    [InlineData("--resume", "run", "--approve-request", "request", "--deny-request", "request")]
+    [InlineData("--resume", "run", "--answer-request", "request", "--answer", "text", "--approve-request", "approval")]
+    [InlineData("--resume", "run", "--require-approval", "write_file")]
+    [InlineData("--require-approval", "write_file,")]
+    [InlineData("--require-approval", "write_file,WRITE_FILE")]
+    public void TryValidate_RejectsIncompleteOrConflictingHumanControls(params string[] args)
+    {
+        var options = CliOptions.Parse(args);
+        Assert.False(options.TryValidate(out var error));
+        Assert.False(string.IsNullOrWhiteSpace(error));
+    }
+
+    [Fact]
+    public void Parse_ApprovalPolicyDefaultsToNoneAndTrimsToolNames()
+    {
+        Assert.Null(CliOptions.Parse(["--prompt", "hi"]).ApprovalRequiredTools);
+        var options = CliOptions.Parse(["--prompt", "hi", "--require-approval", "write_file, execute_command"]);
+        Assert.Equal(new[] { "write_file", "execute_command" }, options.ApprovalRequiredTools);
+        Assert.True(options.TryValidate(out _));
+    }
+
     [Fact]
     public void Parse_ParsesMessageTtlDays()
     {
@@ -141,6 +187,58 @@ public sealed class CliOptionsTests
         Assert.Equal(1024, options.LlmSafetyMarginTokens);
         Assert.Equal(512, options.LlmMinOutputTokensPerRequest);
         Assert.Equal(3, options.LlmMaxAutoContinuationPasses);
+    }
+
+    [Fact]
+    public void Parse_ResolvesPersistentWorkflowBudgetsWithoutChangingDefaultCallLimits()
+    {
+        var options = CliOptions.Parse(["--max-total-tokens", "3000000000", "--max-execution-seconds", "95", "--prompt", "hello"]);
+
+        Assert.True(options.TryValidate(out _));
+        Assert.Equal(3_000_000_000L, options.MaxTotalTokens);
+        Assert.Equal(95, options.MaxExecutionSeconds);
+        var budget = options.ResolveWorkflowBudget();
+        Assert.NotNull(budget);
+        Assert.Equal(3_000_000_000L, budget.MaxTotalTokens);
+        Assert.Equal(TimeSpan.FromSeconds(95), budget.MaxExecutionTime);
+        Assert.Equal(32, budget.MaxModelCalls);
+        Assert.Equal(64, budget.MaxToolCalls);
+        Assert.Null(CliOptions.Parse(["--prompt", "hello"]).ResolveWorkflowBudget());
+    }
+
+    [Theory]
+    [InlineData("--max-total-tokens", "0")]
+    [InlineData("--max-total-tokens", "-1")]
+    [InlineData("--max-total-tokens", "9223372036854775808")]
+    [InlineData("--max-total-tokens", "invalid")]
+    [InlineData("--max-execution-seconds", "0")]
+    [InlineData("--max-execution-seconds", "-1")]
+    [InlineData("--max-execution-seconds", "2147483648")]
+    [InlineData("--max-execution-seconds", "invalid")]
+    public void Parse_RejectsInvalidPersistentBudget(string option, string value)
+    {
+        Assert.Throws<ArgumentException>(() => CliOptions.Parse([option, value]));
+    }
+
+    [Theory]
+    [InlineData("--resume", "workflow", "--max-total-tokens", "1000")]
+    [InlineData("--pause", "workflow", "--max-execution-seconds", "10")]
+    [InlineData("--cancel", "workflow", "--max-total-tokens", "1000")]
+    [InlineData("--list-workflows", "--max-execution-seconds", "10")]
+    public void TryValidate_RejectsBudgetChangesDuringRecovery(params string[] args)
+    {
+        Assert.False(CliOptions.Parse(args).TryValidate(out var error));
+        Assert.Contains("Saved limits cannot change", error);
+    }
+
+    [Theory]
+    [InlineData(0, 10)]
+    [InlineData(1, 0)]
+    public void TryValidate_RejectsInvalidBudgetInDirectOptions(long tokens, int seconds)
+    {
+        var options = CliOptions.Parse(["--prompt", "hello"]) with { MaxTotalTokens = tokens, MaxExecutionSeconds = seconds };
+        Assert.False(options.TryValidate(out var error));
+        Assert.Contains("positive integers", error);
     }
 
     [Fact]

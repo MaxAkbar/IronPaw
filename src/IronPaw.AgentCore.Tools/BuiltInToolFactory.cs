@@ -15,6 +15,7 @@ public static class BuiltInToolFactory
         var tools = new List<ITool>
         {
             new CurrentTimeTool(),
+            new RequestInputTool(),
             new ListFilesTool(workspaceRoot),
             new ReadFileTool(workspaceRoot),
             new WriteFileTool(workspaceRoot),

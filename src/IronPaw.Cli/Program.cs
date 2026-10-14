@@ -123,6 +123,8 @@ try
             options.Profile,
             options.AutoCreateSkills,
             prompt,
+            options.ApprovalRequiredTools,
+            options.ResolveWorkflowBudget(),
             cancellation.Token);
 
         return runExitCode;
@@ -184,6 +186,8 @@ try
             options.Profile,
             options.AutoCreateSkills,
             promptOrCommand,
+            options.ApprovalRequiredTools,
+            options.ResolveWorkflowBudget(),
             cancellation.Token);
 
         if (runExitCode is 130)
@@ -259,6 +263,8 @@ static async Task<int> RunSingleAsync(
     ToolProfile profile,
     bool autoCreateSkills,
     string prompt,
+    IReadOnlyCollection<string>? approvalRequiredTools,
+    WorkflowBudget? workflowBudget,
     CancellationToken ct)
 {
     try
@@ -272,11 +278,13 @@ static async Task<int> RunSingleAsync(
             Model: model,
             ToolPolicy: new ToolSelectionPolicy(Profile: profile),
             Caller: CallerIdentity.LocalOwner(),
-            AutoCreateSkills: autoCreateSkills);
+            AutoCreateSkills: autoCreateSkills,
+            ApprovalRequiredTools: approvalRequiredTools,
+            Budget: workflowBudget);
 
         var result = await orchestrator.RunAsync(request, eventSink, ct);
         ConsoleUi.RenderFinal(result);
-        return result.Status is AgentRunStatus.Succeeded or AgentRunStatus.AwaitingInput ? 0 : 2;
+        return result.Status is AgentRunStatus.Succeeded or AgentRunStatus.AwaitingInput or AgentRunStatus.Paused ? 0 : 2;
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
