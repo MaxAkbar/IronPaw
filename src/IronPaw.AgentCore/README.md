@@ -19,7 +19,7 @@ It runs the agent loop, coordinates tools, persists state, and emits event strea
 
 - `AgentOrchestrator.cs`
   - main run loop and recovery boundaries
-  - accepts optional `IMemoryStore` and `IRunHistoryStore`
+  - accepts optional `IMemoryStore`, `IRunHistoryStore`, and `IWorkflowStore`
 - `SessionLaneScheduler.cs`
   - per-session serialization
 - `DefaultSystemPromptBuilder.cs`
@@ -50,6 +50,34 @@ It runs the agent loop, coordinates tools, persists state, and emits event strea
 - `IronPaw.AgentCore.Tools` (tool execution/schema normalization)
 - `IronPaw.AgentCore.Persistence`
 - `IronPaw.AgentCore.Providers`
+
+## Durable execution
+
+When `IWorkflowStore` is provided, accepted work is persisted before entering the
+session lane. `IResumableAgentOrchestrator.ResumeAsync` retains the run, task,
+root, and immediate-parent identities and the original caller permissions.
+Completed model responses and tool receipts reconstruct the saved execution;
+they do not invoke the provider or tool again. Saved model prompts avoid clock
+changes during recovery, while changed tool schemas or messages stop replay.
+
+Every new model attempt or tool intent consumes a persisted call budget. The
+CSharpDB store enforces the root workflow's model/tool limits across descendants
+in the same transaction as its checkpoint and journal event. Known token usage
+is retained across failed attempts. `InterruptedModelCalls` identifies retries
+whose earlier stream ended without a recorded complete response; its billing
+may be unknown. Token and elapsed-time admission limits are future extensions.
+
+An unfinished tool intent has an unknown outcome and blocks resume, including
+when the tool threw after starting. `ReconcileToolAsync` records an externally
+established result and explanation; it never executes the action. Tools receive
+a stable `ToolExecutionId` that destinations can use for idempotency. CSharpDB
+cannot make an external file or HTTP side effect part of its transaction.
+
+The workflow checkpoint is authoritative; conversation transcripts and run
+history remain separate projections. Pending clarification text and terminal
+results survive restart. A structured approval queue and a dependency graph
+are later additions. Callers that omit the store retain the original execution
+API without durability.
 
 ## Multi-agent support
 

@@ -9,6 +9,7 @@
     <ProjectReference Include="..\IronPaw.AgentCore\IronPaw.AgentCore.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Tools\IronPaw.AgentCore.Tools.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Persistence\IronPaw.AgentCore.Persistence.csproj" />
+    <ProjectReference Include="..\IronPaw.AgentCore.Persistence.CSharpDb\IronPaw.AgentCore.Persistence.CSharpDb.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Providers\IronPaw.AgentCore.Providers.csproj" />
   </ItemGroup>
 

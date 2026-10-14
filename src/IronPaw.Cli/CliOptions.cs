@@ -19,7 +19,12 @@ internal sealed record CliOptions(
     int? LlmContextWindowTokens = null,
     int? LlmSafetyMarginTokens = null,
     int? LlmMinOutputTokensPerRequest = null,
-    int? LlmMaxAutoContinuationPasses = null)
+    int? LlmMaxAutoContinuationPasses = null,
+    string? ResumeRunId = null,
+    bool ListWorkflows = false,
+    string? ReconcileToolExecutionId = null,
+    string? ReconcileResultFile = null,
+    string? ReconcileNote = null)
 {
     public static CliOptions Parse(string[] args)
     {
@@ -39,6 +44,11 @@ internal sealed record CliOptions(
         int? llmSafetyMarginTokens = null;
         int? llmMinOutputTokensPerRequest = null;
         int? llmMaxAutoContinuationPasses = null;
+        string? resumeRunId = null;
+        var listWorkflows = false;
+        string? reconcileToolExecutionId = null;
+        string? reconcileResultFile = null;
+        string? reconcileNote = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -128,6 +138,26 @@ internal sealed record CliOptions(
                     listSkills = true;
                     break;
 
+                case "--resume":
+                    resumeRunId = ReadValue(args, ref i, arg);
+                    break;
+
+                case "--list-workflows":
+                    listWorkflows = true;
+                    break;
+
+                case "--reconcile-tool":
+                    reconcileToolExecutionId = ReadValue(args, ref i, arg);
+                    break;
+
+                case "--reconcile-result":
+                    reconcileResultFile = ReadValue(args, ref i, arg);
+                    break;
+
+                case "--reconcile-note":
+                    reconcileNote = ReadValue(args, ref i, arg);
+                    break;
+
                 default:
                     if (arg.StartsWith("-", StringComparison.Ordinal))
                     {
@@ -157,11 +187,43 @@ internal sealed record CliOptions(
             llmContextWindowTokens,
             llmSafetyMarginTokens,
             llmMinOutputTokensPerRequest,
-            llmMaxAutoContinuationPasses);
+            llmMaxAutoContinuationPasses,
+            resumeRunId,
+            listWorkflows,
+            reconcileToolExecutionId,
+            reconcileResultFile,
+            reconcileNote);
     }
 
     public bool TryValidate(out string? error)
     {
+        if (ResumeRunId is not null && string.IsNullOrWhiteSpace(ResumeRunId))
+        {
+            error = "--resume requires a workflow run ID.";
+            return false;
+        }
+
+        if (ListWorkflows && ResumeRunId is not null)
+        {
+            error = "Use either --list-workflows or --resume, not both.";
+            return false;
+        }
+
+        if ((ListWorkflows || ResumeRunId is not null) &&
+            (!string.IsNullOrWhiteSpace(Prompt) || !string.IsNullOrWhiteSpace(PromptFile) || ListSkills))
+        {
+            error = "Workflow commands cannot be combined with a prompt or --list-skills.";
+            return false;
+        }
+
+        var hasReconciliation = ReconcileToolExecutionId is not null || ReconcileResultFile is not null || ReconcileNote is not null;
+        if (hasReconciliation && (ResumeRunId is null || string.IsNullOrWhiteSpace(ReconcileToolExecutionId) ||
+            string.IsNullOrWhiteSpace(ReconcileResultFile) || string.IsNullOrWhiteSpace(ReconcileNote)))
+        {
+            error = "Reconciliation requires --resume, --reconcile-tool, --reconcile-result, and --reconcile-note.";
+            return false;
+        }
+
         if (!string.IsNullOrWhiteSpace(Prompt) && !string.IsNullOrWhiteSpace(PromptFile))
         {
             error = "Use either --prompt or --prompt-file, not both.";
@@ -251,6 +313,11 @@ internal sealed record CliOptions(
         table.AddRow("--profile <name>", "Tool profile: Minimal | Coding | Messaging | Web | Full");
         table.AddRow("--auto-create-skills", "Automatically create runtime tools when needed (requires Full profile)");
         table.AddRow("--list-skills", "List discovered add-in skills and exit");
+        table.AddRow("--list-workflows", "List saved workflows and unresolved tool execution IDs for this workspace");
+        table.AddRow("--resume <run-id>", "Resume a saved workflow using its original provider, model, session, and permissions");
+        table.AddRow("--reconcile-tool <execution-id>", "With --resume, record an externally verified tool outcome before resuming");
+        table.AddRow("--reconcile-result <path>", "JSON ToolResult file containing the verified outcome (never executes the tool)");
+        table.AddRow("--reconcile-note <text>", "Evidence explaining how the uncertain tool outcome was established");
         table.AddRow("--store <backend>", "Storage backend: json | sqlite (default: json)");
         table.AddRow("--message-ttl-days <days>", "SQLite message retention window in days (default: 30)");
         table.AddRow("--llm-context-window-tokens <n>", "Override context window tokens for OpenAI-compatible providers");

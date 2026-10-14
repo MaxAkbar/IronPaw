@@ -98,6 +98,37 @@ Commands:
 
 If required provider settings are missing (for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`), the CLI prompts for them instead of failing immediately.
 
+## Workflow recovery
+
+CLI and Desktop persist workflow checkpoints in CSharpDB for every conversation
+store selection. Run these commands from the original workspace:
+
+```powershell
+dotnet run --project src/IronPaw.Cli -- --list-workflows
+dotnet run --project src/IronPaw.Cli -- --resume <run-id>
+```
+
+Listing requires no provider credentials. Resume uses the saved provider, model,
+session, permissions, responses, and receipts. The same workspace journal has
+one owning host at a time, so close its Desktop or CLI host before opening another.
+
+If an interrupted tool has an unknown outcome, establish its destination state
+first. Save the established `ToolResult` in a JSON file, for example:
+
+```json
+{"IsError":false,"Content":"Confirmed the file contains the intended content","Trust":"Local"}
+```
+
+Then record that outcome and resume:
+
+```powershell
+dotnet run --project src/IronPaw.Cli -- --resume <run-id> --reconcile-tool <execution-id> --reconcile-result result.json --reconcile-note "Verified the destination file"
+```
+
+The listing shows unresolved execution IDs. Reconciliation records an outcome;
+it does not run the action. Model/tool call budgets and known usage remain
+consumed across recovery; incomplete provider billing can remain unknown.
+
 ## Add-in skill discovery paths
 
 - `./addins/skills`

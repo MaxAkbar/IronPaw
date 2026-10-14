@@ -2,17 +2,20 @@ using System.IO;
 using IronPaw.AgentCore;
 using IronPaw.AgentCore.Abstractions;
 using IronPaw.AgentCore.Persistence;
+using IronPaw.AgentCore.Persistence.CSharpDb;
 using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
 using Microsoft.Extensions.DependencyInjection;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace IronPaw.Desktop;
 
 internal static class DesktopBootstrapper
 {
-    public static DesktopBootstrap Build()
+    public static DesktopBootstrap Build(string? stateRoot = null, string? workspaceRoot = null)
     {
-        var paths = ResolvePaths();
+        var paths = ResolvePaths(stateRoot, workspaceRoot);
         Directory.CreateDirectory(paths.StateRoot);
         Directory.CreateDirectory(paths.SessionsDirectory);
         Directory.CreateDirectory(paths.AppSkillsDirectory);
@@ -26,19 +29,28 @@ internal static class DesktopBootstrapper
             ValidateOnBuild = true
         });
 
-        return new DesktopBootstrap(serviceProvider);
+        try
+        {
+            return new DesktopBootstrap(serviceProvider);
+        }
+        catch
+        {
+            serviceProvider.Dispose();
+            throw;
+        }
     }
 
-    private static DesktopPaths ResolvePaths()
+    private static DesktopPaths ResolvePaths(string? stateRoot, string? workspaceRoot)
     {
-        var workspaceRoot = Directory.GetCurrentDirectory();
+        workspaceRoot = Path.GetFullPath(workspaceRoot ?? Directory.GetCurrentDirectory());
         var appDataRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "IronPaw");
-        var stateRoot = Path.Combine(appDataRoot, "state");
+        var appSkillsDirectory = stateRoot is null ? Path.Combine(appDataRoot, "skills") : Path.Combine(Path.GetFullPath(stateRoot), "skills");
+        stateRoot = Path.GetFullPath(stateRoot ?? Path.Combine(appDataRoot, "state"));
         return new DesktopPaths(
             WorkspaceRoot: workspaceRoot,
-            AppSkillsDirectory: Path.Combine(appDataRoot, "skills"),
+            AppSkillsDirectory: appSkillsDirectory,
             StateRoot: stateRoot,
             SessionsDirectory: Path.Combine(stateRoot, "sessions"),
             SessionStorePath: Path.Combine(stateRoot, "session-store.json"));
@@ -62,6 +74,8 @@ internal static class DesktopBootstrapper
         services.AddSingleton(sessionStore);
         services.AddSingleton(transcriptStore);
         services.AddSingleton<IRunHistoryStore>(new JsonRunHistoryStore(Path.Combine(paths.StateRoot, "run-history.jsonl")));
+        services.AddSingleton<IWorkflowStore>(_ => CSharpDbWorkflowStore.OpenAsync(
+            ResolveWorkflowDatabasePath(paths.StateRoot, paths.WorkspaceRoot)).GetAwaiter().GetResult());
 
         services.AddSingleton<InMemoryToolRegistry>(sp =>
         {
@@ -85,7 +99,7 @@ internal static class DesktopBootstrapper
         services.AddSingleton<IToolResultTruncator, ToolResultTruncator>();
         services.AddSingleton<ISystemPromptBuilder, DefaultSystemPromptBuilder>();
 
-        services.AddSingleton<IAgentOrchestrator>(sp =>
+        services.AddSingleton<IResumableAgentOrchestrator>(sp =>
         {
             var orchestrator = new AgentOrchestrator(
                 sp.GetRequiredService<ISessionLaneScheduler>(),
@@ -98,11 +112,25 @@ internal static class DesktopBootstrapper
                 sp.GetRequiredService<ITranscriptSanitizer>(),
                 sp.GetRequiredService<IToolResultTruncator>(),
                 sp.GetRequiredService<ISystemPromptBuilder>(),
-                runHistoryStore: sp.GetRequiredService<IRunHistoryStore>());
+                runHistoryStore: sp.GetRequiredService<IRunHistoryStore>(),
+                workflowStore: sp.GetRequiredService<IWorkflowStore>());
 
             RegisterRuntimeTools(sp, paths.AppSkillsDirectory, orchestrator);
             return orchestrator;
         });
+        services.AddSingleton<IAgentOrchestrator>(sp => sp.GetRequiredService<IResumableAgentOrchestrator>());
+    }
+
+    private static string ResolveWorkflowDatabasePath(string stateRoot, string workspaceRoot)
+    {
+        var normalizedWorkspace = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspaceRoot));
+        if (OperatingSystem.IsWindows())
+        {
+            normalizedWorkspace = normalizedWorkspace.ToUpperInvariant();
+        }
+
+        var workspaceId = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedWorkspace)));
+        return Path.Combine(stateRoot, "workflows", workspaceId, "workflows.cdb");
     }
 
     private static void RegisterRuntimeTools(IServiceProvider services, string appSkillsDirectory, IAgentOrchestrator orchestrator)
@@ -222,11 +250,11 @@ internal sealed class DesktopBootstrap : IDisposable
     {
         _serviceProvider = serviceProvider;
         // Ensure runtime tools are registered at startup.
-        Orchestrator = _serviceProvider.GetRequiredService<IAgentOrchestrator>();
+        Orchestrator = _serviceProvider.GetRequiredService<IResumableAgentOrchestrator>();
         SkillLoadResult = _serviceProvider.GetRequiredService<SkillAddinLoadResult>();
     }
 
-    public IAgentOrchestrator Orchestrator { get; }
+    public IResumableAgentOrchestrator Orchestrator { get; }
 
     public SkillAddinLoadResult SkillLoadResult { get; }
 

@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Tools\IronPaw.AgentCore.Tools.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Persistence\IronPaw.AgentCore.Persistence.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Providers\IronPaw.AgentCore.Providers.csproj" />
+    <ProjectReference Include="..\IronPaw.Workflow.CrashHarness\IronPaw.Workflow.CrashHarness.csproj" />
   </ItemGroup>
 
 </Project>

@@ -5,7 +5,7 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore;
 
-public sealed class AgentOrchestrator : IAgentOrchestrator
+public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
 {
     private readonly ISessionLaneScheduler _laneScheduler;
     private readonly ISessionStore _sessionStore;
@@ -19,6 +19,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
     private readonly ISystemPromptBuilder _promptBuilder;
     private readonly IMemoryStore? _memoryStore;
     private readonly IRunHistoryStore? _runHistoryStore;
+    private readonly IWorkflowStore? _workflowStore;
 
     public AgentOrchestrator(
         ISessionLaneScheduler laneScheduler,
@@ -32,7 +33,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         IToolResultTruncator toolResultTruncator,
         ISystemPromptBuilder promptBuilder,
         IMemoryStore? memoryStore = null,
-        IRunHistoryStore? runHistoryStore = null)
+        IRunHistoryStore? runHistoryStore = null,
+        IWorkflowStore? workflowStore = null)
     {
         _laneScheduler = laneScheduler;
         _sessionStore = sessionStore;
@@ -46,9 +48,14 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         _promptBuilder = promptBuilder;
         _memoryStore = memoryStore;
         _runHistoryStore = runHistoryStore;
+        _workflowStore = workflowStore;
     }
 
     public async Task<AgentRunResult> RunAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct)
+        => await RunCoreAsync(request, sink, ct);
+
+    private async Task<AgentRunResult> RunCoreAsync(AgentRunRequest request, IAgentEventSink sink,
+        CancellationToken ct, WorkflowCheckpoint? checkpoint = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (request.MaxRounds < 1)
@@ -56,12 +63,30 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             throw new ArgumentOutOfRangeException(nameof(request), "MaxRounds must be at least one.");
         }
         var effectiveSink = sink ?? NullAgentEventSink.Instance;
-        var progress = new RunProgress(request);
+        if (request.Budget is { } budget && (budget.MaxModelCalls < 1 || budget.MaxToolCalls < 0))
+            throw new ArgumentOutOfRangeException(nameof(request), "Workflow budgets must allow a model call and cannot be negative.");
+        if (_workflowStore is not null && checkpoint is null)
+        {
+            var id = RunId.New();
+            var now = DateTimeOffset.UtcNow;
+            checkpoint = new WorkflowCheckpoint(id.Value, (request.RootRunId ?? id).Value,
+                request.ParentRunId?.Value, Guid.NewGuid().ToString("n"), request, now, now,
+                Budget: request.Budget ?? new(), Usage: new());
+            await _workflowStore.CreateAsync(checkpoint, ct);
+        }
+        var progress = new RunProgress(request, checkpoint,
+            checkpoint is null ? null : new WorkflowExecution(_workflowStore!, checkpoint));
         try
         {
             return await _laneScheduler.EnqueueAsync(request.SessionKey, async laneCt =>
             {
                 progress.EnteredLane = true;
+                if (progress.Execution is not null)
+                {
+                    if (progress.Execution.Checkpoint.LeaseOwner is not null)
+                        throw new WorkflowConflictException("This workflow is already running.");
+                    await progress.Execution.ClaimAsync(laneCt);
+                }
                 AgentRunResult result;
                 try
                 {
@@ -71,7 +96,17 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         EventData.Of(("provider", request.Provider), ("model", request.Model)),
                         AgentId: request.AgentId), laneCt);
                     result = await RunInLaneAsync(request, effectiveSink, progress, laneCt);
-                    await RecordSummaryAsync(progress, error: null, laneCt);
+                    if (progress.Execution is not null)
+                    {
+                        using var commitCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        var metadata = result.Metadata.ToDictionary(pair => pair.Key, pair => pair.Value);
+                        metadata["rootWorkflowUsage"] = await _workflowStore!.GetUsageAsync(
+                            new RunId(progress.Execution.Checkpoint.RootRunId), commitCt.Token);
+                        result = result with { Metadata = metadata };
+                        await progress.Execution.FinishAsync(result, commitCt.Token);
+                    }
+                    if (progress.Execution is null)
+                        await RecordSummaryAsync(progress, error: null, laneCt);
                 }
                 catch (Exception error)
                 {
@@ -81,6 +116,16 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
                 // Observer failures must not turn committed work into a second, failed run.
                 using var terminalCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                if (progress.Execution is not null)
+                {
+                    try { await RecordSummaryAsync(progress, error: null, terminalCt.Token); }
+                    catch (Exception error)
+                    {
+                        var metadata = result.Metadata.ToDictionary(pair => pair.Key, pair => pair.Value);
+                        metadata["historyProjectionError"] = error.Message;
+                        result = result with { Metadata = metadata };
+                    }
+                }
                 try
                 {
                     await PublishTerminalAsync(progress, effectiveSink, error: null, terminalCt.Token);
@@ -96,6 +141,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         }
         catch (Exception error) when (!progress.EnteredLane)
         {
+            if (progress.Execution is not null)
+            {
+                using var cleanupCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await progress.Execution.InterruptAsync(error, progress.Transcript, cleanupCt.Token);
+            }
             await RecordFailureAsync(progress, effectiveSink, error, ct.IsCancellationRequested);
             throw;
         }
@@ -109,7 +159,11 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         // Pre-load memories and enrich the request (skip for sub-agents — they start fresh).
         var effectiveRequest = request;
-        if (_memoryStore is not null && request.ParentRunId is null)
+        if (progress.Execution?.Checkpoint.InitialTranscript is not null)
+        {
+            effectiveRequest = progress.Execution.Checkpoint.Request;
+        }
+        else if (_memoryStore is not null && request.ParentRunId is null)
         {
             var globalMemories = await _memoryStore.LoadGlobalAsync(ct);
             var sessionMemories = await _memoryStore.LoadSessionAsync(request.SessionKey, ct);
@@ -125,16 +179,19 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
 
         progress.Request = effectiveRequest;
 
-        var loadedTranscript = await _transcriptStore.LoadAsync(effectiveRequest.SessionKey, ct);
+        var loadedTranscript = progress.Execution?.Checkpoint.InitialTranscript
+            ?? await _transcriptStore.LoadAsync(effectiveRequest.SessionKey, ct);
         var repairedTranscript = _transcriptSanitizer.Repair(loadedTranscript);
         var transcript = progress.Transcript = repairedTranscript.ToList();
         progress.TranscriptLoaded = true;
+        if (progress.Execution is not null)
+            await progress.Execution.InitializeAsync(effectiveRequest, transcript, ct);
 
         transcript.Add(new ChatMessage(ChatRole.User, effectiveRequest.UserInput));
 
         if (effectiveRequest.AutoCreateSkills)
         {
-            await TryAutoCreateSkillsAsync(effectiveRequest, transcript, sink, runId, toolsUsed, ct);
+            await TryAutoCreateSkillsAsync(effectiveRequest, transcript, sink, runId, toolsUsed, progress, ct);
         }
 
         // Initial resolution for the diagnostic event only.
@@ -146,6 +203,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             sink,
             runId,
             toolsUsed,
+            progress,
             ct);
         progress.InputTokens += routeResult.InputTokens;
         progress.OutputTokens += routeResult.OutputTokens;
@@ -216,7 +274,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     AgentId: effectiveRequest.AgentId),
                 ct);
 
-            await foreach (var delta in _llmClient.StreamAsync(llmRequest, ct))
+            await foreach (var delta in StreamModelAsync(llmRequest, progress, ct))
             {
                 switch (delta)
                 {
@@ -328,8 +386,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                         ParentRunId: effectiveRequest.ParentRunId,
                         ParentSessionKey: effectiveRequest.ParentSessionKey,
                         ToolPolicy: effectiveRequest.ToolPolicy,
-                        EventSink: sink);
-                    result = await _toolExecutor.ExecuteAsync(tool, toolCall, execContext, ct);
+                        EventSink: sink,
+                        RootRunId: effectiveRequest.RootRunId ?? runId);
+                    result = await ExecuteToolAsync(tool, toolCall, execContext, progress, ct);
                 }
 
                 var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);
@@ -368,6 +427,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             await _transcriptStore.ReplaceAsync(effectiveRequest.SessionKey, transcript, ct);
         }
 
+        SynchronizeWorkflowUsage(progress);
         var totalTokens = progress.InputTokens + progress.OutputTokens + progress.CacheReadTokens + progress.CacheWriteTokens;
         await _sessionStore.UpsertAsync(
             effectiveRequest.SessionKey,
@@ -383,15 +443,16 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     UpdatedAt = DateTimeOffset.UtcNow,
                     ProviderOverride = effectiveRequest.Provider,
                     ModelOverride = effectiveRequest.Model,
-                    InputTokens = previous.InputTokens + progress.InputTokens,
-                    OutputTokens = previous.OutputTokens + progress.OutputTokens,
-                    TotalTokens = previous.TotalTokens + totalTokens,
+                    InputTokens = previous.InputTokens + (AlreadyAccounted(previous, runId) ? 0 : progress.InputTokens),
+                    OutputTokens = previous.OutputTokens + (AlreadyAccounted(previous, runId) ? 0 : progress.OutputTokens),
+                    TotalTokens = previous.TotalTokens + (AlreadyAccounted(previous, runId) ? 0 : totalTokens),
                     TotalTokensFresh = true,
                     Diagnostics = new Dictionary<string, object?>
                     {
                         ["toolCount"] = lastToolCount,
                         ["systemPromptChars"] = lastSystemPromptLength,
-                        ["rounds"] = progress.Rounds
+                        ["rounds"] = progress.Rounds,
+                        ["accountedRunId"] = runId.Value
                     }
                 };
             },
@@ -407,7 +468,8 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 ["rounds"] = progress.Rounds,
                 ["toolCount"] = lastToolCount,
                 ["totalTokens"] = progress.TotalTokens,
-                ["status"] = progress.Status.ToString()
+                ["status"] = progress.Status.ToString(),
+                ["workflowUsage"] = progress.Execution?.Checkpoint.Usage
             },
             Status: progress.Status);
     }
@@ -432,6 +494,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             ? "Run cancelled before completion."
             : $"Run failed: {error.Message}";
         using var cleanupCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        SynchronizeWorkflowUsage(progress);
+        if (progress.Execution is not null && progress.Execution.Checkpoint.LeaseOwner is not null)
+        {
+            try { await progress.Execution.InterruptAsync(error, progress.Transcript, cleanupCt.Token); }
+            catch (Exception persistenceError) { error.Data["IronPaw.WorkflowPersistenceError"] = persistenceError.Message; }
+        }
         if (progress.TranscriptLoaded)
         {
             if (progress.PartialAssistant is { Length: > 0 })
@@ -493,10 +561,12 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 ("error", error)), severity, progress.Request.AgentId), ct);
     }
 
-    private sealed class RunProgress(AgentRunRequest request)
+    private sealed class RunProgress(AgentRunRequest request, WorkflowCheckpoint? checkpoint = null,
+        WorkflowExecution? execution = null)
     {
-        public RunId RunId { get; } = RunId.New();
-        public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+        public RunId RunId { get; } = checkpoint is null ? RunId.New() : new RunId(checkpoint.RunId);
+        public DateTimeOffset StartedAt { get; } = checkpoint?.CreatedAt ?? DateTimeOffset.UtcNow;
+        public WorkflowExecution? Execution { get; } = execution;
         public AgentRunRequest Request { get; set; } = request;
         public bool EnteredLane { get; set; }
         public bool TranscriptLoaded { get; set; }
@@ -577,12 +647,14 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         eventType = string.Empty;
         eventData = EventData.Of();
 
-        if (!details.TryGetValue("observability_event_type", out var eventTypeObj) ||
-            eventTypeObj is not string rawEventType ||
-            string.IsNullOrWhiteSpace(rawEventType))
+        if (!details.TryGetValue("observability_event_type", out var eventTypeObj))
         {
             return false;
         }
+
+        var rawEventType = eventTypeObj is JsonElement { ValueKind: JsonValueKind.String } json
+            ? json.GetString() : eventTypeObj as string;
+        if (string.IsNullOrWhiteSpace(rawEventType)) return false;
 
         eventType = rawEventType.Trim();
 
@@ -608,6 +680,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         IAgentEventSink sink,
         RunId runId,
         HashSet<string> toolsUsed,
+        RunProgress progress,
         CancellationToken ct)
     {
         if (request.ParentRunId is not null)
@@ -629,6 +702,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             ToolCallId: $"plan_list_agents_{Guid.NewGuid():N}",
             ToolName: listAgentsTool.Descriptor.Name,
             Arguments: emptyArgs);
+        listCall = progress.Execution?.NormalizeCall(listCall) ?? listCall;
         var execContext = new ToolExecutionContext(
             runId,
             request.SessionKey,
@@ -640,9 +714,10 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             ParentRunId: request.ParentRunId,
             ParentSessionKey: request.ParentSessionKey,
             ToolPolicy: request.ToolPolicy,
-            EventSink: sink);
+            EventSink: sink,
+            RootRunId: request.RootRunId ?? runId);
 
-        var listResult = await _toolExecutor.ExecuteAsync(listAgentsTool, listCall, execContext, ct);
+        var listResult = await ExecuteToolAsync(listAgentsTool, listCall, execContext, progress, ct);
         if (listResult.IsError)
         {
             return RoutePlanExecutionResult.None;
@@ -685,7 +760,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         long cacheWriteTokens = 0;
 
         var streamCompleted = false;
-        await foreach (var delta in _llmClient.StreamAsync(plannerRequest, ct))
+        await foreach (var delta in StreamModelAsync(plannerRequest, progress, ct))
         {
             switch (delta)
             {
@@ -766,6 +841,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
             });
             var toolCallId = $"plan_delegate_{Guid.NewGuid():N}";
             var toolCall = new ToolCall(toolCallId, invokeAgentTool.Descriptor.Name, args);
+            toolCall = progress.Execution?.NormalizeCall(toolCall) ?? toolCall;
 
             transcript.Add(new ChatMessage(ChatRole.Assistant, args.GetRawText(), toolCall.ToolCallId, toolCall.ToolName));
             toolsUsed.Add(toolCall.ToolName);
@@ -784,7 +860,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                     AgentId: request.AgentId),
                 ct);
 
-            var result = await _toolExecutor.ExecuteAsync(invokeAgentTool, toolCall, execContext, ct);
+            var result = await ExecuteToolAsync(invokeAgentTool, toolCall, execContext, progress, ct);
             var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);
             transcript.Add(new ChatMessage(ChatRole.Tool, fencedContent, toolCall.ToolCallId, toolCall.ToolName));
 
@@ -813,6 +889,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         IAgentEventSink sink,
         RunId runId,
         HashSet<string> toolsUsed,
+        RunProgress progress,
         CancellationToken ct)
     {
         var tools = _toolRegistry.ResolveTools(request.ToolPolicy);
@@ -840,7 +917,7 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
         var pendingToolCalls = new List<ToolCall>();
 
         var streamCompleted = false;
-        await foreach (var delta in _llmClient.StreamAsync(llmRequest, ct))
+        await foreach (var delta in StreamModelAsync(llmRequest, progress, ct))
         {
             switch (delta)
             {
@@ -895,8 +972,9 @@ public sealed class AgentOrchestrator : IAgentOrchestrator
                 ParentRunId: request.ParentRunId,
                 ParentSessionKey: request.ParentSessionKey,
                 ToolPolicy: request.ToolPolicy,
-                EventSink: sink);
-            var result = await _toolExecutor.ExecuteAsync(createSkillTool, toolCall, execContext, ct);
+                EventSink: sink,
+                RootRunId: request.RootRunId ?? runId);
+            var result = await ExecuteToolAsync(createSkillTool, toolCall, execContext, progress, ct);
 
             var fencedContent = ContentFencer.Fence(result, toolCall.ToolName);
             transcript.Add(new ChatMessage(ChatRole.Tool, fencedContent, toolCall.ToolCallId, toolCall.ToolName));

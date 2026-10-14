@@ -99,8 +99,10 @@ public sealed class InvokeAgentTool : ITool
             MaxOutputTokens: agentDef.MaxOutputTokens,
             MaxRounds: agentDef.MaxRounds,
             AgentId: agentDef.AgentId,
-            ParentRunId: context.ScopeRunId,
-            ParentSessionKey: context.ScopeSessionKey);
+            ParentRunId: context.RunId,
+            ParentSessionKey: context.ScopeSessionKey,
+            RootRunId: context.RootRunId ?? context.ScopeRunId,
+            Budget: new WorkflowBudget(MaxModelCalls: agentDef.MaxRounds + 2));
 
         // Wrap the event sink to tag child events with the agent ID.
         var childSink = new AgentPrefixedEventSink(context.EventSink ?? NullAgentEventSink.Instance, agentDef.AgentId);

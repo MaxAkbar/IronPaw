@@ -75,6 +75,36 @@ public sealed class CliOptionsTests
     }
 
     [Fact]
+    public void Parse_ParsesWorkflowCommands()
+    {
+        var list = CliOptions.Parse(["--list-workflows"]);
+        Assert.True(list.ListWorkflows);
+        Assert.True(list.TryValidate(out _));
+        var resume = CliOptions.Parse(["--resume", "run-123", "--reconcile-tool", "execution-456",
+            "--reconcile-result", "result.json", "--reconcile-note", "Verified destination state"]);
+        Assert.Equal("run-123", resume.ResumeRunId);
+        Assert.Equal("execution-456", resume.ReconcileToolExecutionId);
+        Assert.Equal("result.json", resume.ReconcileResultFile);
+        Assert.Equal("Verified destination state", resume.ReconcileNote);
+        Assert.True(resume.TryValidate(out _));
+    }
+
+    [Theory]
+    [InlineData("--resume", "run", "--list-workflows")]
+    [InlineData("--resume", "run", "--prompt", "hello")]
+    [InlineData("--list-workflows", "--prompt-file", "prompt.txt")]
+    [InlineData("--list-workflows", "--list-skills")]
+    [InlineData("--resume", " ")]
+    [InlineData("--reconcile-tool", "execution")]
+    [InlineData("--resume", "run", "--reconcile-tool", "execution")]
+    public void TryValidate_RejectsAmbiguousWorkflowCommands(params string[] args)
+    {
+        var options = CliOptions.Parse(args);
+        Assert.False(options.TryValidate(out var error));
+        Assert.False(string.IsNullOrWhiteSpace(error));
+    }
+
+    [Fact]
     public void Parse_ParsesMessageTtlDays()
     {
         var options = CliOptions.Parse(["--message-ttl-days", "45", "--prompt", "hi"]);

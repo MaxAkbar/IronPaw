@@ -31,13 +31,6 @@ if (!options.TryValidate(out var validationError))
 }
 
 var interactiveInputAvailable = !Console.IsInputRedirected;
-if (!ProviderResolver.TryResolve(options.Provider, interactiveInputAvailable, out var provider, out var providerQuitRequested))
-{
-    return providerQuitRequested ? 0 : 2;
-}
-
-var model = ResolveModel(options.Model, provider);
-var sessionKey = new SessionKey(string.IsNullOrWhiteSpace(options.Session) ? "default" : options.Session.Trim());
 IAgentEventSink eventSink = options.NoEvents
     ? NullAgentEventSink.Instance
     : new AnsiConsoleEventSink();
@@ -46,8 +39,6 @@ var llmOptionOverrides = new OpenAiClientOptionOverrides(
     SafetyMarginTokens: options.LlmSafetyMarginTokens,
     MinimumOutputTokensPerRequest: options.LlmMinOutputTokensPerRequest,
     MaxAutoContinuationPasses: options.LlmMaxAutoContinuationPasses);
-using var bootstrap = AppBootstrapper.Build(options.Store, options.MessageTtlDays, llmOptionOverrides);
-
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) =>
 {
@@ -57,7 +48,32 @@ Console.CancelKeyPress += (_, eventArgs) =>
 
 try
 {
+    using var bootstrap = AppBootstrapper.Build(options.Store, options.MessageTtlDays, llmOptionOverrides);
     ConsoleUi.RenderBanner();
+    if (WorkflowCommands.IsWorkflowCommand(options))
+    {
+        return await WorkflowCommands.ExecuteAsync(options, bootstrap.WorkflowStore, bootstrap.Orchestrator,
+            eventSink, configuredProvider =>
+            {
+                if (!ProviderResolver.TryResolve(configuredProvider, interactiveInputAvailable: false,
+                        out var savedProvider, out var resolveQuitRequested))
+                {
+                    return (false, resolveQuitRequested);
+                }
+
+                var configured = ProviderResolver.TryEnsureConfiguration(savedProvider, interactiveInputAvailable,
+                    out var configurationQuitRequested);
+                return (configured, configurationQuitRequested);
+            }, cancellation.Token);
+    }
+
+    if (!ProviderResolver.TryResolve(options.Provider, interactiveInputAvailable, out var provider, out var providerQuitRequested))
+    {
+        return providerQuitRequested ? 0 : 2;
+    }
+
+    var model = ResolveModel(options.Model, provider);
+    var sessionKey = new SessionKey(string.IsNullOrWhiteSpace(options.Session) ? "default" : options.Session.Trim());
     ConsoleUi.RenderRunSettings(
         provider,
         model,
@@ -182,6 +198,12 @@ catch (OperationCanceledException)
 {
     ConsoleUi.RenderWarning("Run canceled.");
     return 130;
+}
+catch (WorkflowReconciliationRequiredException ex)
+{
+    ConsoleUi.RenderError(ex.Message);
+    ConsoleUi.RenderWarning("Use --list-workflows to inspect unresolved tool execution IDs. After verifying the external outcome, supply --resume with --reconcile-tool, --reconcile-result, and --reconcile-note.");
+    return 2;
 }
 catch (Exception ex)
 {

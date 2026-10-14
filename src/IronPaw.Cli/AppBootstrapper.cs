@@ -1,10 +1,13 @@
 using IronPaw.AgentCore;
 using IronPaw.AgentCore.Abstractions;
 using IronPaw.AgentCore.Persistence;
+using IronPaw.AgentCore.Persistence.CSharpDb;
 using IronPaw.AgentCore.Persistence.Sqlite;
 using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
 using Microsoft.Extensions.DependencyInjection;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace IronPaw.Cli;
 
@@ -13,9 +16,11 @@ internal static class AppBootstrapper
     public static AppBootstrap Build(
         StoreBackend storeBackend = StoreBackend.Json,
         int messageTtlDays = 30,
-        OpenAiClientOptionOverrides? llmOptions = null)
+        OpenAiClientOptionOverrides? llmOptions = null,
+        string? stateRoot = null,
+        string? workspaceRoot = null)
     {
-        var paths = ResolvePaths();
+        var paths = ResolvePaths(stateRoot, workspaceRoot);
         Directory.CreateDirectory(paths.StateRoot);
         Directory.CreateDirectory(paths.AppSkillsDirectory);
 
@@ -28,19 +33,27 @@ internal static class AppBootstrapper
             ValidateOnBuild = true
         });
 
-        return new AppBootstrap(serviceProvider);
+        try
+        {
+            return new AppBootstrap(serviceProvider);
+        }
+        catch
+        {
+            serviceProvider.Dispose();
+            throw;
+        }
     }
 
-    private static BootstrapPaths ResolvePaths()
+    private static BootstrapPaths ResolvePaths(string? stateRoot, string? workspaceRoot)
     {
-        var workspaceRoot = Directory.GetCurrentDirectory();
+        workspaceRoot = Path.GetFullPath(workspaceRoot ?? Directory.GetCurrentDirectory());
         var appDataRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "IronPaw");
         return new BootstrapPaths(
             WorkspaceRoot: workspaceRoot,
-            AppSkillsDirectory: Path.Combine(appDataRoot, "skills"),
-            StateRoot: Path.Combine(appDataRoot, "state"));
+            AppSkillsDirectory: stateRoot is null ? Path.Combine(appDataRoot, "skills") : Path.Combine(Path.GetFullPath(stateRoot), "skills"),
+            StateRoot: Path.GetFullPath(stateRoot ?? Path.Combine(appDataRoot, "state")));
     }
 
     private static void ConfigureServices(
@@ -51,6 +64,8 @@ internal static class AppBootstrapper
         BootstrapPaths paths)
     {
         RegisterStores(services, storeBackend, paths.StateRoot, messageTtlDays);
+        services.AddSingleton<IWorkflowStore>(_ => CSharpDbWorkflowStore.OpenAsync(
+            ResolveWorkflowDatabasePath(paths.StateRoot, paths.WorkspaceRoot)).GetAwaiter().GetResult());
 
         var skillLoadResult = SkillAddinLoader.LoadFromDirectories(
         [
@@ -82,7 +97,7 @@ internal static class AppBootstrapper
         services.AddSingleton<IToolResultTruncator, ToolResultTruncator>();
         services.AddSingleton<ISystemPromptBuilder, DefaultSystemPromptBuilder>();
 
-        services.AddSingleton<IAgentOrchestrator>(sp =>
+        services.AddSingleton<IResumableAgentOrchestrator>(sp =>
         {
             var orchestrator = new AgentOrchestrator(
                 sp.GetRequiredService<ISessionLaneScheduler>(),
@@ -96,11 +111,25 @@ internal static class AppBootstrapper
                 sp.GetRequiredService<IToolResultTruncator>(),
                 sp.GetRequiredService<ISystemPromptBuilder>(),
                 sp.GetRequiredService<IMemoryStore>(),
-                sp.GetRequiredService<IRunHistoryStore>());
+                sp.GetRequiredService<IRunHistoryStore>(),
+                workflowStore: sp.GetRequiredService<IWorkflowStore>());
 
             RegisterRuntimeTools(sp, paths.AppSkillsDirectory, orchestrator);
             return orchestrator;
         });
+        services.AddSingleton<IAgentOrchestrator>(sp => sp.GetRequiredService<IResumableAgentOrchestrator>());
+    }
+
+    internal static string ResolveWorkflowDatabasePath(string stateRoot, string workspaceRoot)
+    {
+        var normalizedWorkspace = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspaceRoot));
+        if (OperatingSystem.IsWindows())
+        {
+            normalizedWorkspace = normalizedWorkspace.ToUpperInvariant();
+        }
+
+        var workspaceId = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedWorkspace)));
+        return Path.Combine(Path.GetFullPath(stateRoot), "workflows", workspaceId, "workflows.cdb");
     }
 
     private static void RegisterStores(
@@ -276,7 +305,8 @@ internal sealed class AppBootstrap : IDisposable
     {
         _serviceProvider = serviceProvider;
         // Force creation during startup so tool registrations run once.
-        Orchestrator = _serviceProvider.GetRequiredService<IAgentOrchestrator>();
+        Orchestrator = _serviceProvider.GetRequiredService<IResumableAgentOrchestrator>();
+        WorkflowStore = _serviceProvider.GetRequiredService<IWorkflowStore>();
         SkillLoadResult = _serviceProvider.GetRequiredService<SkillAddinLoadResult>();
         MemoryStore = _serviceProvider.GetRequiredService<IMemoryStore>();
         RunHistoryStore = _serviceProvider.GetRequiredService<IRunHistoryStore>();
@@ -287,7 +317,9 @@ internal sealed class AppBootstrap : IDisposable
         WebBrowserService = _serviceProvider.GetRequiredService<IWebBrowserService>();
     }
 
-    public IAgentOrchestrator Orchestrator { get; }
+    public IResumableAgentOrchestrator Orchestrator { get; }
+
+    public IWorkflowStore WorkflowStore { get; }
 
     public SkillAddinLoadResult SkillLoadResult { get; }
 

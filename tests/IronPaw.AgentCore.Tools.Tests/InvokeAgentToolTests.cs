@@ -90,7 +90,7 @@ public sealed class InvokeAgentToolTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_ChildRequest_PropagatesScopedParentLineage()
+    public async Task ExecuteAsync_ChildRequest_PropagatesImmediateParentAndRootLineage()
     {
         var registry = new InMemoryAgentRegistry();
         registry.Register(CreateAgentDef("coder"));
@@ -115,7 +115,8 @@ public sealed class InvokeAgentToolTests
 
         Assert.NotNull(capturedRequest);
         Assert.NotNull(capturedRequest.ParentRunId);
-        Assert.Equal("root-run", capturedRequest.ParentRunId!.Value.Value);
+        Assert.Equal("child-run", capturedRequest.ParentRunId!.Value.Value);
+        Assert.Equal("root-run", capturedRequest.RootRunId!.Value.Value);
         Assert.NotNull(capturedRequest.ParentSessionKey);
         Assert.Equal("root-session", capturedRequest.ParentSessionKey!.Value.Value);
     }

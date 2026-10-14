@@ -140,9 +140,11 @@ public sealed record ToolExecutionContext(
     RunId? ParentRunId = null,
     SessionKey? ParentSessionKey = null,
     ToolSelectionPolicy? ToolPolicy = null,
-    IAgentEventSink? EventSink = null)
+    IAgentEventSink? EventSink = null,
+    string? ToolExecutionId = null,
+    RunId? RootRunId = null)
 {
-    public RunId ScopeRunId => ParentRunId ?? RunId;
+    public RunId ScopeRunId => RootRunId ?? ParentRunId ?? RunId;
 
     public SessionKey ScopeSessionKey => ParentSessionKey ?? SessionKey;
 }
@@ -408,7 +410,9 @@ public sealed record AgentRunRequest(
     IReadOnlyList<MemoryEntry>? ActiveMemories = null,
     string? AgentId = null,
     RunId? ParentRunId = null,
-    SessionKey? ParentSessionKey = null);
+    SessionKey? ParentSessionKey = null,
+    RunId? RootRunId = null,
+    WorkflowBudget? Budget = null);
 
 /// <summary>Tracks completion of the execution loop. Artifact verification is separate.</summary>
 public enum AgentRunStatus
