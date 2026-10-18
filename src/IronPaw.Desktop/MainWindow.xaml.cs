@@ -35,9 +35,10 @@ public partial class MainWindow : Window
         _bootstrap = bootstrap;
         _orchestrator = _bootstrap.Orchestrator;
         _recovery = new(_orchestrator, _bootstrap.WorkflowStore);
+        InitializeGraphHost();
         AppendSkillDiagnostics(_bootstrap.SkillLoadResult);
         PromptTextBox.Text = "Create a project plan for an agent architecture and write it to Plan.md.";
-        Loaded += async (_, _) => await RefreshWorkflowsAsync();
+        Loaded += async (_, _) => { await RefreshWorkflowsAsync(); await RefreshGraphsAsync(); };
         UpdateControls();
     }
 
@@ -45,7 +46,7 @@ public partial class MainWindow : Window
 
     private async void RunButton_OnClick(object sender, RoutedEventArgs e)
     {
-        if (_runCancellationTokenSource is not null)
+        if (_runCancellationTokenSource is not null || _activeGraphId is not null)
         {
             return;
         }
@@ -96,7 +97,7 @@ public partial class MainWindow : Window
 
     private Task ExecuteRunAsync(RunId rootRunId, Func<CancellationToken, Task<AgentRunResult?>> action)
     {
-        if (_activeRootRunId is not null) return Task.CompletedTask;
+        if (_activeRootRunId is not null || _activeGraphId is not null) return Task.CompletedTask;
         _activeRootRunId = rootRunId;
         _runCancellationTokenSource = new();
         UpdateControls();
@@ -134,6 +135,11 @@ public partial class MainWindow : Window
     private async Task ControlAsync(RunId? rootRunId, bool permanentCancel)
     {
         if (rootRunId is null || _controlBusy) return;
+        if (_activeGraphId is not null)
+        {
+            RecoveryStatusTextBlock.Text = "Use Task graphs to control the active graph.";
+            return;
+        }
         if (_activeRootRunId is { } active && active != rootRunId.Value)
         {
             RecoveryStatusTextBlock.Text = "Control the active root, or wait until it finishes before controlling another workflow.";
@@ -325,18 +331,20 @@ public partial class MainWindow : Window
     {
         if (RunButton is null) return;
         var running = _activeRootRunId is not null;
-        RunButton.IsEnabled = !running && !_controlBusy;
+        var graphRunning = _activeGraphId is not null;
+        RunButton.IsEnabled = !running && !graphRunning && !_controlBusy;
         CancelButton.IsEnabled = PauseActiveButton.IsEnabled = running && !_controlBusy;
         var root = _detail?.Root;
         var controllable = root is not null && root.Result is null && root.Control != WorkflowControl.Cancel;
-        var sameActiveRoot = !running || _activeRootRunId!.Value.Value == root?.RunId;
+        var sameActiveRoot = !graphRunning && (!running || _activeRootRunId!.Value.Value == root?.RunId);
         PauseWorkflowButton.IsEnabled = CancelWorkflowButton.IsEnabled = controllable && sameActiveRoot && !_controlBusy;
-        var editable = controllable && !running && !_controlBusy;
+        var editable = controllable && !running && !graphRunning && !_controlBusy;
         ResumeWorkflowButton.IsEnabled = editable && root?.Status is not (WorkflowStatus.Failed or WorkflowStatus.BudgetExhausted);
         var request = (HumanRequestsComboBox.SelectedItem as HumanRequestChoice)?.Request;
         AnswerButton.IsEnabled = editable && request?.Kind == WorkflowHumanRequestKind.Input;
         ApproveButton.IsEnabled = DenyButton.IsEnabled = editable && request?.Kind == WorkflowHumanRequestKind.ToolApproval;
-        ReconcileButton.IsEnabled = !running && !_controlBusy && UnknownToolsComboBox.SelectedItem is ToolChoice;
+        ReconcileButton.IsEnabled = !running && !graphRunning && !_controlBusy && UnknownToolsComboBox.SelectedItem is ToolChoice;
+        UpdateGraphControls();
     }
 
     private sealed record WorkflowChoice(WorkflowCheckpoint Checkpoint)
@@ -436,6 +444,21 @@ public partial class MainWindow : Window
             base.OnClosing(e);
             return;
         }
+        if (!_closing && _activeGraphId is { } graphId)
+        {
+            e.Cancel = true;
+            base.OnClosing(e);
+            _closePending = true;
+            await ControlGraphAsync(graphId, permanentCancel: false);
+            _graphCancellationTokenSource?.Cancel();
+            if (_graphTask is { } graphTask)
+            {
+                try { await graphTask; } catch { /* Already reported by graph execution. */ }
+            }
+            _closing = true;
+            Close();
+            return;
+        }
         if (!_closing && _activeRootRunId is { } active)
         {
             e.Cancel = true;
@@ -459,6 +482,9 @@ public partial class MainWindow : Window
         _runCancellationTokenSource?.Cancel();
         _runCancellationTokenSource?.Dispose();
         _runCancellationTokenSource = null;
+        _graphCancellationTokenSource?.Cancel();
+        _graphCancellationTokenSource?.Dispose();
+        _graphCancellationTokenSource = null;
         _bootstrap.Dispose();
         base.OnClosed(e);
     }

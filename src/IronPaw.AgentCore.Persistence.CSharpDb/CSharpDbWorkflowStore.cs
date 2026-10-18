@@ -63,6 +63,7 @@ public sealed partial class CSharpDbWorkflowStore : IWorkflowStore, IAsyncDispos
                 if (existing.Any(x => x.Request.SessionKey == checkpoint.Request.SessionKey && IsActive(x)))
                     throw new WorkflowConflictException("This session already has an unfinished workflow. Resume or resolve it first.");
                 ValidateLineage(existing, checkpoint);
+                await ValidateAgentTaskWorkflowWriteAsync(existing, null, checkpoint, ct).ConfigureAwait(false);
                 ValidateExecutionAdmission(existing, null, checkpoint);
                 ValidateSharedBudget(existing, checkpoint);
                 await ValidateBudgetAdmissionAsync(existing, null, checkpoint, ct).ConfigureAwait(false);
@@ -104,6 +105,7 @@ public sealed partial class CSharpDbWorkflowStore : IWorkflowStore, IAsyncDispos
                     throw new WorkflowConflictException("The workflow changed since this checkpoint was read.");
                 ValidateUpdate(current, checkpoint);
                 var existing = await ReadAllAsync(ct).ConfigureAwait(false);
+                await ValidateAgentTaskWorkflowWriteAsync(existing, current, checkpoint, ct).ConfigureAwait(false);
                 ValidateExecutionAdmission(existing, current, checkpoint);
                 var rootControl = existing.Single(x => x.RunId == checkpoint.RootRunId).Control;
                 if (checkpoint.LeaseOwner is null && checkpoint.Suspension is not null &&
@@ -155,6 +157,8 @@ public sealed partial class CSharpDbWorkflowStore : IWorkflowStore, IAsyncDispos
         await ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS workflow_journal_revision ON workflow_journal (run_id, revision)", ct).ConfigureAwait(false);
         await ExecuteAsync("CREATE TABLE IF NOT EXISTS workflow_clocks (id INTEGER PRIMARY KEY, root_run_id TEXT, payload TEXT)", ct).ConfigureAwait(false);
         await ExecuteAsync("CREATE UNIQUE INDEX IF NOT EXISTS workflow_clocks_root ON workflow_clocks (root_run_id)", ct).ConfigureAwait(false);
+        await EnsureTaskGraphTablesAsync(ct).ConfigureAwait(false);
+        _ = await ReadTaskGraphsAsync(ct).ConfigureAwait(false);
         // Validate every version before mutating any checkpoint. Exclusive acquisition
         // guarantees that a persisted lease cannot belong to another live store.
         var checkpoints = await ReadAllAsync(ct, allowLegacy: true).ConfigureAwait(false);
@@ -226,6 +230,8 @@ public sealed partial class CSharpDbWorkflowStore : IWorkflowStore, IAsyncDispos
             foreach (var rootId in checkpoints.Select(x => x.RootRunId).Distinct(StringComparer.Ordinal))
                 await UpdateClockAsync(rootId, recoveredCheckpoints, ct, legacySource: checkpoints).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+        await InitializeTaskGraphsAsync(ct).ConfigureAwait(false);
+        await InitializeEvaluationsAsync(ct).ConfigureAwait(false);
     }
 
     private async Task<WorkflowCheckpoint?> ReadOneAsync(string runId, CancellationToken ct)
@@ -548,7 +554,7 @@ public sealed partial class CSharpDbWorkflowStore : IWorkflowStore, IAsyncDispos
 
     private static JsonSerializerOptions CreateJsonOptions()
     {
-        var options = new JsonSerializerOptions();
+        var options = new JsonSerializerOptions { MaxDepth = 256 };
         options.Converters.Add(new RunIdConverter());
         options.Converters.Add(new SessionKeyConverter());
         return options;

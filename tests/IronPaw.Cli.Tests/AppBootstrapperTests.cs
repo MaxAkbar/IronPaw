@@ -87,6 +87,20 @@ public sealed class AppBootstrapperTests : IDisposable
     }
 
     [Fact]
+    public async Task Build_TaskGraphsShareTheWorkflowLedgerAndUseManagedWorkspaceRoot()
+    {
+        var workspace = Path.Combine(_testRoot, "workspace");
+        Directory.CreateDirectory(workspace);
+        using var bootstrap = Build(workspace: workspace);
+        Assert.Same(bootstrap.WorkflowStore, bootstrap.TaskGraphStore);
+        Assert.IsType<LazyLlmClient>(bootstrap.LlmClient);
+        Assert.Equal(workspace, bootstrap.GraphController.WorkspaceRoot);
+        var database = AppBootstrapper.ResolveWorkflowDatabasePath(Path.Combine(_testRoot, "state"), workspace);
+        Assert.Equal(Path.Combine(Path.GetDirectoryName(database)!, "task-workspaces"), bootstrap.GraphController.WorkspaceStoreRoot);
+        Assert.Empty(await bootstrap.GraphController.ListAsync(CallerIdentity.LocalOwner(), CancellationToken.None));
+    }
+
+    [Fact]
     public void ResolveWorkflowDatabasePath_NormalizesWorkspaceIdentity()
     {
         var stateRoot = Path.Combine(_testRoot, "state");

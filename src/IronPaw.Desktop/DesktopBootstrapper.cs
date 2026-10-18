@@ -96,7 +96,14 @@ internal static class DesktopBootstrapper
         services.AddSingleton<ISessionLaneScheduler, SessionLaneScheduler>();
         services.AddSingleton<IToolExecutor, ToolExecutor>();
         services.AddSingleton<IToolSchemaNormalizer, ToolSchemaNormalizer>();
-        services.AddSingleton<ILlmClient>(_ => LlmClientFactory.Build());
+        // Browsing saved state and recording control/reconciliation receipts do not
+        // require provider configuration. Resolve that configuration on first model use.
+        services.AddSingleton<ILlmClient>(_ => new DeferredDesktopLlmClient(() => LlmClientFactory.Build()));
+        services.AddSingleton(sp => new TaskGraphHostController(
+            (IAgentTaskGraphStore)sp.GetRequiredService<IWorkflowStore>(),
+            sp.GetRequiredService<IWorkflowStore>(), sp.GetRequiredService<ILlmClient>(),
+            paths.WorkspaceRoot,
+            Path.Combine(Path.GetDirectoryName(ResolveWorkflowDatabasePath(paths.StateRoot, paths.WorkspaceRoot))!, "task-workspaces")));
         services.AddSingleton<ITranscriptSanitizer, TranscriptSanitizer>();
         services.AddSingleton<IToolResultTruncator, ToolResultTruncator>();
         services.AddSingleton<ISystemPromptBuilder, DefaultSystemPromptBuilder>();
@@ -262,9 +269,26 @@ internal sealed class DesktopBootstrap : IDisposable
 
     public IWorkflowStore WorkflowStore => _serviceProvider.GetRequiredService<IWorkflowStore>();
 
+    // Optional for lightweight window probes that register only the normal workflow host.
+    public TaskGraphHostController? Graphs => _serviceProvider.GetService<TaskGraphHostController>();
+
     public void Dispose()
     {
         // Mirror the startup boundary when CSharpDB drains asynchronous storage work.
         Task.Run(_serviceProvider.Dispose).GetAwaiter().GetResult();
+    }
+}
+
+internal sealed class DeferredDesktopLlmClient(Func<ILlmClient> factory) : ILlmClient
+{
+    private readonly Lazy<ILlmClient> _client = new(factory);
+    public IAsyncEnumerable<LlmDelta> StreamAsync(LlmRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        // Enforce routing at dispatch as well as graph preflight. A stale scheduling
+        // hint must never let an unknown provider fall back to the local model.
+        if (!ProviderDefaults.DefaultModels.Keys.Contains(request.Provider, StringComparer.OrdinalIgnoreCase))
+            throw new ArgumentException($"Unsupported task graph provider '{request.Provider}'.", nameof(request));
+        return _client.Value.StreamAsync(request, ct);
     }
 }

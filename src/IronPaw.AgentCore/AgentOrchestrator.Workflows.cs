@@ -13,6 +13,10 @@ public sealed partial class AgentOrchestrator
         IAgentEventSink sink, CancellationToken ct)
     {
         var checkpoint = await RequireWorkflowAsync(runId, caller, ct);
+        if (checkpoint.TaskId == "task-graph-root" && checkpoint.ParentRunId is null &&
+            _workflowStore is ITaskGraphStore graphs && (await graphs.ListTaskGraphsAsync(ct))
+                .Any(graph => graph.AgentBinding?.RootRunId == checkpoint.RunId))
+            throw new WorkflowConflictException("The graph root is a non-executable ledger anchor. Resume its task graph instead.");
         var root = await _workflowStore!.GetAsync(new RunId(checkpoint.RootRunId), ct)
             ?? throw new WorkflowConflictException("Root workflow was not found.");
         if (root.Control == WorkflowControl.Cancel)

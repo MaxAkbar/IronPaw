@@ -222,6 +222,55 @@
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
+                        <TabItem Header="Task graphs" x:Name="TaskGraphsTab">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel Margin="10">
+                                    <WrapPanel>
+                                        <Button x:Name="ImportGraphButton" Content="Import graph manifest…" Click="ImportGraph_OnClick" />
+                                        <Button x:Name="RefreshGraphsButton" Content="Refresh" Click="RefreshGraphs_OnClick" />
+                                    </WrapPanel>
+                                    <TextBlock x:Name="GraphManifestTextBlock" Text="Import a launch manifest to review its tasks, limits and verification commands." TextWrapping="Wrap" Margin="0,10,0,8" />
+                                    <Expander Header="Imported manifest" Margin="0,0,0,8">
+                                        <TextBox x:Name="GraphManifestTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="200" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" />
+                                    </Expander>
+                                    <CheckBox x:Name="GraphLocalVerificationCheckBox" Content="Allow trusted local verification for this action (host OS authority)" Margin="0,0,0,8" Checked="GraphVerification_OnChanged" Unchecked="GraphVerification_OnChanged" />
+                                    <TextBlock Text="Verification commands run repository code as this Windows user. Review the imported profiles before enabling this option. The worker is not an OS sandbox." TextWrapping="Wrap" FontSize="12" Foreground="#7B351E" Margin="0,0,0,8" />
+                                    <Button x:Name="StartGraphButton" Content="Start imported graph" Click="StartGraph_OnClick" />
+                                    <TextBlock Text="Saved graphs" FontWeight="SemiBold" Margin="0,14,0,0" />
+                                    <ComboBox x:Name="GraphsComboBox" DisplayMemberPath="Label" SelectionChanged="GraphSelection_OnChanged" />
+                                    <TextBlock x:Name="GraphSummaryTextBlock" TextWrapping="Wrap" Margin="0,0,0,8" />
+                                    <WrapPanel>
+                                        <Button x:Name="ResumeGraphButton" Content="Resume graph" Click="ResumeGraph_OnClick" />
+                                        <Button x:Name="PauseGraphButton" Content="Pause graph" Click="PauseGraph_OnClick" />
+                                        <Button x:Name="CancelGraphButton" Content="Cancel graph permanently" Click="CancelGraph_OnClick" Background="#B85A2A" />
+                                    </WrapPanel>
+                                    <TextBlock x:Name="GraphStatusTextBlock" TextWrapping="Wrap" Foreground="#7B351E" Margin="0,10,0,8" />
+                                    <TextBlock Text="Task / dependencies / status / attempt" FontWeight="SemiBold" />
+                                    <ComboBox x:Name="GraphTasksComboBox" DisplayMemberPath="Label" SelectionChanged="GraphTaskSelection_OnChanged" />
+                                    <Button x:Name="RecoverGraphTaskButton" Content="Recover selected task invocation" Click="RecoverGraphTask_OnClick" />
+                                    <Expander Header="Graph definition, artifacts, receipts, child invocations and journal" IsExpanded="True" Margin="0,8,0,8">
+                                        <TextBox x:Name="GraphDetailTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="260" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" />
+                                    </Expander>
+                                    <Expander Header="Reconcile an independently established outcome" Margin="0,8,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Select the exact saved operation, import its verified result JSON, and record your evidence. Recording a result does not execute or resume work." TextWrapping="Wrap" Margin="0,8,0,8" />
+                                            <ComboBox x:Name="GraphReconciliationKindComboBox" SelectedIndex="0" SelectionChanged="GraphReconciliationKind_OnChanged">
+                                                <ComboBoxItem Content="Task outcome" />
+                                                <ComboBoxItem Content="Verification command outcome" />
+                                                <ComboBoxItem Content="Child tool outcome" />
+                                            </ComboBox>
+                                            <ComboBox x:Name="GraphUnknownCommandsComboBox" DisplayMemberPath="Label" />
+                                            <ComboBox x:Name="GraphUnknownToolsComboBox" DisplayMemberPath="Label" />
+                                            <Button x:Name="ImportGraphResultButton" Content="Import verified result JSON…" Click="ImportGraphResult_OnClick" />
+                                            <TextBox x:Name="GraphReconcileResultTextBox" AcceptsReturn="True" TextWrapping="Wrap" Height="150" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" />
+                                            <TextBlock Text="Independent verification evidence / note" />
+                                            <TextBox x:Name="GraphReconcileNoteTextBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
+                                            <Button x:Name="ReconcileGraphButton" Content="Record established outcome" Click="ReconcileGraph_OnClick" />
+                                        </StackPanel>
+                                    </Expander>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
                     </TabControl>
                 </Border>
             </Grid>

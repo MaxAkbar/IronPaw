@@ -112,6 +112,60 @@ Default add-in discovery paths are controlled by host projects (CLI/Desktop), cu
 - `WorkspacePathResolver.cs`
   - resolves and validates paths relative to the workspace root
 
+## Isolated graph task tools
+
+`GitTaskWorkspaceManager` snapshots an exact local commit into a separate attempt directory,
+excluding Git metadata and uncommitted source changes. Raw `ls-tree`/`cat-file --batch` reads
+preserve committed blob bytes without checkout filters, line-ending conversion or archive attributes.
+Missing objects cannot trigger lazy fetching. Links, submodules and ambiguous paths are rejected.
+Incomplete or mismatched attempts are preserved
+and rejected for inspection rather than overwritten.
+
+`ScopedTaskToolRegistry.Create(workspace, scope)` exposes file listing, reading and writing.
+Each call checks relative scopes, containment and links, including the workspace root and its
+ancestors. Listings filter unauthorized names. Preflight denials return a known error without
+effects; unknown I/O failures still require durable reconciliation. Root and task policies also
+apply. Network, processes, generated skills and add-ins are unsupported in this path.
+
+Captured revisions live outside the writable workspace. Complete manifests and SHA256 hashes
+bind declared artifacts and detect added, deleted or changed files. This mediates model access;
+it does not sandbox arbitrary processes or protect against another program with the same OS user.
+
+`PrepareAsync` supports `AcceptedChanges` graphs. It reads exact accepted predecessor revisions,
+composes each ancestor's own file changes once, and freezes the resulting initial entries, input
+receipts and task scopes outside tool access. Divergent preimages and path collisions fail before
+model execution. Identical final file contents may coalesce. Resume validates the frozen baseline
+and preserves existing edits. A schema 2 capture records its input-manifest checksum and own
+preimage/postimage changeset, rejecting changes outside the producer's write scope and unsupported
+empty directories. Producer live working copies and arbitrary artifact paths are never import sources.
+
+### Trusted command verification
+
+`TrustedLocalTaskVerificationWorker` is a separate, optional host API. Construction requires
+`TaskVerificationAuthority.TrustedLocalProcess` and an allowlist of exact immutable profiles.
+Only an owner can authorize it. Each profile fixes an absolute executable, its SHA256 digest,
+literal argument list, relative working directory, timeout and bounded log size. Tests profiles
+also require a fresh relative TRX report path. The agent's file tools cannot configure commands.
+
+`CreateVerificationCopyAsync` copies the exact sealed candidate into a fresh disposable directory,
+with input hashes and evidence outside that directory. It verifies the source before and after
+copying, and the worker rechecks both immediately before launch. Build outputs may change the copy;
+the sealed source is rechecked after the command. Each profile starts from a separate pristine copy.
+Incomplete and completed copies are preserved rather than overwritten.
+
+The worker clears the inherited environment, uses private home/AppData/temp directories, retains
+explicit OS discovery paths and the selected executable directory, and never invokes a shell.
+It drains stdout/stderr concurrently, retaining bounded UTF8 prefixes, full raw stream hashes and
+byte counts. Exit zero establishes a build pass. Tests additionally need a fresh, bounded, valid
+TRX report with positive passing test counts and no failures; missing, empty, malformed, oversized
+or inconsistent reports fail. A timeout/cancellation after process start produces an uncertain
+receipt even after process-tree termination, because detached effects cannot be proven stopped.
+
+This executes repository code with the current user's OS authority. It is not an OS sandbox:
+network, files and credentials available to that user remain accessible. The executable digest pins
+the launcher, not its SDK, loaded libraries or repository dependencies. Hosts requiring process,
+network or credential isolation must supply a worker with those boundaries.
+
 ## Tools vs Skills — Conceptual Guide
 
 ### What is a Tool?

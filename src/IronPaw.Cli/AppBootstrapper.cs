@@ -92,7 +92,11 @@ internal static class AppBootstrapper
         services.AddSingleton<ISessionLaneScheduler, SessionLaneScheduler>();
         services.AddSingleton<IToolExecutor, ToolExecutor>();
         services.AddSingleton<IToolSchemaNormalizer, ToolSchemaNormalizer>();
-        services.AddSingleton<ILlmClient>(_ => LlmClientFactory.Build(llmOptions));
+        services.AddSingleton<ILlmClient>(_ => new LazyLlmClient(() => LlmClientFactory.Build(llmOptions)));
+        services.AddSingleton(sp => new TaskGraphHostController(
+            (IAgentTaskGraphStore)sp.GetRequiredService<IWorkflowStore>(),
+            sp.GetRequiredService<IWorkflowStore>(), sp.GetRequiredService<ILlmClient>(), paths.WorkspaceRoot,
+            Path.Combine(Path.GetDirectoryName(ResolveWorkflowDatabasePath(paths.StateRoot, paths.WorkspaceRoot))!, "task-workspaces")));
         services.AddSingleton<ITranscriptSanitizer, TranscriptSanitizer>();
         services.AddSingleton<IToolResultTruncator, ToolResultTruncator>();
         services.AddSingleton<ISystemPromptBuilder, DefaultSystemPromptBuilder>();
@@ -300,13 +304,16 @@ internal static class AppBootstrapper
 internal sealed class AppBootstrap : IDisposable
 {
     private readonly ServiceProvider _serviceProvider;
+    private readonly Lazy<TaskGraphHostController> _graphController;
 
     public AppBootstrap(ServiceProvider serviceProvider)
     {
         _serviceProvider = serviceProvider;
+        _graphController = new(() => _serviceProvider.GetRequiredService<TaskGraphHostController>());
         // Force creation during startup so tool registrations run once.
         Orchestrator = _serviceProvider.GetRequiredService<IResumableAgentOrchestrator>();
         WorkflowStore = _serviceProvider.GetRequiredService<IWorkflowStore>();
+        LlmClient = _serviceProvider.GetRequiredService<ILlmClient>();
         SkillLoadResult = _serviceProvider.GetRequiredService<SkillAddinLoadResult>();
         MemoryStore = _serviceProvider.GetRequiredService<IMemoryStore>();
         RunHistoryStore = _serviceProvider.GetRequiredService<IRunHistoryStore>();
@@ -320,6 +327,12 @@ internal sealed class AppBootstrap : IDisposable
     public IResumableAgentOrchestrator Orchestrator { get; }
 
     public IWorkflowStore WorkflowStore { get; }
+
+    public IAgentTaskGraphStore TaskGraphStore => (IAgentTaskGraphStore)WorkflowStore;
+
+    public ILlmClient LlmClient { get; }
+
+    public TaskGraphHostController GraphController => _graphController.Value;
 
     public SkillAddinLoadResult SkillLoadResult { get; }
 

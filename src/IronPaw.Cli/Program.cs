@@ -30,6 +30,16 @@ if (!options.TryValidate(out var validationError))
     return 2;
 }
 
+if (options.ValidateEvaluationConfigFile is not null)
+    return await EvaluationConfigurationCommands.ExecuteAsync(options, CancellationToken.None);
+
+if (LiveEvaluationCommands.IsEvaluationCommand(options))
+{
+    using var evaluationCancellation = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; evaluationCancellation.Cancel(); };
+    return await LiveEvaluationCommands.ExecuteAsync(options, evaluationCancellation.Token);
+}
+
 var interactiveInputAvailable = !Console.IsInputRedirected;
 IAgentEventSink eventSink = options.NoEvents
     ? NullAgentEventSink.Instance
@@ -50,6 +60,19 @@ try
 {
     using var bootstrap = AppBootstrapper.Build(options.Store, options.MessageTtlDays, llmOptionOverrides);
     ConsoleUi.RenderBanner();
+    if (TaskGraphCommands.IsGraphCommand(options))
+    {
+        return await TaskGraphCommands.ExecuteAsync(options, bootstrap.GraphController,
+            configuredProvider =>
+            {
+                if (!ProviderResolver.TryResolve(configuredProvider, interactiveInputAvailable: false,
+                        out var savedProvider, out var resolveQuitRequested))
+                    return (false, resolveQuitRequested);
+                var configured = ProviderResolver.TryEnsureConfiguration(savedProvider, interactiveInputAvailable,
+                    out var configurationQuitRequested);
+                return (configured, configurationQuitRequested);
+            }, cancellation.Token);
+    }
     if (WorkflowCommands.IsWorkflowCommand(options))
     {
         return await WorkflowCommands.ExecuteAsync(options, bootstrap.WorkflowStore, bootstrap.Orchestrator,

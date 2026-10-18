@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\IronPaw.AgentCore.Abstractions\IronPaw.AgentCore.Abstractions.csproj" />
+    <ProjectReference Include="..\IronPaw.AgentCore.Domain\IronPaw.AgentCore.Domain.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Tools\IronPaw.AgentCore.Tools.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Persistence\IronPaw.AgentCore.Persistence.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Providers\IronPaw.AgentCore.Providers.csproj" />

@@ -8,6 +8,7 @@
 - provider routing (`local`, `openai`, `ollama`, `lmstudio`, `anthropic`)
 - add-in skill system with dynamic discovery and runtime Roslyn compilation
 - task review and run history tracking
+- durable dependency graphs with isolated file tasks, shared budgets and separate artifact acceptance
 
 ## Architecture View
 
@@ -24,6 +25,8 @@ flowchart LR
   Desktop --> Core
 
   Core --> Abstractions[IronPaw.AgentCore.Abstractions]
+  Core --> Domain[IronPaw.AgentCore.Domain]
+  Domain --> Abstractions
   Core --> Tools[IronPaw.AgentCore.Tools]
   Core --> Providers[IronPaw.AgentCore.Providers]
   Core --> Persistence[IronPaw.AgentCore.Persistence]
@@ -109,6 +112,7 @@ sequenceDiagram
 ### Project README Index
 
 - [src/IronPaw.AgentCore.Abstractions/README.md](src/IronPaw.AgentCore.Abstractions/README.md)
+- [src/IronPaw.AgentCore.Domain/README.md](src/IronPaw.AgentCore.Domain/README.md)
 - [src/IronPaw.AgentCore/README.md](src/IronPaw.AgentCore/README.md)
 - [src/IronPaw.AgentCore.Tools/README.md](src/IronPaw.AgentCore.Tools/README.md)
 - [src/IronPaw.AgentCore.Persistence/README.md](src/IronPaw.AgentCore.Persistence/README.md)
@@ -120,6 +124,7 @@ sequenceDiagram
 ## Solution Layout
 
 - `src/IronPaw.AgentCore.Abstractions`: shared contracts, DTOs, and runtime interfaces (tools, skills, LLM, sessions, memory, run history).
+- `src/IronPaw.AgentCore.Domain`: pure task-graph validation, result consistency and progress inspection shared by runtime and persistence.
 - `src/IronPaw.AgentCore`: orchestration loop, lane scheduler, system prompt builder with memory injection, transcript repair and truncation.
 - `src/IronPaw.AgentCore.Tools`: built-in tools (file I/O, memory, review, web browsing/extraction, runtime skill creation, agent delegation), policy pipeline, schema normalization, agent registry, and add-in skill loading.
 - `src/IronPaw.AgentCore.Persistence`: file-based stores for sessions, transcripts, memory, and run history.
@@ -200,6 +205,19 @@ dotnet run --project src/IronPaw.Cli -- --list-skills
 ```
 
 ## Multi-Agent Delegation
+
+Embedding hosts can also use `AgentTaskGraphRunner` for durable dependency scheduling with
+isolated Git snapshots, scoped file tools and the shared CSharpDB budget ledger. Accepted predecessor
+file changes compose into dependent tasks with pinned inputs and conflict detection. Its built-in
+verifier checks explicitly configured artifact integrity criteria. Optional owner-authorized command
+profiles add durable build/test receipts against exact disposable copies of the combined candidate;
+uncertain process effects require reconciliation. The local worker uses host OS authority and is not
+an OS sandbox. CLI and Desktop graph controls support inspection, pause/resume, recovery and explicit
+reconciliation. A controlled replay corpus exercises coding and failure workflows against a direct
+strategy; [live quality/cost/latency qualification remains unestablished](docs/orchestration-evaluations.md).
+Its future provider, model and total spending cap are configurable through a
+[disabled-by-default settings file](docs/orchestration-evaluations.md#live-comparison-configuration).
+See [the core API and example](src/IronPaw.AgentCore/README.md#isolated-agent-task-graphs).
 
 IronPaw supports multi-agent orchestration through a supervisor/specialist pattern. A top-level agent can delegate tasks to named specialist agents using the `invoke_agent` tool.
 

@@ -20,9 +20,13 @@ internal static class WorkflowCommands
         IAnsiConsole? console = null)
     {
         console ??= AnsiConsole.Console;
+        var graphRoots = store is ITaskGraphStore graphStore
+            ? (await graphStore.ListTaskGraphsAsync(ct)).Where(graph => graph.AgentBinding is not null)
+                .ToDictionary(graph => graph.AgentBinding!.RootRunId, graph => graph.Graph.GraphId, StringComparer.Ordinal)
+            : new Dictionary<string, string>(StringComparer.Ordinal);
         if (options.ListWorkflows)
         {
-            var savedWorkflows = await store.ListAsync(ct);
+            var savedWorkflows = (await store.ListAsync(ct)).Where(workflow => !graphRoots.ContainsKey(workflow.RootRunId)).ToArray();
             var budgets = new Dictionary<string, WorkflowBudgetSnapshot>(StringComparer.Ordinal);
             foreach (var rootId in savedWorkflows.Select(w => w.RootRunId).Distinct(StringComparer.Ordinal))
             {
@@ -37,6 +41,13 @@ internal static class WorkflowCommands
         if (checkpoint is null)
         {
             ConsoleUi.RenderError($"Workflow '{runId.Value}' was not found in this workspace. Use --list-workflows.");
+            return 2;
+        }
+
+        if (graphRoots.TryGetValue(checkpoint.RootRunId, out var graphId))
+        {
+            console.Write(new Text($"Workflow '{runId.Value}' belongs to task graph '{graphId}'. Use --show-graph, --resume-graph, --pause-graph, or --cancel-graph. " +
+                "Reconcile uncertain child tools with --reconcile-graph-tool.\n"));
             return 2;
         }
 

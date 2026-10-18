@@ -92,7 +92,10 @@ public sealed partial class CSharpDbWorkflowStore
             clock = new ExecutionClock(0, unclean.Length > 0 ? unclean.Min(x => x.CreatedAt) : null);
         }
         var elapsed = EffectiveElapsed(clock, now);
-        var active = next.Any(x => x.RootRunId == rootRunId && x.LeaseOwner is not null);
+        var active = next.Any(x => x.RootRunId == rootRunId && x.LeaseOwner is not null) ||
+            (await ReadTaskGraphsAsync(ct).ConfigureAwait(false)).Any(graph => graph.AgentBinding?.RootRunId == rootRunId &&
+                graph.Tasks.Any(task => task.LeaseToken is not null || task.Verifications.Any(invocation => invocation.State is
+                    TaskVerificationInvocationState.Started or TaskVerificationInvocationState.NeedsReconciliation)));
         var updated = new ExecutionClock(elapsed.Ticks, active ? Later(now, clock.ActiveSince) : null);
         var payload = Quote(Serialize(updated));
         if (await ClockExistsAsync(rootRunId, ct).ConfigureAwait(false))

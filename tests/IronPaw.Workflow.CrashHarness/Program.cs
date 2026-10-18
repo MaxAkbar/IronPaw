@@ -9,7 +9,13 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.Workflow.CrashHarness;
 
-public enum CrashPoint { AfterCompletedTool, AfterEffectBeforeToolResult, AfterHumanWait, AfterReservedModelAttempt }
+public enum CrashPoint
+{
+    AfterCompletedTool, AfterEffectBeforeToolResult, AfterHumanWait, AfterReservedModelAttempt,
+    AfterGraphEffect, AfterGraphProposal, AfterGraphAcceptance,
+    AfterAgentChildSuccess, AfterAgentCandidate,
+    AfterVerificationStarted, AfterVerificationCompleted
+}
 
 public static class CrashFixture
 {
@@ -116,6 +122,21 @@ internal static class Program
         var root = args[0];
         var point = Enum.Parse<CrashPoint>(args[1]);
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(root));
+        if (point is CrashPoint.AfterVerificationStarted or CrashPoint.AfterVerificationCompleted)
+        {
+            await VerificationTaskGraphCrashFixture.RunAsync(root, store, point, CancellationToken.None);
+            return;
+        }
+        if (point is CrashPoint.AfterAgentChildSuccess or CrashPoint.AfterAgentCandidate)
+        {
+            await AgentTaskGraphCrashFixture.RunAsync(root, store, point, CancellationToken.None);
+            return;
+        }
+        if (point is CrashPoint.AfterGraphEffect or CrashPoint.AfterGraphProposal or CrashPoint.AfterGraphAcceptance)
+        {
+            await TaskGraphCrashFixture.RunAsync(root, store, point, CancellationToken.None);
+            return;
+        }
         using var scheduler = new SessionLaneScheduler();
         ITool[] tools = point == CrashPoint.AfterHumanWait
             ? [new CrashEffectTool(root, point), new CrashHumanInputTool()]

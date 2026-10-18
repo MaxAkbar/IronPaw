@@ -5,6 +5,106 @@ namespace IronPaw.Cli.Tests;
 public sealed class CliOptionsTests
 {
     [Fact]
+    public void Parse_RecognizesStandaloneEvaluationConfigurationValidation()
+    {
+        var options = CliOptions.Parse(["--validate-evaluation-config", "evaluation.json"]);
+        Assert.Equal("evaluation.json", options.ValidateEvaluationConfigFile);
+        Assert.True(options.TryValidate(out var error), error);
+    }
+
+    [Theory]
+    [InlineData("hello")]
+    [InlineData("--prompt", "hello")]
+    [InlineData("--prompt-file", "prompt.txt")]
+    [InlineData("--list-skills")]
+    [InlineData("--list-workflows")]
+    [InlineData("--resume", "run")]
+    [InlineData("--list-graphs")]
+    [InlineData("--start-graph", "graph.json")]
+    [InlineData("--provider", "local")]
+    [InlineData("--model", "model")]
+    [InlineData("--session", "default")]
+    [InlineData("--profile", "Coding")]
+    [InlineData("--max-total-tokens", "100")]
+    [InlineData("--max-execution-seconds", "10")]
+    [InlineData("--llm-context-window-tokens", "1000")]
+    [InlineData("--store", "json")]
+    [InlineData("--message-ttl-days", "30")]
+    [InlineData("--no-events")]
+    [InlineData("--allow-local-verification")]
+    [InlineData("--task", "task")]
+    [InlineData("--require-approval", "write_file")]
+    [InlineData("--reconcile-note", "note")]
+    public void TryValidate_RejectsEvaluationConfigWithOtherCommandsOrOverrides(params string[] extra)
+    {
+        var options = CliOptions.Parse(["--validate-evaluation-config", "evaluation.json", .. extra]);
+        Assert.False(options.TryValidate(out var error));
+        Assert.Contains("standalone", error);
+    }
+
+    [Fact]
+    public void Parse_RejectsRepeatedEvaluationConfigurationFile()
+    {
+        Assert.Throws<ArgumentException>(() => CliOptions.Parse(["--validate-evaluation-config", "one.json", "--validate-evaluation-config", "two.json"]));
+    }
+
+    [Fact]
+    public void TryValidate_RejectsBlankEvaluationConfigurationFile()
+    {
+        Assert.False(CliOptions.Parse(["--validate-evaluation-config", " "]).TryValidate(out var error));
+        Assert.Contains("nonempty", error);
+    }
+
+    [Theory]
+    [InlineData("--list-graphs")]
+    [InlineData("--start-graph", "graph.json")]
+    [InlineData("--show-graph", "graph-1")]
+    [InlineData("--resume-graph", "graph-1", "--allow-local-verification")]
+    [InlineData("--pause-graph", "graph-1")]
+    [InlineData("--cancel-graph", "graph-1")]
+    [InlineData("--recover-graph", "graph-1", "--task", "task-1")]
+    [InlineData("--reconcile-graph-tool", "graph-1", "--task", "task-1", "--execution", "execution-1", "--result-file", "result.json", "--reconcile-note", "Verified tool effects")]
+    [InlineData("--reconcile-graph-task", "graph-1", "--task", "task-1", "--result-file", "result.json", "--reconcile-note", "Verified workspace state")]
+    [InlineData("--reconcile-graph-command", "graph-1", "--task", "task-1", "--invocation", "command-1", "--result-file", "result.json", "--reconcile-note", "Verified command outcome")]
+    public void Parse_RecognizesGraphCommands(params string[] args)
+    {
+        var options = CliOptions.Parse(args);
+        Assert.True(options.TryValidate(out var error), error);
+    }
+
+    [Theory]
+    [InlineData("--list-graphs", "--prompt", "hi")]
+    [InlineData("--list-graphs", "--list-workflows")]
+    [InlineData("--list-graphs", "--show-graph", "graph")]
+    [InlineData("--list-graphs", "--provider", "local")]
+    [InlineData("--resume-graph", "graph", "--model", "different")]
+    [InlineData("--start-graph", "graph.json", "--profile", "Coding")]
+    [InlineData("--resume-graph", "graph", "--max-total-tokens", "100")]
+    [InlineData("--resume-graph", "graph", "--max-execution-seconds", "10")]
+    [InlineData("--resume-graph", "graph", "--llm-context-window-tokens", "1000")]
+    [InlineData("--show-graph", " ")]
+    [InlineData("--start-graph", " ")]
+    [InlineData("--list-graphs", "--allow-local-verification")]
+    [InlineData("--pause-graph", "graph", "--allow-local-verification")]
+    [InlineData("--recover-graph", "graph")]
+    [InlineData("--show-graph", "graph", "--task", "task")]
+    [InlineData("--reconcile-graph-command", "graph", "--task", "task", "--result-file", "result.json", "--reconcile-note", "Verified")]
+    [InlineData("--reconcile-graph-task", "graph", "--task", "task", "--invocation", "invocation", "--result-file", "result.json", "--reconcile-note", "Verified")]
+    [InlineData("--reconcile-graph-task", "graph", "--task", "task", "--result-file", "result.json")]
+    [InlineData("--resume-graph", "graph", "--reconcile-note", "note")]
+    [InlineData("--reconcile-graph-tool", "graph", "--task", "task", "--result-file", "result.json", "--reconcile-note", "Verified")]
+    [InlineData("--show-graph", "graph", "--execution", "execution")]
+    [InlineData("--execution", "execution")]
+    [InlineData("--task", "task")]
+    [InlineData("--allow-local-verification", "--prompt", "hi")]
+    [InlineData("--result-file", "result.json")]
+    public void TryValidate_RejectsAmbiguousOrOverriddenGraphCommands(params string[] args)
+    {
+        Assert.False(CliOptions.Parse(args).TryValidate(out var error));
+        Assert.False(string.IsNullOrWhiteSpace(error));
+    }
+
+    [Fact]
     public void Parse_ParsesAllMajorFlags()
     {
         var options = CliOptions.Parse(

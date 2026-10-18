@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\IronPaw.AgentCore.Abstractions\IronPaw.AgentCore.Abstractions.csproj" />
+    <ProjectReference Include="..\IronPaw.AgentCore.Domain\IronPaw.AgentCore.Domain.csproj" />
     <PackageReference Include="CSharpDB.Engine" Version="[4.6.6]" />
   </ItemGroup>
 </Project>

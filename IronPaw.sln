@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.AgentCore.Abstracti
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.AgentCore", "src\IronPaw.AgentCore\IronPaw.AgentCore.csproj", "{D2B16682-9CF1-44BE-99AE-7C147E716E7E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.AgentCore.Domain", "src\IronPaw.AgentCore.Domain\IronPaw.AgentCore.Domain.csproj", "{8A86B055-7DCA-4C92-9624-BFA6D0A04152}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.AgentCore.Tools", "src\IronPaw.AgentCore.Tools\IronPaw.AgentCore.Tools.csproj", "{DA0EAD1D-6B30-4F9E-AD78-67006A4C5B3A}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IronPaw.AgentCore.Persistence", "src\IronPaw.AgentCore.Persistence\IronPaw.AgentCore.Persistence.csproj", "{5AD4F25E-5941-4D93-8741-28C0AEF74177}"
@@ -83,6 +85,18 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Debug|x64.Build.0 = Debug|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Debug|x86.Build.0 = Debug|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Release|x64.ActiveCfg = Release|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Release|x64.Build.0 = Release|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Release|x86.ActiveCfg = Release|Any CPU
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152}.Release|x86.Build.0 = Release|Any CPU
 		{D17EDC79-581C-4F46-927B-20830632B70D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{D17EDC79-581C-4F46-927B-20830632B70D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D17EDC79-581C-4F46-927B-20830632B70D}.Debug|x64.ActiveCfg = Debug|Any CPU
@@ -328,6 +342,7 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{8A86B055-7DCA-4C92-9624-BFA6D0A04152} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{D17EDC79-581C-4F46-927B-20830632B70D} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{1C88FCBF-C9A3-47E4-A78E-FAAE3B800F1C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{D2B16682-9CF1-44BE-99AE-7C147E716E7E} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}

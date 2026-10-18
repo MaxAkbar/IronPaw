@@ -7,9 +7,12 @@ internal sealed class WorkflowRecoveryController(IResumableAgentOrchestrator orc
 {
     private readonly CallerIdentity _caller = CallerIdentity.LocalOwner();
 
-    public async Task<IReadOnlyList<WorkflowCheckpoint>> ListRootsAsync(CancellationToken ct) =>
-        (await orchestrator.ListWorkflowsAsync(ct)).Where(run => run.RunId == run.RootRunId)
+    public async Task<IReadOnlyList<WorkflowCheckpoint>> ListRootsAsync(CancellationToken ct)
+    {
+        var graphRoots = await GraphRootIdsAsync(ct);
+        return (await orchestrator.ListWorkflowsAsync(ct)).Where(run => run.RunId == run.RootRunId && !graphRoots.Contains(run.RunId))
             .OrderByDescending(run => run.UpdatedAt).ToArray();
+    }
 
     public async Task<WorkflowRecoveryDetail> InspectAsync(RunId runId, CancellationToken ct)
     {
@@ -76,8 +79,18 @@ internal sealed class WorkflowRecoveryController(IResumableAgentOrchestrator orc
         await orchestrator.CancelAsync(new RunId(run.RootRunId), _caller, ct);
     }
 
-    private async Task<WorkflowCheckpoint> RequireAsync(RunId runId, CancellationToken ct) =>
-        await store.GetAsync(runId, ct) ?? throw new ArgumentException("The selected workflow no longer exists.", nameof(runId));
+    private async Task<WorkflowCheckpoint> RequireAsync(RunId runId, CancellationToken ct)
+    {
+        var run = await store.GetAsync(runId, ct) ?? throw new ArgumentException("The selected workflow no longer exists.", nameof(runId));
+        if ((await GraphRootIdsAsync(ct)).Contains(run.RootRunId))
+            throw new WorkflowConflictException("Use the Task graphs tab to inspect or control a graph invocation.");
+        return run;
+    }
+
+    private async Task<HashSet<string>> GraphRootIdsAsync(CancellationToken ct) => store is ITaskGraphStore graphs
+        ? (await graphs.ListTaskGraphsAsync(ct)).Select(graph => graph.AgentBinding?.RootRunId)
+            .OfType<string>().ToHashSet(StringComparer.Ordinal)
+        : [];
 
     private async Task<WorkflowCheckpoint> RequireHumanRequestAsync(RunId runId, string requestId,
         WorkflowHumanRequestKind kind, CancellationToken ct)

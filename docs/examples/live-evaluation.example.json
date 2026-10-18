@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "provider": null,
+  "model": null,
+  "maxTotalSpend": null,
+  "currency": "USD",
+  "pricing": null,
+  "maxInputTokensPerRequest": null,
+  "maxOutputTokensPerRequest": null,
+  "inputFramingTokenAllowance": null,
+  "pairedTrials": 20,
+  "seed": 1729
+}
