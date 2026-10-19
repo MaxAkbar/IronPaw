@@ -1,3 +1,4 @@
+using IronPaw.AgentCore;
 using IronPaw.AgentCore.Abstractions;
 using IronPaw.AgentCore.Providers;
 using IronPaw.Cli;
@@ -33,6 +34,22 @@ if (!options.TryValidate(out var validationError))
 if (options.ValidateEvaluationConfigFile is not null)
     return await EvaluationConfigurationCommands.ExecuteAsync(options, CancellationToken.None);
 
+if (options.ValidateConfigFile is not null)
+{
+    try
+    {
+        // Validate the file itself, independent of current environment defaults or provider credentials.
+        (await TaskGraphDocumentJson.ReadAsync<IronPawSettings>(options.ValidateConfigFile, CancellationToken.None)).RequireValid();
+        Console.WriteLine("Application settings valid. No application state was opened and no provider was called.");
+        return 0;
+    }
+    catch (Exception error) when (error is IOException or ArgumentException or UnauthorizedAccessException or System.Text.Json.JsonException)
+    {
+        ConsoleUi.RenderError("Invalid application settings: " + error.Message);
+        return 2;
+    }
+}
+
 if (LiveEvaluationCommands.IsEvaluationCommand(options))
 {
     using var evaluationCancellation = new CancellationTokenSource();
@@ -41,6 +58,19 @@ if (LiveEvaluationCommands.IsEvaluationCommand(options))
 }
 
 var interactiveInputAvailable = !Console.IsInputRedirected;
+IronPawSettings settings;
+var savedCommand = TaskGraphCommands.IsGraphCommand(options) || WorkflowCommands.IsWorkflowCommand(options);
+try
+{
+    // Inspection and saved recovery remain available even if current user settings are broken.
+    settings = savedCommand ? new IronPawSettings() : IronPawSettingsLoader.Load(options.ConfigFile);
+    if (!savedCommand) options = options.WithSettings(settings);
+}
+catch (Exception error) when (error is IOException or ArgumentException or UnauthorizedAccessException or System.Text.Json.JsonException)
+{
+    ConsoleUi.RenderError("Invalid application settings: " + error.Message);
+    return 2;
+}
 IAgentEventSink eventSink = options.NoEvents
     ? NullAgentEventSink.Instance
     : new AnsiConsoleEventSink();
@@ -58,7 +88,7 @@ Console.CancelKeyPress += (_, eventArgs) =>
 
 try
 {
-    using var bootstrap = AppBootstrapper.Build(options.Store, options.MessageTtlDays, llmOptionOverrides);
+    using var bootstrap = AppBootstrapper.Build(options.MessageTtlDays, llmOptionOverrides, settings: settings, legacyEnvironment: savedCommand);
     ConsoleUi.RenderBanner();
     if (TaskGraphCommands.IsGraphCommand(options))
     {
@@ -257,7 +287,7 @@ static string ResolveModel(string? configuredModel, string provider)
 
 static OpenAiClientOptions? ResolveLlmBudgetOptions(string provider, OpenAiClientOptionOverrides llmOptionOverrides)
 {
-    return LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides);
+    return LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides, readEnvironmentOverrides: false);
 }
 
 static string PromptForInteractivePrompt(string provider, string model, string sessionKey)

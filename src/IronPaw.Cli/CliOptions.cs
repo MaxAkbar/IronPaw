@@ -1,3 +1,4 @@
+using IronPaw.AgentCore;
 using IronPaw.AgentCore.Abstractions;
 using Spectre.Console;
 
@@ -10,7 +11,6 @@ internal sealed record CliOptions(
     string? Prompt,
     string? PromptFile,
     ToolProfile Profile,
-    StoreBackend Store,
     int MessageTtlDays,
     bool AutoCreateSkills,
     bool ListSkills,
@@ -62,17 +62,21 @@ internal sealed record CliOptions(
     string? ReconcileEvaluationCommandId = null,
     string? ReconcileEvaluationTaskId = null,
     string? ReconcileEvaluationToolId = null,
-    string? EvaluationGraphId = null)
+    string? EvaluationGraphId = null,
+    string? ConfigFile = null,
+    string? ValidateConfigFile = null,
+    IReadOnlyCollection<string>? ConfigurationOverrides = null)
 {
     public static CliOptions Parse(string[] args)
     {
+        if (args.Any(arg => arg == "--store" || arg.StartsWith("--store=", StringComparison.Ordinal)))
+            throw new ArgumentException("--store has been removed. IronPaw now uses CSharpDB (application.cdb). JSON data imports automatically; SQLite files are preserved but are not imported. Remove --store and its value.");
         var provider = "local";
         string? model = null;
         var session = "default";
         string? prompt = null;
         string? promptFile = null;
         var profile = ToolProfile.Coding;
-        var store = StoreBackend.Json;
         var messageTtlDays = 30;
         var autoCreateSkills = false;
         var listSkills = false;
@@ -125,10 +129,15 @@ internal sealed record CliOptions(
         string? reconcileEvaluationTaskId = null;
         string? reconcileEvaluationToolId = null;
         string? evaluationGraphId = null;
+        string? configFile = null;
+        string? validateConfigFile = null;
+        var configurationOverrides = new List<string>();
 
         for (var i = 0; i < args.Length; i++)
         {
             var arg = args[i];
+            if (arg.StartsWith("-", StringComparison.Ordinal) && arg is not "--validate-config" and not "-h" and not "--help")
+                configurationOverrides.Add(arg);
             if (arg.StartsWith("-", StringComparison.Ordinal) && arg is not "--validate-evaluation-config" and not "-h" and not "--help")
                 evaluationConfigurationOverrides.Add(arg);
             if (arg.StartsWith("-", StringComparison.Ordinal) && arg is not "--run-evaluation" and not
@@ -139,10 +148,16 @@ internal sealed record CliOptions(
                 "--execution" and not "--tool-execution" and not "-h" and not "--help")
                 evaluationRuntimeOverrides.Add(arg);
             if (arg is "--provider" or "-p" or "--model" or "-m" or "--session" or "-s" or "--profile" or
-                "--max-total-tokens" or "--max-execution-seconds" || arg.StartsWith("--llm-", StringComparison.Ordinal))
+                "--max-total-tokens" or "--max-execution-seconds" or "--config" || arg.StartsWith("--llm-", StringComparison.Ordinal))
                 graphBindingOverrides.Add(arg);
             switch (arg)
             {
+                case "--config":
+                    configFile = ReadValue(args, ref i, arg);
+                    break;
+                case "--validate-config":
+                    validateConfigFile = ReadValue(args, ref i, arg);
+                    break;
                 case "-h":
                 case "--help":
                     showHelp = true;
@@ -176,15 +191,6 @@ internal sealed record CliOptions(
                     if (!Enum.TryParse<ToolProfile>(profileValue, ignoreCase: true, out profile))
                     {
                         throw new ArgumentException($"Invalid --profile value '{profileValue}'.");
-                    }
-
-                    break;
-
-                case "--store":
-                    var storeValue = ReadValue(args, ref i, arg);
-                    if (!Enum.TryParse<StoreBackend>(storeValue, ignoreCase: true, out store))
-                    {
-                        throw new ArgumentException($"Invalid --store value '{storeValue}'. Use 'json' or 'sqlite'.");
                     }
 
                     break;
@@ -395,7 +401,6 @@ internal sealed record CliOptions(
             prompt,
             promptFile,
             profile,
-            store,
             messageTtlDays,
             autoCreateSkills,
             listSkills,
@@ -425,11 +430,27 @@ internal sealed record CliOptions(
             validateEvaluationConfigFile, evaluationConfigurationOverrides,
             runEvaluationFile, resumeEvaluationId, showEvaluationId, reconcileEvaluationId,
             evaluationOutputDirectory, evaluationRequestId, evaluationRuntimeOverrides,
-            reconcileEvaluationCommandId, reconcileEvaluationTaskId, reconcileEvaluationToolId, evaluationGraphId);
+            reconcileEvaluationCommandId, reconcileEvaluationTaskId, reconcileEvaluationToolId, evaluationGraphId,
+            configFile, validateConfigFile, configurationOverrides);
     }
 
     public bool TryValidate(out string? error)
     {
+        if (ValidateConfigFile is not null)
+        {
+            if (string.IsNullOrWhiteSpace(ValidateConfigFile) || ConfigFile is not null || ConfigurationOverrides?.Count > 0)
+            {
+                error = "--validate-config requires a nonempty settings file path and cannot be combined with other commands or overrides.";
+                return false;
+            }
+            error = null;
+            return true;
+        }
+        if (ConfigFile is not null && (string.IsNullOrWhiteSpace(ConfigFile) || ResumeRunId is not null || ListWorkflows || PauseRunId is not null || CancelRunId is not null))
+        {
+            error = "--config requires a nonempty path and applies only to new runs; saved workflows retain their settings.";
+            return false;
+        }
         if (EvaluationCommandCount > 0 || EvaluationOutputDirectory is not null || EvaluationRequestId is not null || EvaluationGraphId is not null)
             return TryValidateEvaluationRuntime(out error);
         if (ValidateEvaluationConfigFile is not null)
@@ -564,6 +585,28 @@ internal sealed record CliOptions(
         return true;
     }
 
+    internal CliOptions WithSettings(IronPawSettings settings)
+    {
+        settings = settings.RequireValid();
+        var providerExplicit = GraphBindingOverrides?.Any(flag => flag is "--provider" or "-p") == true;
+        var llm = new RuntimeLlmSettings {
+            ContextWindowTokens = LlmContextWindowTokens ?? settings.Llm.ContextWindowTokens,
+            SafetyMarginTokens = LlmSafetyMarginTokens ?? settings.Llm.SafetyMarginTokens,
+            MinimumOutputTokensPerRequest = LlmMinOutputTokensPerRequest ?? settings.Llm.MinimumOutputTokensPerRequest,
+            MaxAutoContinuationPasses = LlmMaxAutoContinuationPasses ?? settings.Llm.MaxAutoContinuationPasses };
+        (settings with { Llm = llm }).RequireValid();
+        return this with {
+            Provider = providerExplicit ? Provider : settings.Provider,
+            Model = Model ?? (providerExplicit && !Provider.Equals(settings.Provider, StringComparison.OrdinalIgnoreCase) ? null : settings.Model),
+            MaxTotalTokens = MaxTotalTokens ?? settings.MaxTotalTokens,
+            MaxExecutionSeconds = MaxExecutionSeconds ?? settings.MaxExecutionSeconds,
+            LlmContextWindowTokens = llm.ContextWindowTokens,
+            LlmSafetyMarginTokens = llm.SafetyMarginTokens,
+            LlmMinOutputTokensPerRequest = llm.MinimumOutputTokensPerRequest,
+            LlmMaxAutoContinuationPasses = llm.MaxAutoContinuationPasses
+        };
+    }
+
     private int EvaluationCommandCount => (RunEvaluationFile is not null ? 1 : 0) +
         (ResumeEvaluationId is not null ? 1 : 0) + (ShowEvaluationId is not null ? 1 : 0) +
         (ReconcileEvaluationId is not null ? 1 : 0) + (ReconcileEvaluationCommandId is not null ? 1 : 0) +
@@ -575,7 +618,7 @@ internal sealed record CliOptions(
             ValidateEvaluationConfigFile is not null || GraphCommandCount > 0 ||
             WorkflowCommands.IsWorkflowCommand(this) || Prompt is not null || PromptFile is not null ||
             Provider != "local" || Model is not null || Session != "default" || Profile != ToolProfile.Coding ||
-            Store != StoreBackend.Json || MessageTtlDays != 30 || ListSkills || AutoCreateSkills || NoEvents ||
+            MessageTtlDays != 30 || ListSkills || AutoCreateSkills || NoEvents ||
             MaxTotalTokens is not null || MaxExecutionSeconds is not null ||
             LlmContextWindowTokens is not null || LlmSafetyMarginTokens is not null ||
             LlmMinOutputTokensPerRequest is not null || LlmMaxAutoContinuationPasses is not null ||
@@ -641,7 +684,7 @@ internal sealed record CliOptions(
         if (EvaluationConfigurationOverrides?.Count > 0 || GraphCommandCount > 0 ||
             Prompt is not null || PromptFile is not null || ListSkills || AutoCreateSkills ||
             Provider != "local" || Model is not null || Session != "default" || Profile != ToolProfile.Coding ||
-            Store != StoreBackend.Json || MessageTtlDays != 30 || NoEvents ||
+            MessageTtlDays != 30 || NoEvents ||
             GraphBindingOverrides?.Count > 0 || MaxTotalTokens is not null || MaxExecutionSeconds is not null ||
             LlmContextWindowTokens is not null || LlmSafetyMarginTokens is not null ||
             LlmMinOutputTokensPerRequest is not null || LlmMaxAutoContinuationPasses is not null ||
@@ -761,6 +804,8 @@ internal sealed record CliOptions(
             .AddColumn("[bold]Description[/]");
 
         table.AddRow("-h, --help", "Show help");
+        table.AddRow("--config <path>", "Use a reviewed settings file for a new run (otherwise IRONPAW_CONFIG or shared user settings)");
+        table.AddRow("--validate-config <path>", "Validate application settings without opening application state or contacting a provider");
         table.AddRow("-p, --provider <name>", "Provider: local | openai | ollama | lmstudio | anthropic (default: local)");
         table.AddRow("-m, --model <id>", "Model id (provider-specific default if omitted)");
         table.AddRow("-s, --session <key>", "Session key (default: default)");
@@ -803,8 +848,7 @@ internal sealed record CliOptions(
         table.AddRow("--reconcile-tool <execution-id>", "With --resume, record an externally verified tool outcome before resuming");
         table.AddRow("--reconcile-result <path>", "JSON ToolResult file containing the verified outcome (never executes the tool)");
         table.AddRow("--reconcile-note <text>", "Evidence explaining how the uncertain tool outcome was established");
-        table.AddRow("--store <backend>", "Storage backend: json | sqlite (default: json)");
-        table.AddRow("--message-ttl-days <days>", "SQLite message retention window in days (default: 30)");
+        table.AddRow("--message-ttl-days <days>", "CSharpDB message retention window in days (default: 30)");
         table.AddRow("--llm-context-window-tokens <n>", "Override context window tokens for OpenAI-compatible providers");
         table.AddRow("--llm-safety-margin-tokens <n>", "Override reserved safety margin tokens for OpenAI-compatible providers");
         table.AddRow("--llm-min-output-tokens-per-request <n>", "Override minimum output tokens budgeted per provider request");

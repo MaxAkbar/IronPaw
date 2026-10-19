@@ -40,9 +40,9 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
         _sessionStore = sessionStore;
         _transcriptStore = transcriptStore;
         _toolRegistry = toolRegistry;
-        _toolExecutor = toolExecutor;
+        _toolExecutor = toolExecutor is ObservedToolExecutor ? toolExecutor : new ObservedToolExecutor(toolExecutor);
         _schemaNormalizer = schemaNormalizer;
-        _llmClient = llmClient;
+        _llmClient = llmClient is ObservedLlmClient ? llmClient : new ObservedLlmClient(llmClient);
         _transcriptSanitizer = transcriptSanitizer;
         _toolResultTruncator = toolResultTruncator;
         _promptBuilder = promptBuilder;
@@ -62,7 +62,7 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
         {
             throw new ArgumentOutOfRangeException(nameof(request), "MaxRounds must be at least one.");
         }
-        var effectiveSink = sink ?? NullAgentEventSink.Instance;
+        var suppliedSink = sink ?? NullAgentEventSink.Instance;
         if (_workflowStore is not null && checkpoint is null && request.RequestedRunId is { } requestedId)
         {
             var existing = await _workflowStore.GetAsync(requestedId, ct);
@@ -72,7 +72,7 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
                     existing.Request.SessionKey != request.SessionKey || existing.Request.UserInput != request.UserInput ||
                     existing.Request.AgentId != request.AgentId)
                     throw new WorkflowConflictException("The child invocation identity does not match its saved request.");
-                return await ResumeAsync(requestedId, request.Caller, effectiveSink, ct);
+                return await ResumeAsync(requestedId, request.Caller, suppliedSink, ct);
             }
         }
         if (request.MaxOutputTokens < 1)
@@ -89,6 +89,7 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
                 Budget: request.Budget ?? new(), Usage: new());
             await _workflowStore.CreateAsync(checkpoint, ct);
         }
+        var effectiveSink = new ResilientAgentEventSink(suppliedSink);
         var progress = new RunProgress(request, checkpoint,
             checkpoint is null ? null : new WorkflowExecution(_workflowStore!, checkpoint));
         using var budgetCt = new CancellationTokenSource();
@@ -98,9 +99,13 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
         var active = new ActiveWorkflow(checkpoint?.RootRunId ?? progress.RunId.Value, executionCt);
         if (progress.Execution is not null && !_activeWorkflows.TryAdd(progress.RunId.Value, active))
             throw new WorkflowConflictException("This workflow is already executing in this host.");
+        using var observation = ExecutionDiagnostics.Observe("run", ("ironpaw.run.id", progress.RunId.Value),
+            ("ironpaw.workflow.root_id", checkpoint?.RootRunId ?? request.RootRunId?.Value ?? progress.RunId.Value),
+            ("ironpaw.parent_run.id", request.ParentRunId?.Value), ("ironpaw.agent.id", request.AgentId));
+        var observedResult = false;
         try
         {
-            return await _laneScheduler.EnqueueAsync(request.SessionKey, async laneCt =>
+            var completedRun = await _laneScheduler.EnqueueAsync(request.SessionKey, async laneCt =>
             {
                 progress.EnteredLane = true;
                 AgentRunResult result;
@@ -184,6 +189,9 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
                 }
                 return result;
             }, executionCt.Token);
+            observedResult = true;
+            observation.Complete(ExecutionDiagnostics.Outcome(completedRun.Status));
+            return effectiveSink.Annotate(completedRun);
         }
         catch (Exception error) when (!progress.EnteredLane)
         {
@@ -192,8 +200,13 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
                 using var cleanupCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                 var root = await progress.Execution.RootAsync(cleanupCt.Token);
                 if (root.Control != WorkflowControl.None)
-                    return await SettleSuspensionAsync(progress, WorkflowStatus.Paused,
+                {
+                    var result = await SettleSuspensionAsync(progress, WorkflowStatus.Paused,
                         root.Control == WorkflowControl.Cancel ? "Workflow cancelled." : "Workflow paused.", effectiveSink);
+                    observedResult = true;
+                    observation.Complete(ExecutionDiagnostics.Outcome(result.Status));
+                    return effectiveSink.Annotate(result);
+                }
                 await progress.Execution.InterruptAsync(error, progress.Transcript, cleanupCt.Token);
             }
             await RecordFailureAsync(progress, effectiveSink, error, ct.IsCancellationRequested);
@@ -201,6 +214,7 @@ public sealed partial class AgentOrchestrator : IResumableAgentOrchestrator
         }
         finally
         {
+            if (!observedResult) observation.Complete(executionCt.IsCancellationRequested ? "cancelled" : "failed");
             stopBudgetTimer.Cancel();
             await budgetTimer;
             if (progress.Execution is not null) _activeWorkflows.TryRemove(progress.RunId.Value, out _);

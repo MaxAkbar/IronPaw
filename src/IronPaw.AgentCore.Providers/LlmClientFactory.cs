@@ -14,9 +14,12 @@ public static class LlmClientFactory
     private const string OllamaProvider = "ollama";
     private const string LmStudioProvider = "lmstudio";
 
-    public static ILlmClient Build(OpenAiClientOptionOverrides? runtimeOverrides = null)
+    public static ILlmClient Build(OpenAiClientOptionOverrides? runtimeOverrides = null) =>
+        Build(runtimeOverrides, readEnvironmentOverrides: true);
+
+    public static ILlmClient Build(OpenAiClientOptionOverrides? runtimeOverrides, bool readEnvironmentOverrides)
     {
-        var environmentOverrides = LoadOpenAiClientOptionOverridesFromEnvironment();
+        var environmentOverrides = readEnvironmentOverrides ? LoadOpenAiClientOptionOverridesFromEnvironment() : new OpenAiClientOptionOverrides();
         var effectiveOverrides = MergeOverrides(environmentOverrides, runtimeOverrides);
 
         var sharedHttpClient = new HttpClient
@@ -65,14 +68,18 @@ public static class LlmClientFactory
 
     public static OpenAiClientOptions? ResolveOpenAiCompatibleOptions(
         string provider,
-        OpenAiClientOptionOverrides? runtimeOverrides = null)
+        OpenAiClientOptionOverrides? runtimeOverrides = null) =>
+        ResolveOpenAiCompatibleOptions(provider, runtimeOverrides, readEnvironmentOverrides: true);
+
+    public static OpenAiClientOptions? ResolveOpenAiCompatibleOptions(
+        string provider, OpenAiClientOptionOverrides? runtimeOverrides, bool readEnvironmentOverrides)
     {
         if (string.IsNullOrWhiteSpace(provider))
         {
             return null;
         }
 
-        var environmentOverrides = LoadOpenAiClientOptionOverridesFromEnvironment();
+        var environmentOverrides = readEnvironmentOverrides ? LoadOpenAiClientOptionOverridesFromEnvironment() : new OpenAiClientOptionOverrides();
         var effectiveOverrides = MergeOverrides(environmentOverrides, runtimeOverrides);
         return ResolveOpenAiCompatibleOptionsCore(provider, effectiveOverrides);
     }

@@ -33,7 +33,6 @@ public sealed class LiveEvaluationOptionsTests
     [InlineData("--provider", "local")]
     [InlineData("--model", "other")]
     [InlineData("--session", "default")]
-    [InlineData("--store", "json")]
     [InlineData("--profile", "Coding")]
     [InlineData("--message-ttl-days", "30")]
     [InlineData("--llm-context-window-tokens", "2048")]

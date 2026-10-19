@@ -1,21 +1,20 @@
 using IronPaw.AgentCore.Abstractions;
-using IronPaw.AgentCore.Persistence.Sqlite;
-using Microsoft.Data.Sqlite;
+using IronPaw.AgentCore.Persistence.CSharpDb;
 
-namespace IronPaw.AgentCore.Persistence.Sqlite.Tests;
+namespace IronPaw.AgentCore.Persistence.CSharpDb.Tests;
 
-public sealed class SqlitePersistenceTests
+public sealed class ApplicationStoreParityTests
 {
     // --- Session Store ---
 
     [Fact]
-    public async Task SqliteSessionStore_UpsertAndGet_RoundTripsData()
+    public async Task CSharpDbApplicationStore_UpsertAndGet_RoundTripsData()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteSessionStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
             var key = new SessionKey("session-a");
 
             await store.UpsertAsync(
@@ -40,13 +39,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteSessionStore_UpsertMutatesExisting()
+    public async Task CSharpDbApplicationStore_UpsertMutatesExisting()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteSessionStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
             var key = new SessionKey("session-mutate");
 
             await store.UpsertAsync(
@@ -70,13 +69,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteSessionStore_LoadAll_ReturnsAllSessions()
+    public async Task CSharpDbApplicationStore_LoadAll_ReturnsAllSessions()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteSessionStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
 
             await store.UpsertAsync(new SessionKey("a"), _ => new SessionEntry("a", DateTimeOffset.UtcNow), CancellationToken.None);
             await store.UpsertAsync(new SessionKey("b"), _ => new SessionEntry("b", DateTimeOffset.UtcNow), CancellationToken.None);
@@ -93,13 +92,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteSessionStore_GetNonExistent_ReturnsNull()
+    public async Task CSharpDbApplicationStore_GetNonExistent_ReturnsNull()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteSessionStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
 
             var entry = await store.GetAsync(new SessionKey("nope"), CancellationToken.None);
             Assert.Null(entry);
@@ -113,13 +112,13 @@ public sealed class SqlitePersistenceTests
     // --- Transcript Store ---
 
     [Fact]
-    public async Task SqliteTranscriptStore_AppendLoadAndReplace_Works()
+    public async Task CSharpDbApplicationStore_AppendLoadAndReplace_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteTranscriptStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
             var key = new SessionKey("transcript-a");
 
             await store.AppendAsync(key, [
@@ -145,13 +144,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteTranscriptStore_AppendPreservesOrder()
+    public async Task CSharpDbApplicationStore_AppendPreservesOrder()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteTranscriptStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
             var key = new SessionKey("order-test");
 
             await store.AppendAsync(key, [new ChatMessage(ChatRole.User, "first")], CancellationToken.None);
@@ -171,13 +170,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteTranscriptStore_PreservesToolCallFields()
+    public async Task CSharpDbApplicationStore_PreservesToolCallFields()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteTranscriptStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
             var key = new SessionKey("tool-fields");
 
             await store.AppendAsync(key, [
@@ -199,13 +198,13 @@ public sealed class SqlitePersistenceTests
     // --- Memory Store ---
 
     [Fact]
-    public async Task SqliteMemoryStore_AddAndLoadGlobal_Works()
+    public async Task CSharpDbApplicationStore_AddAndLoadGlobal_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteMemoryStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
 
             var entry = new MemoryEntry(
                 Id: Guid.NewGuid().ToString("n"),
@@ -227,13 +226,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteMemoryStore_AddAndLoadSession_Works()
+    public async Task CSharpDbApplicationStore_AddAndLoadSession_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteMemoryStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
             var sessionKey = new SessionKey("session-mem");
 
             var entry = new MemoryEntry(
@@ -261,13 +260,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteMemoryStore_Remove_Works()
+    public async Task CSharpDbApplicationStore_Remove_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteMemoryStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
             var id = Guid.NewGuid().ToString("n");
 
             await store.AddAsync(new MemoryEntry(id, "to forget", MemoryScope.Global, DateTimeOffset.UtcNow), CancellationToken.None);
@@ -288,13 +287,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteMemoryStore_EnforcesCapacityLimit()
+    public async Task CSharpDbApplicationStore_EnforcesCapacityLimit()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath, MaxGlobalMemories: 3);
-            var store = new SqliteMemoryStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath, MaxGlobalMemories: 3);
+            var store = new CSharpDbApplicationStore(options);
 
             for (var i = 0; i < 5; i++)
             {
@@ -321,13 +320,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteMemoryStore_Search_FindsMatches()
+    public async Task CSharpDbApplicationStore_Search_FindsMatches()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteMemoryStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = new CSharpDbApplicationStore(options);
 
             await store.AddAsync(new MemoryEntry("1", "The quick brown fox", MemoryScope.Global, DateTimeOffset.UtcNow), CancellationToken.None);
             await store.AddAsync(new MemoryEntry("2", "Lazy dog sleeps", MemoryScope.Global, DateTimeOffset.UtcNow), CancellationToken.None);
@@ -345,13 +344,13 @@ public sealed class SqlitePersistenceTests
     // --- Run History Store ---
 
     [Fact]
-    public async Task SqliteRunHistoryStore_RecordAndLoad_Works()
+    public async Task ApplicationHistory_RecordAndLoad_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteRunHistoryStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = (IRunHistoryStore)new CSharpDbApplicationStore(options);
 
             var summary = new RunSummary(
                 RunId: "run-1",
@@ -382,13 +381,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteRunHistoryStore_GetById_Works()
+    public async Task ApplicationHistory_GetById_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteRunHistoryStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = (IRunHistoryStore)new CSharpDbApplicationStore(options);
 
             await store.RecordAsync(new RunSummary("run-a", "s1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "p1", "r1", 1, 100, []), CancellationToken.None);
             await store.RecordAsync(new RunSummary("run-b", "s1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "p2", "r2", 2, 200, []), CancellationToken.None);
@@ -407,13 +406,13 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteRunHistoryStore_LoadBySession_Filters()
+    public async Task ApplicationHistory_LoadBySession_Filters()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
-            var store = new SqliteRunHistoryStore(options);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
+            var store = (IRunHistoryStore)new CSharpDbApplicationStore(options);
 
             await store.RecordAsync(new RunSummary("r1", "s1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "p1", "r1", 1, 100, []), CancellationToken.None);
             await store.RecordAsync(new RunSummary("r2", "s2", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "p2", "r2", 1, 100, []), CancellationToken.None);
@@ -431,40 +430,22 @@ public sealed class SqlitePersistenceTests
         }
     }
 
-    // --- Schema Initializer ---
-
-    [Fact]
-    public void SqliteSchemaInitializer_CanRunTwice_WithoutError()
-    {
-        var (dbPath, cleanup) = CreateTempDb();
-        try
-        {
-            // Initialize is called during CreateTempDb, call again to verify idempotency
-            var connectionString = SqliteSchemaInitializer.BuildConnectionString(dbPath);
-            SqliteSchemaInitializer.Initialize(connectionString);
-        }
-        finally
-        {
-            cleanup();
-        }
-    }
-
     // --- Agent Message Bus ---
 
     [Fact]
-    public async Task SqliteAgentMessageBus_SendAndRead_PersistsAcrossInstances()
+    public async Task ApplicationMessages_SendAndRead_PersistsAcrossInstances()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
             var registry = new TestAgentRegistry(
             [
                 CreateAgent("codegen", ["reviewer", "codegen"]),
                 CreateAgent("reviewer", ["codegen", "reviewer"])
             ]);
 
-            var senderBus = new SqliteAgentMessageBus(options, registry);
+            var senderBus = new CSharpDbAgentMessageBus(new CSharpDbApplicationStore(options), registry);
             var session = new SessionKey("s-msg");
             var runId = new RunId("r-msg");
 
@@ -479,7 +460,7 @@ public sealed class SqlitePersistenceTests
                 CancellationToken.None);
 
             // Recreate bus instance to verify persistence-backed durability.
-            var receiverBus = new SqliteAgentMessageBus(options, registry);
+            var receiverBus = new CSharpDbAgentMessageBus(new CSharpDbApplicationStore(options), registry);
             var inbox = await receiverBus.ReadAsync(
                 new AgentMessageReadRequest(
                     SessionKey: session,
@@ -501,17 +482,17 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteAgentMessageBus_UnauthorizedSender_Throws()
+    public async Task ApplicationMessages_UnauthorizedSender_Throws()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
             var registry = new TestAgentRegistry(
             [
                 CreateAgent("reviewer", ["codegen"])
             ]);
-            var bus = new SqliteAgentMessageBus(options, registry);
+            var bus = new CSharpDbAgentMessageBus(new CSharpDbApplicationStore(options), registry);
 
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
                 bus.SendAsync(
@@ -530,19 +511,19 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteAgentMessageBus_ReadWithoutMarkAsRead_DoesNotConsume()
+    public async Task ApplicationMessages_ReadWithoutMarkAsRead_DoesNotConsume()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
             var registry = new TestAgentRegistry(
             [
                 CreateAgent("codegen", ["reviewer", "codegen"]),
                 CreateAgent("reviewer", ["codegen", "reviewer"])
             ]);
 
-            var bus = new SqliteAgentMessageBus(options, registry);
+            var bus = new CSharpDbAgentMessageBus(new CSharpDbApplicationStore(options), registry);
             var session = new SessionKey("s-msg");
             var runId = new RunId("r-msg");
 
@@ -580,12 +561,12 @@ public sealed class SqlitePersistenceTests
     }
 
     [Fact]
-    public async Task SqliteAgentMessageBus_ReadWithSenderAndCorrelationFilters_Works()
+    public async Task ApplicationMessages_ReadWithSenderAndCorrelationFilters_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
         try
         {
-            var options = new SqliteStoreOptions(dbPath);
+            var options = new CSharpDbApplicationStoreOptions(dbPath);
             var registry = new TestAgentRegistry(
             [
                 CreateAgent("codegen", ["reviewer", "codegen"]),
@@ -593,7 +574,7 @@ public sealed class SqlitePersistenceTests
                 CreateAgent("analyst", ["reviewer", "analyst"])
             ]);
 
-            var bus = new SqliteAgentMessageBus(options, registry);
+            var bus = new CSharpDbAgentMessageBus(new CSharpDbApplicationStore(options), registry);
             var session = new SessionKey("s-msg");
             var runId = new RunId("r-msg");
 
@@ -646,84 +627,15 @@ public sealed class SqlitePersistenceTests
         }
     }
 
-    [Fact]
-    public async Task SqliteAgentMessageBus_TtlCleanup_RemovesExpiredMessagesOnRead()
-    {
-        var (dbPath, cleanup) = CreateTempDb();
-        try
-        {
-            var options = new SqliteStoreOptions(dbPath, MessageTtlDays: 1);
-            var registry = new TestAgentRegistry(
-            [
-                CreateAgent("codegen", ["reviewer", "codegen"]),
-                CreateAgent("reviewer", ["codegen", "reviewer"])
-            ]);
-
-            var bus = new SqliteAgentMessageBus(options, registry);
-            var session = new SessionKey("s-msg");
-            var runId = new RunId("r-msg");
-            var sent = await bus.SendAsync(
-                new AgentMessageSendRequest(
-                    SessionKey: session,
-                    ScopeRunId: runId,
-                    SenderAgentId: "codegen",
-                    RecipientAgentId: "reviewer",
-                    Content: "stale message"),
-                CancellationToken.None);
-
-            // Age the record beyond TTL.
-            var connectionString = SqliteSchemaInitializer.BuildConnectionString(dbPath);
-            await using (var connection = new SqliteConnection(connectionString))
-            {
-                await connection.OpenAsync(CancellationToken.None);
-                await using var command = connection.CreateCommand();
-                command.CommandText = """
-                    UPDATE agent_messages
-                    SET sent_at = @oldSentAt
-                    WHERE message_id = @messageId
-                    """;
-                command.Parameters.AddWithValue("@oldSentAt", DateTimeOffset.UtcNow.AddDays(-5).ToString("O"));
-                command.Parameters.AddWithValue("@messageId", sent.MessageId);
-                await command.ExecuteNonQueryAsync(CancellationToken.None);
-            }
-
-            var inbox = await bus.ReadAsync(
-                new AgentMessageReadRequest(
-                    SessionKey: session,
-                    ScopeRunId: runId,
-                    RecipientAgentId: "reviewer"),
-                CancellationToken.None);
-            Assert.Empty(inbox);
-
-            // Confirm cleanup removed the expired row.
-            await using (var connection = new SqliteConnection(connectionString))
-            {
-                await connection.OpenAsync(CancellationToken.None);
-                await using var countCommand = connection.CreateCommand();
-                countCommand.CommandText = "SELECT COUNT(*) FROM agent_messages WHERE message_id = @messageId";
-                countCommand.Parameters.AddWithValue("@messageId", sent.MessageId);
-                var remaining = (long)(await countCommand.ExecuteScalarAsync(CancellationToken.None))!;
-                Assert.Equal(0, remaining);
-            }
-        }
-        finally
-        {
-            cleanup();
-        }
-    }
-
     // --- Helpers ---
 
     private static (string dbPath, Action cleanup) CreateTempDb()
     {
         var dir = Path.Combine(Path.GetTempPath(), "IronPawTests", Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(dir);
-        var dbPath = Path.Combine(dir, "test.db");
-        var connectionString = SqliteSchemaInitializer.BuildConnectionString(dbPath);
-        SqliteSchemaInitializer.Initialize(connectionString);
+        var dbPath = Path.Combine(dir, "application.cdb");
         return (dbPath, () =>
         {
-            SqliteConnection.ClearAllPools();
             Directory.Delete(dir, recursive: true);
         });
     }

@@ -11,10 +11,11 @@ IronPaw stores two kinds of memories:
 | **Global** | Persists forever across all sessions | Every session |
 | **Session** | Scoped to one session | Only that session |
 
-Memories are injected into the system prompt at the start of each run, so the agent sees them as context. They are stored as JSON files on disk:
-
-- Global: `%LOCALAPPDATA%\IronPaw\state\memories.json`
-- Session: `%LOCALAPPDATA%\IronPaw\state\sessions\<session-id>.memories.json`
+The CLI injects memories into the system prompt at the start of each run. Global and session
+memories are stored in `%LOCALAPPDATA%\IronPaw\state\application.cdb`, shared with Desktop.
+Desktop retains its existing tool catalog and does not add memory tools or prompt injection.
+Legacy JSON imports once without truncation or eviction; limits apply when adding new memories.
+See [application storage](../application-storage.md).
 
 ### Limits
 
@@ -109,7 +110,7 @@ The memory guidance section also teaches the agent when to use memory tools — 
 
 ## Task review
 
-Every completed run is recorded in `%LOCALAPPDATA%\IronPaw\state\run-history.jsonl`. Each entry includes:
+Run outcomes are recorded in `%LOCALAPPDATA%\IronPaw\state\application.cdb`, idempotently by run ID. Entries preserve outcome status and error details, and include:
 - Run ID
 - Session ID
 - Timestamps (started, completed)

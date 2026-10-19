@@ -23,7 +23,7 @@ Add these project references (or NuGet packages, if published):
   <ProjectReference Include="..\IronPaw.AgentCore\IronPaw.AgentCore.csproj" />
   <ProjectReference Include="..\IronPaw.AgentCore.Abstractions\IronPaw.AgentCore.Abstractions.csproj" />
   <ProjectReference Include="..\IronPaw.AgentCore.Tools\IronPaw.AgentCore.Tools.csproj" />
-  <ProjectReference Include="..\IronPaw.AgentCore.Persistence\IronPaw.AgentCore.Persistence.csproj" />
+  <ProjectReference Include="..\IronPaw.AgentCore.Persistence.CSharpDb\IronPaw.AgentCore.Persistence.CSharpDb.csproj" />
   <ProjectReference Include="..\IronPaw.AgentCore.Providers\IronPaw.AgentCore.Providers.csproj" />
 </ItemGroup>
 ```
@@ -35,7 +35,7 @@ The easiest approach uses `LlmClientFactory.Build()`, which wires all providers 
 ```csharp
 using IronPaw.AgentCore;
 using IronPaw.AgentCore.Abstractions;
-using IronPaw.AgentCore.Persistence;
+using IronPaw.AgentCore.Persistence.CSharpDb;
 using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
 
@@ -43,15 +43,13 @@ using IronPaw.AgentCore.Tools;
 var stateDir = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
     "MyApp", "state");
-var sessionsDir = Path.Combine(stateDir, "sessions");
 Directory.CreateDirectory(stateDir);
-Directory.CreateDirectory(sessionsDir);
 
-// Persistence
-var sessionStore = new FileSessionStore(new FileSessionStoreOptions(
-    StoreFilePath: Path.Combine(stateDir, "session-store.json"),
-    CacheTtl: TimeSpan.FromSeconds(5)));
-var transcriptStore = new JsonTranscriptStore(sessionsDir);
+// One lazy shared store; each operation opens and closes the database under a file lock.
+var applicationStore = new CSharpDbApplicationStore(new CSharpDbApplicationStoreOptions(
+    DatabasePath: Path.Combine(stateDir, "application.cdb"), LegacyJsonStateRoot: stateDir));
+ISessionStore sessionStore = applicationStore;
+ITranscriptStore transcriptStore = applicationStore;
 
 // Tools
 var tools = BuiltInToolFactory.CreateDefault(
@@ -135,14 +133,8 @@ var result = await orchestrator.RunAsync(request, new MyEventSink(), ct);
 ## Adding memory and run history
 
 ```csharp
-// Memory store
-var memoryStore = new FileMemoryStore(new FileMemoryStoreOptions(
-    GlobalMemoryPath: Path.Combine(stateDir, "memories.json"),
-    SessionMemoriesDirectory: sessionsDir));
-
-// Run history store
-var runHistoryStore = new JsonRunHistoryStore(
-    Path.Combine(stateDir, "run-history.jsonl"));
+IMemoryStore memoryStore = applicationStore;
+IRunHistoryStore runHistoryStore = applicationStore;
 
 // Include memory/review tools
 var tools = BuiltInToolFactory.CreateDefault(
@@ -268,3 +260,7 @@ The key integration points are:
 | `AgentRunResult` | Read the final message, metadata, and transcript |
 | Storage paths | Choose where to persist sessions, transcripts, and memory |
 | API keys | Provide keys via environment variables or config |
+
+The JSON adapter classes remain available in `IronPaw.AgentCore.Persistence` for existing library
+consumers and import tooling. They are no longer the default app stores. See
+[application storage and migration](../application-storage.md) before migrating an existing state root.

@@ -20,6 +20,15 @@ public sealed class TaskCommandVerificationIntegrationTests
     {
         await using var scope = await Scope.OpenAsync();
         var graph = Graph();
+        var verificationSpans = new ConcurrentQueue<Activity>();
+        using var listener = new ActivityListener {
+            ShouldListenTo = source => source.Name == ExecutionDiagnostics.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStopped = span => {
+                if (span.OperationName == "ironpaw.verification" && Equals(span.GetTagItem("ironpaw.graph.id"), graph.GraphId)) verificationSpans.Enqueue(span);
+            }
+        };
+        ActivitySource.AddActivityListener(listener);
         var client = new WriterClient();
         var worker = new Worker((job, _) =>
         {
@@ -40,6 +49,10 @@ public sealed class TaskCommandVerificationIntegrationTests
         Assert.Equal(TaskVerificationIdentity.ProfileFingerprint(completed.AgentBinding!.VerificationProfiles[0]), receipt.ProfileFingerprint);
         Assert.Equal(2, client.Calls);
         Assert.Single(worker.Jobs);
+        var verificationSpan = Assert.Single(verificationSpans);
+        Assert.Equal(receipt.InvocationId, verificationSpan.GetTagItem("ironpaw.verification.invocation_id"));
+        Assert.Equal(receipt.Revision, verificationSpan.GetTagItem("ironpaw.revision"));
+        Assert.Equal("completed", verificationSpan.GetTagItem("ironpaw.outcome"));
         await scope.ReopenAsync();
 
         var replayClient = new WriterClient();
@@ -48,6 +61,7 @@ public sealed class TaskCommandVerificationIntegrationTests
         Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(replay).Status);
         Assert.Equal(0, replayClient.Calls);
         Assert.Empty(replayWorker.Jobs);
+        Assert.Single(verificationSpans);
         Assert.Equal(receipt, Assert.Single(replay.Tasks[0].Verifications));
     }
 

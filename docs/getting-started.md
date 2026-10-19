@@ -58,11 +58,13 @@ Transcript + session persisted to disk
 Result rendered to terminal
 ```
 
-All state is saved under `%LOCALAPPDATA%\IronPaw\state\`:
-- `session-store.json` — session metadata (tokens, model, rounds)
-- `sessions/<session-id>.jsonl` — full conversation transcript
-- `memories.json` — persistent memory entries
-- `run-history.jsonl` — completed run summaries
+Application data is saved under `%LOCALAPPDATA%\IronPaw\state\application.cdb`: session metadata,
+ordered transcripts, global/session memories, run summaries and agent messages. Workflow journals
+remain separate under `state/workflows/<workspace-id>/workflows.cdb`.
+
+Legacy JSON imports once on first application access, preserving the originals. Close older
+IronPaw instances before migrating. SQLite data is preserved but not imported. See
+[storage and migration](application-storage.md).
 
 ## Running with a live LLM
 

@@ -48,6 +48,7 @@ public static class ToolPolicyEvaluator
         var allow = ToLookup(policy.AllowList);
         var deny = ToLookup(policy.DenyList);
         var explicitGroups = ToLookup(policy.AllowedGroups);
+        var mcpTools = ToLookup(policy.AllowedMcpTools);
         var filtered = new List<ITool>();
 
         foreach (var tool in tools)
@@ -67,7 +68,10 @@ public static class ToolPolicyEvaluator
                 continue;
             }
 
-            if (!profileGroups.Contains(tool.Descriptor.Group))
+            var isMcp = tool.Descriptor.Group.Equals("group:mcp", StringComparison.OrdinalIgnoreCase);
+            if (isMcp
+                ? !policy.SenderIsOwner || policy.Profile is not (ToolProfile.Coding or ToolProfile.Full) || !mcpTools.Contains(tool.Descriptor.Name)
+                : !profileGroups.Contains(tool.Descriptor.Group))
             {
                 continue;
             }

@@ -15,7 +15,9 @@ public partial class App : Application
         try { new MainWindow().Show(); }
         catch (Exception error)
         {
-            var guidance = error is IOException
+            var guidance = error is ArgumentException or System.Text.Json.JsonException or FileNotFoundException
+                ? "Check the shared IronPaw settings file and IRONPAW_CONFIG, then try again.\n\n"
+                : error is IOException
                 ? "Close any other IronPaw CLI or Desktop host using this workspace, then try again.\n\n"
                 : "The workspace's saved workflow state could not be opened.\n\n";
             MessageBox.Show(guidance + error.Message, "IronPaw could not start", MessageBoxButton.OK, MessageBoxImage.Error);

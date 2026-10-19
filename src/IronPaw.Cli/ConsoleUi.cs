@@ -308,7 +308,7 @@ internal static class ConsoleUi
             .AddColumn("[bold]Last Updated[/]")
             .AddColumn("[bold]Total Tokens[/]")
             .AddColumn("[bold]Compactions[/]")
-            .AddColumn("[bold]Transcript Path[/]");
+            .AddColumn("[bold]Transcript Storage[/]");
 
         foreach (var (key, entry) in sessions.OrderByDescending(s => s.Value.UpdatedAt))
         {
@@ -317,7 +317,7 @@ internal static class ConsoleUi
                 $"[grey70]{Markup.Escape(entry.UpdatedAt.ToLocalTime().ToString("g"))}[/]",
                 $"[white]{entry.TotalTokens}[/]",
                 $"[white]{entry.CompactionCount}[/]",
-                $"[grey70]{Markup.Escape(entry.TranscriptPath ?? "-")}[/]");
+                "[grey70]application.cdb[/]");
         }
 
         AnsiConsole.Write(table);
@@ -343,7 +343,7 @@ internal static class ConsoleUi
         infoTable.AddRow("Output Tokens", $"[white]{session.OutputTokens}[/]");
         infoTable.AddRow("Total Tokens", $"[white]{session.TotalTokens}[/]");
         infoTable.AddRow("Compactions", $"[white]{session.CompactionCount}[/]");
-        infoTable.AddRow("Transcript Path", $"[grey70]{Markup.Escape(session.TranscriptPath ?? "-")}[/]");
+        infoTable.AddRow("Transcript Storage", "[grey70]application.cdb[/]");
 
         AnsiConsole.Write(infoTable);
 

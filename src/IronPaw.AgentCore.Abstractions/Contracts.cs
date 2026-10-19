@@ -83,6 +83,8 @@ public sealed record AgentEvent(
     AgentEventSeverity Severity = AgentEventSeverity.Info,
     string? AgentId = null);
 
+/// <summary>Transient observation of execution. Checkpoints and operation receipts are the durable authority.</summary>
+/// <remarks>The orchestrator contains callback exceptions. Request cancellation or workflow control to stop work.</remarks>
 public interface IAgentEventSink
 {
     ValueTask PublishAsync(AgentEvent evt, CancellationToken ct);
@@ -115,7 +117,11 @@ public sealed record ToolSelectionPolicy(
     IReadOnlyCollection<string>? DenyList = null,
     IReadOnlyCollection<string>? AllowedGroups = null,
     int SubagentDepth = 0,
-    ToolSelectionPolicy? InheritedPolicy = null);
+    ToolSelectionPolicy? InheritedPolicy = null)
+{
+    // Exact reviewed connector identities. Broad profiles never implicitly grant MCP access.
+    public IReadOnlyCollection<string>? AllowedMcpTools { get; init; }
+}
 
 public sealed record ToolDescriptor(
     string Name,
@@ -496,12 +502,6 @@ public interface IRunHistoryStore
     Task<IReadOnlyList<RunSummary>> LoadBySessionAsync(SessionKey sessionKey, CancellationToken ct);
 
     Task<RunSummary?> GetAsync(string runId, CancellationToken ct);
-}
-
-public enum StoreBackend
-{
-    Json,
-    Sqlite
 }
 
 public sealed record AgentDefinition(

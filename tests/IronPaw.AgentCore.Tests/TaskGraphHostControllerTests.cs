@@ -33,6 +33,8 @@ public sealed class TaskGraphHostControllerTests
         Assert.Equal(1, detail.Usage.ToolCalls);
         Assert.Equal(20, detail.Budget.ChargedTokens);
         Assert.Equal(2, detail.Invocations.Count);
+        Assert.NotEmpty(detail.InvocationJournal);
+        Assert.All(detail.InvocationJournal, entry => Assert.Contains(detail.Invocations, run => run.RunId == entry.RunId));
         Assert.Single(detail.Journal, entry => entry.EventType == "task_acceptance");
         Assert.Single(await host.ListAsync(Owner, Ct));
         Assert.Null(await host.GetRequiredProviderAsync(saved.Graph.GraphId, Owner, Ct));

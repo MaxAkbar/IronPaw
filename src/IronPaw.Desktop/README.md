@@ -34,6 +34,12 @@ dotnet run --project src/IronPaw.Desktop
 
 ## Runtime configuration
 
+Desktop shares the CLI's user settings file at `%LOCALAPPDATA%/IronPaw/settings.json`, or the file
+selected by `IRONPAW_CONFIG`. Provider/model and workflow limits prefill the new-run controls;
+specialists use the shared host catalog and configured routing. File validation occurs before
+application state opens. Credentials, permissions and evaluation settings cannot be supplied in
+this file. See [shared configuration](../../docs/runtime-configuration.md).
+
 - Providers:
   - `local`
   - `openai`
@@ -131,3 +137,53 @@ provider configuration or invoke a model. Provider construction is deferred unti
 Launches reject unsupported provider names before graph admission. Resume and recovery validate the
 saved provider only when their schedulable work may need a model. Candidate-only verification and
 reconciliation remain available when the saved provider is no longer configured.
+
+## Execution timeline
+
+Open **Timeline** to browse saved ordinary workflows and task graphs. The view refreshes every two
+seconds while this tab is visible; clear **Refresh automatically** to hold the view or use **Refresh**
+to read it again. Browsing reads CSharpDB checkpoints, journals and host receipts without constructing
+a provider, claiming work, starting verification, or resuming a run. The full execution ID is available
+on the selector's tooltip. Caller ownership and graph workspace boundaries also apply to this view.
+
+Task rows show dependency waits, active agents and tools, pending human input, verification outcomes,
+and failures that need attention. The progress bar counts host-accepted tasks. A finished model run
+does not count as accepted work or independent verification. Artifact-only acceptance explicitly says
+that no build/test check is configured. Test success requires an established zero-exit receipt with a
+positive test count, all tests passing, and none failed or skipped. Unknown effects remain **Needs
+review** and do not trigger automatic retries. Requested pause/cancellation stays visibly unsettled
+while work still owns a claim.
+
+Select a task and expand **Selected task and saved evidence** for candidate revisions, output locations
+and digests, host decisions, and bounded command logs. The summary shows shared token reservations,
+charged tokens, call counts and active execution time. It does not infer monetary cost. **Saved activity**
+shows up to the latest 250 journal entries and reports the total if older entries are omitted. Revision
+order is preserved within each journal even after clock corrections; parallel journals may interleave.
+These independently read checkpoints and ledgers form a refreshable view, not an atomic snapshot of
+all concurrent activity.
+
+Changing selection or closing the window cancels pending timeline reads and rejects stale results.
+Unchanged task/activity collections retain their selection and scroll position. **Open controls** moves
+to the existing recovery or graph controls; execution, reconciliation and authority grants remain
+separate actions. Opening graph controls clears the local-verification checkbox. Automatic timeline
+refresh does not replace drafts in the recovery controls.
+
+## Resilient live updates
+
+Live events use a bounded queue drained by the dispatcher. Slow or closed views do not block
+producers. Adjacent text updates are combined; lifecycle/tool entries have priority under pressure,
+and omitted/shortened entries are reported explicitly. The event list holds the latest 500 entries,
+while the response pane streams the main invocation's text and then shows the returned final response.
+Long response previews carry an explicit shortening message. Late text cannot change that final response.
+Saved workflow state and receipts remain available through Timeline and recovery.
+
+See [execution diagnostics and desktop delivery](../../docs/execution-observability.md) for exact
+limits, telemetry hooks, failure isolation and the boundary between live display and durable evidence.
+
+## Application storage
+
+Desktop shares `<state-root>/application.cdb` with the CLI for sessions, transcripts, memories,
+run history and messages. Storage work runs off the dispatcher. The first application operation
+imports legacy JSON once; close older IronPaw instances before migrating. Original files remain
+intact; SQLite files are not imported. The existing Desktop tool catalog and saved workflow
+permissions are preserved. See [application storage](../../docs/application-storage.md).

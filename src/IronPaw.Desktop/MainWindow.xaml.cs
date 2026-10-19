@@ -33,9 +33,16 @@ public partial class MainWindow : Window
         Events = new ObservableCollection<string>();
         DataContext = this;
         _bootstrap = bootstrap;
+        var defaults = _bootstrap.Settings;
+        ProviderComboBox.SelectedItem = ProviderComboBox.Items.OfType<ComboBoxItem>().Single(item => (string)item.Content == defaults.Provider);
+        ModelTextBox.Text = defaults.Model ?? ProviderDefaults.DefaultModels[defaults.Provider];
+        TokenLimitTextBox.Text = defaults.MaxTotalTokens?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
+        ExecutionLimitTextBox.Text = defaults.MaxExecutionSeconds?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
         _orchestrator = _bootstrap.Orchestrator;
         _recovery = new(_orchestrator, _bootstrap.WorkflowStore);
         InitializeGraphHost();
+        InitializeTimeline();
+        InitializeEventDelivery();
         AppendSkillDiagnostics(_bootstrap.SkillLoadResult);
         PromptTextBox.Text = "Create a project plan for an agent architecture and write it to Plan.md.";
         Loaded += async (_, _) => { await RefreshWorkflowsAsync(); await RefreshGraphsAsync(); };
@@ -86,7 +93,7 @@ public partial class MainWindow : Window
                 ToolPolicy: new ToolSelectionPolicy(Profile: ToolProfile.Coding),
                 Caller: CallerIdentity.LocalOwner(), RequestedRunId: runId, Budget: budget,
                 ApprovalRequiredTools: ApprovalToolsTextBox.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
-        await ExecuteRunAsync(runId, async ct => await _orchestrator.RunAsync(request, new UiEventSink(AppendEvent), ct));
+        await ExecuteRunAsync(runId, async ct => await _orchestrator.RunAsync(request, _eventSink, ct));
     }
 
     private async void CancelButton_OnClick(object sender, RoutedEventArgs e) =>
@@ -98,6 +105,10 @@ public partial class MainWindow : Window
     private Task ExecuteRunAsync(RunId rootRunId, Func<CancellationToken, Task<AgentRunResult?>> action)
     {
         if (_activeRootRunId is not null || _activeGraphId is not null) return Task.CompletedTask;
+        _eventSink.Reset();
+        _liveText = true;
+        _responseTruncated = false;
+        AssistantOutputTextBox.Clear();
         _activeRootRunId = rootRunId;
         _runCancellationTokenSource = new();
         UpdateControls();
@@ -108,10 +119,13 @@ public partial class MainWindow : Window
     {
         try
         {
-            var result = await action(_runCancellationTokenSource!.Token);
+            var token = _runCancellationTokenSource!.Token;
+            var result = await Task.Run(() => action(token));
             if (result is not null)
             {
-                AssistantOutputTextBox.Text = result.FinalAssistantMessage;
+                _liveText = false;
+                DrainUiEvents();
+                SetVisibleResponse(result.FinalAssistantMessage);
                 AppendLog($"Run status: {result.Status}. run_id={result.RunId.Value}");
             }
             RecoveryStatusTextBlock.Text = "Saved workflow state refreshed.";
@@ -123,6 +137,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _liveText = false;
             _activeRootRunId = null;
             _runTask = null;
             _runCancellationTokenSource!.Dispose();
@@ -149,8 +164,8 @@ public partial class MainWindow : Window
         UpdateControls();
         try
         {
-            if (permanentCancel) await _recovery.CancelAsync(rootRunId.Value, CancellationToken.None);
-            else await _recovery.PauseAsync(rootRunId.Value, CancellationToken.None);
+            if (permanentCancel) await Task.Run(() => _recovery.CancelAsync(rootRunId.Value, CancellationToken.None));
+            else await Task.Run(() => _recovery.PauseAsync(rootRunId.Value, CancellationToken.None));
             RecoveryStatusTextBlock.Text = permanentCancel ? "Permanent cancellation recorded." : "Pause recorded; active work is settling.";
             await RefreshWorkflowsAsync(rootRunId.Value.Value);
         }
@@ -165,7 +180,7 @@ public partial class MainWindow : Window
         rootId ??= (WorkflowsComboBox.SelectedItem as WorkflowChoice)?.Checkpoint.RunId;
         try
         {
-            var roots = await _recovery.ListRootsAsync(CancellationToken.None);
+            var roots = await Task.Run(() => _recovery.ListRootsAsync(CancellationToken.None));
             _changingSelection = true;
             WorkflowsComboBox.ItemsSource = roots.Select(run => new WorkflowChoice(run)).ToArray();
             WorkflowsComboBox.SelectedItem = WorkflowsComboBox.Items.Cast<WorkflowChoice>()
@@ -200,7 +215,7 @@ public partial class MainWindow : Window
         UpdateControls();
         try
         {
-            var detail = await _recovery.InspectAsync(new RunId(choice.Checkpoint.RunId), CancellationToken.None);
+            var detail = await Task.Run(() => _recovery.InspectAsync(new RunId(choice.Checkpoint.RunId), CancellationToken.None));
             if (version != _detailVersion) return;
             _changingSelection = true;
             var previous = (InvocationsComboBox.SelectedItem as WorkflowChoice)?.Checkpoint.RunId;
@@ -226,7 +241,7 @@ public partial class MainWindow : Window
         UpdateControls();
         try
         {
-            var detail = await _recovery.InspectAsync(new RunId(choice.Checkpoint.RunId), CancellationToken.None);
+            var detail = await Task.Run(() => _recovery.InspectAsync(new RunId(choice.Checkpoint.RunId), CancellationToken.None));
             if (version != _detailVersion) return;
             _detail = detail;
             WorkflowSummaryTextBlock.Text = $"Root: {detail.Root.RunId}\nState: {detail.Root.Status}; control: {detail.Root.Control}; selected: {detail.Selected.Status}\n" +
@@ -290,7 +305,7 @@ public partial class MainWindow : Window
     private async void ResumeWorkflow_OnClick(object sender, RoutedEventArgs e)
     {
         if (_detail is { } detail) await ExecuteRunAsync(new RunId(detail.Root.RunId),
-            async ct => await _recovery.ResumeAsync(new RunId(detail.Root.RunId), new UiEventSink(AppendEvent), ct));
+            async ct => await _recovery.ResumeAsync(new RunId(detail.Root.RunId), _eventSink, ct));
     }
 
     private async void PauseWorkflow_OnClick(object sender, RoutedEventArgs e) =>
@@ -304,7 +319,7 @@ public partial class MainWindow : Window
         if (_detail is not { } detail || HumanRequestsComboBox.SelectedItem is not HumanRequestChoice choice) return;
         var answer = AnswerTextBox.Text;
         await ExecuteRunAsync(new RunId(detail.Root.RunId), async ct => await _recovery.AnswerAndResumeAsync(
-            new RunId(detail.Selected.RunId), choice.Request.RequestId, answer, new UiEventSink(AppendEvent), ct));
+            new RunId(detail.Selected.RunId), choice.Request.RequestId, answer, _eventSink, ct));
     }
 
     private async void ApproveWorkflow_OnClick(object sender, RoutedEventArgs e) => await DecideApprovalAsync(true);
@@ -314,7 +329,7 @@ public partial class MainWindow : Window
     {
         if (_detail is not { } detail || HumanRequestsComboBox.SelectedItem is not HumanRequestChoice choice) return;
         await ExecuteRunAsync(new RunId(detail.Root.RunId), ct => _recovery.DecideApprovalAsync(
-            new RunId(detail.Selected.RunId), choice.Request.RequestId, approved, new UiEventSink(AppendEvent), ct));
+            new RunId(detail.Selected.RunId), choice.Request.RequestId, approved, _eventSink, ct));
     }
 
     private async void ReconcileWorkflow_OnClick(object sender, RoutedEventArgs e)
@@ -324,7 +339,7 @@ public partial class MainWindow : Window
         var note = ReconcileNoteTextBox.Text;
         var isError = ReconcileErrorCheckBox.IsChecked == true;
         await ExecuteRunAsync(new RunId(detail.Root.RunId), async ct => await _recovery.ReconcileAndResumeAsync(
-            new RunId(detail.Selected.RunId), choice.Execution.ExecutionId, content, isError, note, new UiEventSink(AppendEvent), ct));
+            new RunId(detail.Selected.RunId), choice.Execution.ExecutionId, content, isError, note, _eventSink, ct));
     }
 
     private void UpdateControls()
@@ -392,31 +407,9 @@ public partial class MainWindow : Window
         return "local";
     }
 
-    private void AppendEvent(AgentEvent evt)
-    {
-        if (!Dispatcher.CheckAccess())
-        {
-            Dispatcher.Invoke(() => AppendEvent(evt));
-            return;
-        }
-
-        var line = new StringBuilder()
-            .Append(evt.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff"))
-            .Append(" [")
-            .Append(evt.Stream)
-            .Append('/')
-            .Append(evt.Type)
-            .Append("] ")
-            .Append(FormatData(evt.Data))
-            .ToString();
-
-        Events.Add(line);
-        EventsListBox.ScrollIntoView(line);
-    }
-
     private void AppendLog(string message)
     {
-        Events.Add($"{DateTimeOffset.Now:HH:mm:ss.fff} [ui] {message}");
+        AddVisibleEvent($"{DateTimeOffset.Now:HH:mm:ss.fff} [ui] {message}");
         EventsListBox.ScrollIntoView(Events.LastOrDefault());
     }
 
@@ -427,13 +420,6 @@ public partial class MainWindow : Window
         {
             AppendLog($"skills: {diagnostic}");
         }
-    }
-
-    private static string FormatData(IReadOnlyDictionary<string, object?> data)
-    {
-        return string.Join(
-            ", ",
-            data.Select(pair => $"{pair.Key}={pair.Value}"));
     }
 
     protected override async void OnClosing(CancelEventArgs e)
@@ -479,6 +465,8 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        StopTimeline();
+        StopEventDelivery();
         _runCancellationTokenSource?.Cancel();
         _runCancellationTokenSource?.Dispose();
         _runCancellationTokenSource = null;

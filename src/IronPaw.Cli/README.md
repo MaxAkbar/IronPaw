@@ -62,13 +62,19 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 - `--max-total-tokens <n>` (positive 64-bit token limit shared by a new workflow and its descendants)
 - `--max-execution-seconds <n>` (positive execution time limit for a new workflow)
 - `--no-events`
-- `--message-ttl-days <days>` (SQLite message retention window, default `30`)
+- `--message-ttl-days <days>` (CSharpDB message retention window, default `30`)
 - `--llm-context-window-tokens <n>` (OpenAI-compatible budget override)
 - `--llm-safety-margin-tokens <n>` (OpenAI-compatible budget override)
 - `--llm-min-output-tokens-per-request <n>` (OpenAI-compatible budget override)
 - `--llm-max-auto-continuation-passes <n>` (OpenAI-compatible budget override)
 
 ## Usage
+
+New-run defaults are shared with Desktop through `%LOCALAPPDATA%/IronPaw/settings.json` or
+`IRONPAW_CONFIG`. `--config <path>` explicitly selects a reviewed file; CLI options take precedence.
+`--validate-config <path>` validates just the file before bootstrap, without credentials, state or
+provider calls. Saved controls and live evaluations keep their existing bindings and reject
+`--config`. See [precedence, supported settings and CI checks](../../docs/runtime-configuration.md).
 
 Configure a live comparison by copying [`docs/examples/live-evaluation.example.json`](../../docs/examples/live-evaluation.example.json)
 to a local settings file and editing its provider, exact model ID, maximum total spend, and reviewed USD price schedule.
@@ -160,7 +166,7 @@ If required provider settings are missing (for example `OPENAI_API_KEY` or `ANTH
 ## Durable task graphs
 
 Graph commands use the same workspace-specific CSharpDB ledger as workflow recovery,
-regardless of the conversation `--store` selection. Start by displaying the configured
+independently of the shared application database. Start by displaying the configured
 source and managed workspace paths:
 
 ```powershell
@@ -389,3 +395,12 @@ $env:IRONPAW_REVIEWER_PROVIDER="anthropic"
 $env:IRONPAW_REVIEWER_MODEL="claude-3-5-sonnet-latest"
 dotnet run --project src/IronPaw.Cli -- --provider openai --model gpt-4o-mini --prompt "Implement and review a new parser"
 ```
+
+## Application storage
+
+Sessions, transcripts, memories, run history and messages use `<state-root>/application.cdb`.
+JSON data imports automatically on first application-data access; close older instances first.
+Original JSON and SQLite files remain intact. SQLite data is not imported, and obsolete `--store`
+arguments now fail before state or provider initialization. `--message-ttl-days` still defaults to 30.
+See [migration details](../../docs/application-storage.md). Workflow inspection and reconciliation
+remain available when application JSON needs repair.

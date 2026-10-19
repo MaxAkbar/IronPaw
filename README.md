@@ -9,6 +9,23 @@
 - add-in skill system with dynamic discovery and runtime Roslyn compilation
 - task review and run history tracking
 - durable dependency graphs with isolated file tasks, shared budgets and separate artifact acceptance
+- shared user settings for CLI/Desktop and a pinned-SDK Windows validation workflow
+- a desktop execution timeline for dependency waits, current work, host acceptance, saved activity and shared budgets
+- optional execution traces/metrics and bounded desktop event delivery that isolates presentation failures
+- an MCP embedding adapter with reviewed tool bindings, explicit permissions and durable replay
+
+Both apps read `%LOCALAPPDATA%/IronPaw/settings.json` for new-run defaults; `IRONPAW_CONFIG` selects
+another reviewed file. The CLI also supports `--config` and standalone `--validate-config`.
+See [shared configuration and repeatable validation](docs/runtime-configuration.md). Run
+`./eng/Validate.ps1` for the Release build, full test suite and example-configuration checks used by CI.
+See [MCP connector boundaries and embedding](docs/mcp-connectors.md) for the adapter API and
+remaining CLI/Desktop connector setup work.
+
+Both apps persist sessions, transcripts, memories, run history and agent messages in
+`%LOCALAPPDATA%/IronPaw/state/application.cdb`. Existing JSON data imports once, preserving
+original files. Close older IronPaw instances before the first migration. Existing SQLite files
+are preserved and are not imported. Workspace workflow journals keep their separate paths.
+See [application storage and migration](docs/application-storage.md).
 
 ## Architecture View
 
@@ -29,7 +46,9 @@ flowchart LR
   Domain --> Abstractions
   Core --> Tools[IronPaw.AgentCore.Tools]
   Core --> Providers[IronPaw.AgentCore.Providers]
-  Core --> Persistence[IronPaw.AgentCore.Persistence]
+  Core --> Persistence[Persistence interfaces]
+  CLI --> CSharpDb[IronPaw.AgentCore.Persistence.CSharpDb]
+  Desktop --> CSharpDb
 
   Tools --> Addins[Add-in Skill DLLs]
   Tools --> AgentReg[Agent Registry]
@@ -45,13 +64,13 @@ sequenceDiagram
   participant Host as CLI/Desktop Host
   participant Orchestrator as AgentOrchestrator
   participant Lane as SessionLaneScheduler
-  participant Transcript as JsonTranscriptStore
+  participant Transcript as CSharpDbApplicationStore (transcripts)
   participant Tools as InMemoryToolRegistry
   participant Prompt as DefaultSystemPromptBuilder
   participant Router as RoutedLlmClient
   participant Provider as Provider Client
   participant Exec as ToolExecutor
-  participant Session as FileSessionStore
+  participant Session as CSharpDbApplicationStore (sessions)
 
   User->>Host: Submit prompt + provider/model
   Host->>Orchestrator: RunAsync(AgentRunRequest)

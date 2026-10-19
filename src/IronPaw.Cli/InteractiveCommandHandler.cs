@@ -59,7 +59,7 @@ internal static class InteractiveCommandHandler
                     profile,
                     noEvents,
                     skillsLoaded,
-                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides));
+                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides, readEnvironmentOverrides: false));
                 return true;
 
             case "/provider":
@@ -83,7 +83,7 @@ internal static class InteractiveCommandHandler
                     profile,
                     noEvents,
                     skillsLoaded,
-                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides));
+                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides, readEnvironmentOverrides: false));
                 return true;
             }
 
@@ -108,7 +108,7 @@ internal static class InteractiveCommandHandler
                     profile,
                     noEvents,
                     skillsLoaded,
-                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides));
+                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides, readEnvironmentOverrides: false));
                 return true;
             }
 
@@ -133,7 +133,7 @@ internal static class InteractiveCommandHandler
                     profile,
                     noEvents,
                     skillsLoaded,
-                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides));
+                    LlmClientFactory.ResolveOpenAiCompatibleOptions(provider, llmOptionOverrides, readEnvironmentOverrides: false));
                 return true;
             }
 

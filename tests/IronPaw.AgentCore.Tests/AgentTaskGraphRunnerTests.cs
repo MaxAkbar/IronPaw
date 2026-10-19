@@ -201,15 +201,17 @@ public sealed class AgentTaskGraphRunnerTests
         await using var scope = await Scope.OpenAsync(clock);
         var graph = Graph(Task("first"));
         var client = new ScriptedClient((_, _) => throw new InvalidOperationException("Expired preflight admitted the provider."));
-        var delayed = new AdvancingWorkspaces(scope.Manager, () => clock.Advance(TimeSpan.FromSeconds(2)));
+        // The test controls ledger time. Keep the independent real cancellation timer well
+        // outside Git preparation so machine load cannot cancel before the simulated advance.
+        var delayed = new AdvancingWorkspaces(scope.Manager, () => clock.Advance(TimeSpan.FromHours(2)));
 
         var stopped = await scope.Runner(client, delayed).StartAsync(graph, Owner, 1,
-            scope.Options(graph) with { SharedBudget = new(10, 10, MaxExecutionTime: TimeSpan.FromSeconds(1)) }, Ct);
+            scope.Options(graph) with { SharedBudget = new(10, 10, MaxExecutionTime: TimeSpan.FromHours(1)) }, Ct);
 
         Assert.Equal(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(stopped).Status);
         Assert.Empty(client.Requests);
         var snapshot = await scope.Store.GetBudgetAsync(new RunId(stopped.AgentBinding!.RootRunId), Ct);
-        Assert.True(snapshot.ExecutionTime >= TimeSpan.FromSeconds(2));
+        Assert.True(snapshot.ExecutionTime >= TimeSpan.FromHours(2));
         Assert.Equal(TimeSpan.Zero, snapshot.RemainingExecutionTime);
     }
 

@@ -1,6 +1,6 @@
 # IronPaw.AgentCore.Persistence.CSharpDb
 
-Durable workflow storage backed by the pinned `CSharpDB.Engine` NuGet package.
+Application and durable workflow storage backed by the pinned `CSharpDB.Engine` NuGet package.
 It persists accepted requests, model responses, tool intents/results, usage,
 run state, and journal revisions. Each checkpoint and journal record commits
 in one file-backed transaction.
@@ -10,7 +10,7 @@ await using var store = await CSharpDbWorkflowStore.OpenAsync("workflows.cdb");
 // Pass store as AgentOrchestrator's optional workflowStore argument.
 ```
 
-One store owns the database file exclusively for its lifetime. Store operations
+A workflow store owns its workspace database exclusively for its lifetime. Store operations
 serialize their entire transaction; model and tool calls execute outside those
 transactions. Independent hosts cannot open the same journal simultaneously.
 On reopen, stale running leases become interrupted, or require reconciliation
@@ -134,3 +134,26 @@ cannot be replaced. Actual estimated charges exceeding reservations, or observed
 violations, remain visible and block further paid requests. Explicit owner reconciliation needs
 a known receipt and note and never starts a provider or process. External provider billing is not
 queried by this store. Existing workflow and graph checkpoint versions remain unchanged.
+
+## Shared application records
+
+`CSharpDbApplicationStore` implements session, transcript, memory and run-history interfaces.
+`CSharpDbAgentMessageBus` shares that store and uses the host agent registry for authorization.
+Both hosts use `<state-root>/application.cdb`. Each operation runs on a worker, acquires a
+cancellation-aware cross-process sidecar lock (30-second acquisition timeout), opens CSharpDB,
+commits or rolls back, closes the database and releases the lock. No application connection is
+held for the host lifetime. Workflow files and exclusive workflow ownership are unchanged.
+
+```csharp
+var application = new CSharpDbApplicationStore(new CSharpDbApplicationStoreOptions(
+    Path.Combine(stateRoot, "application.cdb"), LegacyJsonStateRoot: stateRoot));
+ISessionStore sessions = application;
+ITranscriptStore transcripts = application;
+IMemoryStore memories = application;
+IRunHistoryStore history = application;
+IAgentMessageBus messages = new CSharpDbAgentMessageBus(application, agentRegistry);
+```
+
+Schema version 1 stores ordered application projections and a transactional JSON import marker.
+Import is lazy and independent of the workflow ledger. The JSON adapters remain available for
+library consumers. See [migration, retention and failure recovery](../../docs/application-storage.md).

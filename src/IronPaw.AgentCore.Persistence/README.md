@@ -1,6 +1,6 @@
 # IronPaw.AgentCore.Persistence
 
-`IronPaw.AgentCore.Persistence` contains file-based state storage for sessions, transcripts, memory, and run history.
+`IronPaw.AgentCore.Persistence` retains the JSON adapters for existing library consumers and legacy import tooling. CLI and Desktop now use [CSharpDB application storage](../IronPaw.AgentCore.Persistence.CSharpDb/README.md).
 
 ## Responsibilities
 
@@ -43,7 +43,7 @@
 
 ## Storage location
 
-Host projects currently use:
+Legacy JSON layouts supported by the one-time application importer:
 - `%LOCALAPPDATA%/IronPaw/state/session-store.json`
 - `%LOCALAPPDATA%/IronPaw/state/sessions/<session>.jsonl`
 - `%LOCALAPPDATA%/IronPaw/state/memories.json`

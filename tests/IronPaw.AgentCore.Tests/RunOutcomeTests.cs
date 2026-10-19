@@ -99,6 +99,20 @@ public sealed class RunOutcomeTests
         Assert.Equal(AgentRunStatus.Succeeded, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
     }
 
+    [Theory]
+    [InlineData("run_started")]
+    [InlineData("assistant_delta")]
+    public async Task NonDurableIntermediateObserverFailureCannotReplaceTheActualOutcome(string eventType)
+    {
+        using var scope = new TestScope(new ScriptedClient([new AssistantTextDelta("done"), new CompletedDelta()]));
+        scope.Sink.ThrowOnType = eventType;
+        var result = await scope.RunAsync();
+        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
+        Assert.Equal("done", result.FinalAssistantMessage);
+        Assert.Contains("observer failed", result.Metadata["eventDeliveryError"]!.ToString());
+        Assert.Equal(AgentRunStatus.Succeeded, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
+    }
+
     [Fact]
     public async Task InterruptedStream_DoesNotExecutePendingToolCalls()
     {
@@ -179,9 +193,10 @@ public sealed class RunOutcomeTests
     {
         public List<AgentEvent> Events { get; } = [];
         public bool ThrowOnCompleted { get; set; }
+        public string? ThrowOnType { get; set; }
         public ValueTask PublishAsync(AgentEvent evt, CancellationToken ct)
         {
-            if (ThrowOnCompleted && evt.Type == "run_completed") throw new InvalidOperationException("observer failed");
+            if (evt.Type == ThrowOnType || ThrowOnCompleted && evt.Type == "run_completed") throw new InvalidOperationException("observer failed");
             Events.Add(evt);
             return ValueTask.CompletedTask;
         }

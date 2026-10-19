@@ -5,7 +5,7 @@ This walkthrough demonstrates end-to-end agent-to-agent messaging with:
 - multi-agent delegation (`invoke_agent`)
 - scoped messaging (`send_agent_message`, `read_agent_messages`)
 - observability events (`message.sent`, `message.received`)
-- durable message queues when using SQLite store backend
+- durable CSharpDB message queues
 
 ## Prerequisites
 
@@ -14,11 +14,11 @@ This walkthrough demonstrates end-to-end agent-to-agent messaging with:
 
 ## Run the workflow
 
-Use SQLite store backend so messages are persisted in `ironpaw.db`:
+Messages are persisted in `state/application.cdb` by default. Retention defaults to 30 days
+and can be changed with `--message-ttl-days`:
 
 ```powershell
 dotnet run --project src/IronPaw.Cli -- `
-  --store sqlite `
   --provider openai `
   --model gpt-4o-mini `
   --profile Full `

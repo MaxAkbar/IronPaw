@@ -64,6 +64,10 @@ internal sealed class TaskCommandVerificationRunner(IAgentTaskGraphStore graphSt
                 continue;
             }
 
+            using var observation = ExecutionDiagnostics.Observe("verification", ("ironpaw.graph.id", claim.GraphId),
+                ("ironpaw.task.id", claim.Task.TaskId), ("ironpaw.task.attempt_id", claim.AttemptId),
+                ("ironpaw.verification.invocation_id", invocationId), ("ironpaw.revision", result.Revision));
+            observation.Complete("needs_reconciliation");
             TaskVerificationCompletion completion;
             try
             {
@@ -79,6 +83,7 @@ internal sealed class TaskCommandVerificationRunner(IAgentTaskGraphStore graphSt
             }
             using var receiptCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await commands.CompleteTaskVerificationAsync(claim, invocationId, completion, receiptCt.Token).ConfigureAwait(false);
+            observation.Complete(ExecutionDiagnostics.Outcome(completion.Outcome));
             if (completion.Outcome != TaskCommandOutcome.Passed) return;
         }
     }

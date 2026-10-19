@@ -1,5 +1,9 @@
 # OpenClaw-Inspired Agent Architecture for a .NET Windows Desktop Application
 
+> Historical research: the SQLite recommendations below are superseded. IronPaw now uses
+> CSharpDB for application storage and workspace workflow journals. Existing SQLite files are
+> preserved without import; see [current storage and migration](docs/application-storage.md).
+
 ## Constraints and allowed sources
 
 This report **ONLY** uses source material from **github.com**, specifically the **openclaw/openclaw** repository (code, docs, and repository-contained issues/discussions when relevant). If a detail is not present in that repository, it is explicitly marked **unspecified**. citeturn20view0turn6view0

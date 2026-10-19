@@ -1,0 +1,49 @@
+name: Validate
+
+on:
+  push:
+    branches: [main, 'max/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows Release
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      OPENAI_API_KEY: ''
+      ANTHROPIC_API_KEY: ''
+      OLLAMA_API_KEY: ''
+      LMSTUDIO_API_KEY: ''
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - name: Validate application
+        run: ./eng/Validate.ps1 -OutputDirectory "${{ runner.temp }}/ironpaw-validation"
+      - name: Retain test and build evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: windows-release-validation
+          path: ${{ runner.temp }}/ironpaw-validation
+          if-no-files-found: error
+          retention-days: 14

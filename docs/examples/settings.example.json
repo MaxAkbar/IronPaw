@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "provider": "local",
+  "model": null,
+  "maxTotalTokens": null,
+  "maxExecutionSeconds": null,
+  "llm": {
+    "contextWindowTokens": null,
+    "safetyMarginTokens": null,
+    "minimumOutputTokensPerRequest": null,
+    "maxAutoContinuationPasses": null
+  },
+  "agents": {
+    "codegen": { "provider": null, "model": null },
+    "reviewer": { "provider": null, "model": null },
+    "webBrowser": { "provider": null, "model": null }
+  }
+}

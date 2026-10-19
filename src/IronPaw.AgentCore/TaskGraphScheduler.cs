@@ -45,6 +45,8 @@ public sealed class TaskGraphScheduler
             throw new WorkflowConflictException("This scheduler is already running the task graph.");
         var running = new List<Task>();
         var attempted = new HashSet<string>(StringComparer.Ordinal);
+        using var observation = ExecutionDiagnostics.Observe("graph", ("ironpaw.graph.id", graphId),
+            ("ironpaw.workflow.root_id", checkpoint.AgentBinding?.RootRunId));
         try
         {
             if (checkpoint.Control == WorkflowControl.Pause)
@@ -88,7 +90,9 @@ public sealed class TaskGraphScheduler
             finally { _active.TryRemove(graphId, out _); }
         }
         using var readCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        return await RequireAsync(graphId, caller, readCt.Token).ConfigureAwait(false);
+        var final = await RequireAsync(graphId, caller, readCt.Token).ConfigureAwait(false);
+        observation.Complete(final);
+        return final;
     }
 
     public async Task PauseAsync(string graphId, CallerIdentity caller, CancellationToken ct)
@@ -109,6 +113,9 @@ public sealed class TaskGraphScheduler
 
     private async Task ProcessClaimAsync(TaskGraphClaim claim, CancellationToken ct)
     {
+        using var observation = ExecutionDiagnostics.Observe("task", ("ironpaw.graph.id", claim.GraphId),
+            ("ironpaw.task.id", claim.Task.TaskId), ("ironpaw.task.attempt_id", claim.AttemptId));
+        observation.Complete("needs_reconciliation");
         try
         {
             ct.ThrowIfCancellationRequested();
@@ -118,7 +125,8 @@ public sealed class TaskGraphScheduler
                 result = await executor.ExecuteAsync(claim, ct).ConfigureAwait(false);
                 // A returned receipt is still durable if a control/deadline races its return.
                 using var receiptCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                await store.RecordTaskResultAsync(claim, result, receiptCt.Token).ConfigureAwait(false);
+                var proposed = await store.RecordTaskResultAsync(claim, result, receiptCt.Token).ConfigureAwait(false);
+                observation.Complete(proposed, claim.Task.TaskId);
                 if (result.Status is not (WorkflowTaskStatus.Succeeded or WorkflowTaskStatus.AwaitingVerification)) return;
             }
             ct.ThrowIfCancellationRequested();
@@ -135,7 +143,11 @@ public sealed class TaskGraphScheduler
                 throw new OperationCanceledException("Task graph control stopped acceptance.");
             var decision = await verifier.VerifyAsync(claim, result, ct).ConfigureAwait(false);
             using var acceptanceCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            try { await store.RecordTaskAcceptanceAsync(claim, decision, acceptanceCt.Token).ConfigureAwait(false); }
+            try
+            {
+                var accepted = await store.RecordTaskAcceptanceAsync(claim, decision, acceptanceCt.Token).ConfigureAwait(false);
+                observation.Complete(accepted, claim.Task.TaskId);
+            }
             catch (WorkflowBudgetExceededException error) when (decision.Outcome == TaskAcceptanceOutcome.Accepted)
             {
                 // The atomic success guard can observe usage or elapsed time that raced
@@ -144,15 +156,18 @@ public sealed class TaskGraphScheduler
                 await store.RecordTaskAcceptanceAsync(claim, new(TaskAcceptanceOutcome.BudgetExhausted,
                     "shared-budget/v1", "The shared graph budget was exhausted before acceptance: " + error.Message),
                     budgetCt.Token).ConfigureAwait(false);
+                observation.Complete("budget_exhausted");
             }
         }
         catch (Exception error)
         {
+            observation.Complete("needs_reconciliation");
             using var settleCt = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
             {
-                await store.AbandonTaskClaimAsync(claim,
+                var abandoned = await store.AbandonTaskClaimAsync(claim,
                     $"{error.GetType().Name}: {error.Message}", settleCt.Token).ConfigureAwait(false);
+                observation.Complete(abandoned, claim.Task.TaskId);
             }
             catch (Exception persistenceError)
             {

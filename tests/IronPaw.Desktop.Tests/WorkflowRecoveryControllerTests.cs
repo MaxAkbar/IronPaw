@@ -197,14 +197,16 @@ public sealed class WorkflowRecoveryControllerTests
         public Exception? ReceiptFailure { get; set; }
         public Task<AgentRunResult>? PendingResume { get; set; }
         public Task<AgentRunResult>? PendingRun { get; set; }
-        public AgentRunRequest? LastRequest { get; private set; }
+        private AgentRunRequest? _lastRequest;
+        public AgentRunRequest? LastRequest { get => Volatile.Read(ref _lastRequest); private set => Volatile.Write(ref _lastRequest, value); }
         public AgentRunResult Result { get; } = new(new("root"), new("desktop-test"), "done", [], new Dictionary<string, object?>());
         public Task<AgentRunResult> RunAsync(AgentRunRequest request, IAgentEventSink sink, CancellationToken ct)
         {
-            LastRequest = request;
+            LastSink = sink;
             var id = request.RequestedRunId ?? RunId.New();
             store.Runs[id.Value] = MakeRun(id.Value, id.Value, null) with { Request = request };
             Calls.Add("run:" + id);
+            LastRequest = request;
             return PendingRun ?? Task.FromResult(Result with { RunId = id });
         }
         public Task<IReadOnlyList<WorkflowCheckpoint>> ListWorkflowsAsync(CancellationToken ct) => store.ListAsync(ct);
@@ -230,8 +232,8 @@ public sealed class WorkflowRecoveryControllerTests
 
     internal sealed class MemoryStore : IWorkflowStore
     {
-        public Dictionary<string, WorkflowCheckpoint> Runs { get; } = [];
-        public Task CreateAsync(WorkflowCheckpoint checkpoint, CancellationToken ct) { Runs.Add(checkpoint.RunId, checkpoint); return Task.CompletedTask; }
+        public System.Collections.Concurrent.ConcurrentDictionary<string, WorkflowCheckpoint> Runs { get; } = [];
+        public Task CreateAsync(WorkflowCheckpoint checkpoint, CancellationToken ct) { if (!Runs.TryAdd(checkpoint.RunId, checkpoint)) throw new WorkflowConflictException("Workflow already exists"); return Task.CompletedTask; }
         public Task<WorkflowCheckpoint?> GetAsync(RunId runId, CancellationToken ct) => Task.FromResult(Runs.GetValueOrDefault(runId.Value));
         public Task<IReadOnlyList<WorkflowCheckpoint>> ListAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<WorkflowCheckpoint>>(Runs.Values.ToArray());
         public Task<WorkflowCheckpoint> SaveAsync(WorkflowCheckpoint checkpoint, int expectedRevision, string eventType, CancellationToken ct) => throw new NotSupportedException();

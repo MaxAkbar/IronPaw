@@ -6,7 +6,10 @@ namespace IronPaw.AgentCore;
 
 public sealed record TaskGraphHostDetail(TaskGraphCheckpoint Checkpoint, TaskGraphProgressSummary Progress,
     IReadOnlyList<WorkflowCheckpoint> Invocations, IReadOnlyList<TaskGraphJournalEntry> Journal,
-    WorkflowUsage Usage, WorkflowBudgetSnapshot Budget);
+    WorkflowUsage Usage, WorkflowBudgetSnapshot Budget)
+{
+    public IReadOnlyList<WorkflowJournalEntry> InvocationJournal { get; init; } = [];
+}
 
 /// <summary>Shared local host commands. A launch file cannot grant process authority or switch workspaces.</summary>
 public sealed class TaskGraphHostController
@@ -47,12 +50,16 @@ public sealed class TaskGraphHostController
     {
         var graph = await RequireAsync(graphId, caller, ct).ConfigureAwait(false);
         var root = new RunId(graph.AgentBinding!.RootRunId);
-        var invocations = (await _workflows.ListAsync(ct).ConfigureAwait(false)).Where(run => run.RootRunId == root.Value)
+        var invocations = (await _workflows.ListAsync(ct).ConfigureAwait(false)).Where(run => run.RootRunId == root.Value &&
+                run.Request.Caller.Id == caller.Id && run.Request.Caller.IsOwner == caller.IsOwner)
             .OrderBy(run => run.CreatedAt).ToArray();
+        var invocationJournals = await Task.WhenAll(invocations.Select(run => _workflows.ReadJournalAsync(new(run.RunId), ct))).ConfigureAwait(false);
         return new(graph, TaskGraphProgress.Inspect(graph), invocations,
             await _graphs.ReadTaskGraphJournalAsync(graphId, ct).ConfigureAwait(false),
             await _workflows.GetUsageAsync(root, ct).ConfigureAwait(false),
-            await _workflows.GetBudgetAsync(root, ct).ConfigureAwait(false));
+            await _workflows.GetBudgetAsync(root, ct).ConfigureAwait(false)) {
+                InvocationJournal = invocationJournals.SelectMany(journal => journal).ToArray()
+            };
     }
 
     public void ValidateLaunch(TaskGraphLaunchDocument document, CallerIdentity caller, bool allowLocalVerification = false)

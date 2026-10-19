@@ -10,7 +10,8 @@ internal sealed class WorkflowRecoveryController(IResumableAgentOrchestrator orc
     public async Task<IReadOnlyList<WorkflowCheckpoint>> ListRootsAsync(CancellationToken ct)
     {
         var graphRoots = await GraphRootIdsAsync(ct);
-        return (await orchestrator.ListWorkflowsAsync(ct)).Where(run => run.RunId == run.RootRunId && !graphRoots.Contains(run.RunId))
+        return (await orchestrator.ListWorkflowsAsync(ct)).Where(run => run.RunId == run.RootRunId && !graphRoots.Contains(run.RunId) &&
+                run.Request.Caller.Id == _caller.Id && run.Request.Caller.IsOwner == _caller.IsOwner)
             .OrderByDescending(run => run.UpdatedAt).ToArray();
     }
 
@@ -19,7 +20,8 @@ internal sealed class WorkflowRecoveryController(IResumableAgentOrchestrator orc
         var selected = await RequireAsync(runId, ct);
         var root = await RequireAsync(new RunId(selected.RootRunId), ct);
         var invocations = (await orchestrator.ListWorkflowsAsync(ct))
-            .Where(run => run.RootRunId == root.RunId).OrderBy(run => run.CreatedAt).ToArray();
+            .Where(run => run.RootRunId == root.RunId && run.Request.Caller.Id == _caller.Id && run.Request.Caller.IsOwner == _caller.IsOwner)
+            .OrderBy(run => run.CreatedAt).ToArray();
         var entries = await Task.WhenAll(invocations.Select(run => store.ReadJournalAsync(new RunId(run.RunId), ct)));
         return new(root, selected, invocations,
             entries.SelectMany(journal => journal).OrderBy(entry => entry.Timestamp).ToArray(),
@@ -82,6 +84,8 @@ internal sealed class WorkflowRecoveryController(IResumableAgentOrchestrator orc
     private async Task<WorkflowCheckpoint> RequireAsync(RunId runId, CancellationToken ct)
     {
         var run = await store.GetAsync(runId, ct) ?? throw new ArgumentException("The selected workflow no longer exists.", nameof(runId));
+        if (run.Request.Caller.Id != _caller.Id || run.Request.Caller.IsOwner != _caller.IsOwner)
+            throw new UnauthorizedAccessException("This workflow belongs to another caller.");
         if ((await GraphRootIdsAsync(ct)).Contains(run.RootRunId))
             throw new WorkflowConflictException("Use the Task graphs tab to inspect or control a graph invocation.");
         return run;

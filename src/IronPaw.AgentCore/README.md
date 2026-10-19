@@ -17,6 +17,11 @@ It runs the agent loop, coordinates tools, persists state, and emits event strea
 
 ## Main files
 
+- `IronPawSettings.cs`: strict, versioned user defaults and environment resolution, independent of
+  credentials, state stores and workspace files. Hosts use the same immutable settings snapshot.
+- `DefaultAgentCatalog.cs`: shared specialist instructions, permission policies and routing defaults.
+  User settings can select provider/model routes and cannot expand these policies.
+
 - `AgentOrchestrator.cs`
   - main run loop and recovery boundaries
   - accepts optional `IMemoryStore`, `IRunHistoryStore`, and `IWorkflowStore`
@@ -452,3 +457,33 @@ The orchestrator is reused as the execution engine for multi-agent delegation. W
 - Register specialist agents via `IAgentRegistry` for multi-agent delegation.
 - Replace prompt builder/sanitizer/truncator with alternative implementations.
 - Provide `IMemoryStore` / `IRunHistoryStore` for persistent memory and task review.
+
+## Execution timeline projection
+
+`ExecutionTimelineBuilder` projects persisted graph/workflow checkpoints and host verification receipts
+into read-only task rows and activity entries. It does not execute providers or tools, infer acceptance
+from model text, or treat an ordinary completed agent run as verified. Graph acceptance follows saved
+host decisions; build/test labels require established command receipts. Dependency waits, unknown
+effects, active tools, human input, shared budgets and bounded saved output are available to hosts.
+
+Graph host inspection includes invocation journals through `TaskGraphHostDetail.InvocationJournal`.
+The projection filters entries by captured invocation identity, original caller and checkpoint revision.
+It merges streams deterministically while preserving each stream's revision order, including timestamp
+regressions, and caps visible events at 250 with explicit total/omitted counts. Store reads remain
+independent; the view does not promise a globally atomic snapshot or global causal ordering.
+
+## Diagnostics and observers
+
+`ExecutionDiagnostics` exposes optional .NET activity/metric hooks for graph, task, agent, model,
+tool and command-verification operations. Adapter counters exclude durable replay, and traces carry
+bounded execution identities without prompt/tool/output payloads. Observer callback exceptions are
+isolated from execution. See [the diagnostics contract](../../docs/execution-observability.md) for
+instrument names, outcome semantics, privacy boundaries and desktop delivery limits.
+
+## MCP tools
+
+The optional sibling project `IronPaw.AgentCore.Mcp` adapts a reviewed MCP catalog to `ITool`.
+Use an explicit `ToolSelectionPolicy.AllowedMcpTools` grant as well as the ordinary caller,
+profile and inherited-policy checks. Connector calls use the same durable intent, approval,
+budget, result and reconciliation path; saved replay performs no connector I/O. The built-in
+CLI/Desktop hosts do not register connectors yet. See [the MCP adapter contract](../../docs/mcp-connectors.md).

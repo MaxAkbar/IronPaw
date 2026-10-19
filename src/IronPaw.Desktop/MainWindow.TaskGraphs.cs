@@ -70,7 +70,7 @@ public partial class MainWindow
         graphId ??= (GraphsComboBox.SelectedItem as GraphChoice)?.Checkpoint.Graph.GraphId;
         try
         {
-            var graphs = await _graphs.ListAsync(_graphCaller, CancellationToken.None);
+            var graphs = await Task.Run(() => _graphs.ListAsync(_graphCaller, CancellationToken.None));
             _changingGraphSelection = true;
             GraphsComboBox.ItemsSource = graphs.OrderByDescending(graph => graph.UpdatedAt).Select(graph => new GraphChoice(graph)).ToArray();
             GraphsComboBox.SelectedItem = GraphsComboBox.Items.Cast<GraphChoice>().FirstOrDefault(choice => choice.Checkpoint.Graph.GraphId == graphId)
@@ -105,7 +105,7 @@ public partial class MainWindow
         UpdateControls();
         try
         {
-            var detail = await _graphs.InspectAsync(choice.Checkpoint.Graph.GraphId, _graphCaller, CancellationToken.None);
+            var detail = await Task.Run(() => _graphs.InspectAsync(choice.Checkpoint.Graph.GraphId, _graphCaller, CancellationToken.None));
             if (version != _graphDetailVersion) return;
             _graphDetail = detail;
             var graph = detail.Checkpoint;
@@ -200,8 +200,8 @@ public partial class MainWindow
         UpdateControls();
         try
         {
-            if (permanentCancel) await _graphs.CancelAsync(graphId, _graphCaller, CancellationToken.None);
-            else await _graphs.PauseAsync(graphId, _graphCaller, CancellationToken.None);
+            if (permanentCancel) await Task.Run(() => _graphs.CancelAsync(graphId, _graphCaller, CancellationToken.None));
+            else await Task.Run(() => _graphs.PauseAsync(graphId, _graphCaller, CancellationToken.None));
             if (_activeGraphId == graphId) _graphCancellationTokenSource?.Cancel();
             GraphStatusTextBlock.Text = permanentCancel ? "Permanent graph cancellation recorded." : "Graph pause recorded; active claims are settling.";
             await RefreshGraphsAsync(graphId);
@@ -223,7 +223,8 @@ public partial class MainWindow
     {
         try
         {
-            var checkpoint = await action(_graphCancellationTokenSource!.Token);
+            var token = _graphCancellationTokenSource!.Token;
+            var checkpoint = await Task.Run(() => action(token));
             GraphStatusTextBlock.Text = $"Graph {graphId}: {TaskGraphProgress.Inspect(checkpoint).Status}.";
             AppendLog(GraphStatusTextBlock.Text);
         }
@@ -273,16 +274,16 @@ public partial class MainWindow
             if (GraphReconciliationKindComboBox.SelectedIndex == 1)
             {
                 if (GraphUnknownCommandsComboBox.SelectedItem is not GraphCommandChoice command) throw new ArgumentException("Select a verification command whose outcome is unknown.");
-                await _graphs.ReconcileVerificationAsync(graphId, task.State.TaskId, command.Invocation.InvocationId,
-                    TaskGraphDocumentJson.Parse<TaskVerificationCompletion>(json), note, _graphCaller, CancellationToken.None);
+                await Task.Run(() => _graphs.ReconcileVerificationAsync(graphId, task.State.TaskId, command.Invocation.InvocationId,
+                    TaskGraphDocumentJson.Parse<TaskVerificationCompletion>(json), note, _graphCaller, CancellationToken.None));
             }
             else if (GraphReconciliationKindComboBox.SelectedIndex == 2)
             {
                 if (GraphUnknownToolsComboBox.SelectedItem is not GraphToolChoice tool) throw new ArgumentException("Select a child tool whose outcome is unknown.");
-                await _graphs.ReconcileChildToolAsync(graphId, task.State.TaskId, tool.Execution.ExecutionId,
-                    TaskGraphDocumentJson.Parse<ToolResult>(json), note, _graphCaller, CancellationToken.None);
+                await Task.Run(() => _graphs.ReconcileChildToolAsync(graphId, task.State.TaskId, tool.Execution.ExecutionId,
+                    TaskGraphDocumentJson.Parse<ToolResult>(json), note, _graphCaller, CancellationToken.None));
             }
-            else await _graphs.ReconcileTaskAsync(graphId, task.State.TaskId, TaskGraphDocumentJson.Parse<WorkflowTaskResult>(json), note, _graphCaller, CancellationToken.None);
+            else await Task.Run(() => _graphs.ReconcileTaskAsync(graphId, task.State.TaskId, TaskGraphDocumentJson.Parse<WorkflowTaskResult>(json), note, _graphCaller, CancellationToken.None));
             GraphStatusTextBlock.Text = "Established outcome recorded. Resume or recover remains a separate action.";
             await RefreshGraphsAsync(graphId);
         }

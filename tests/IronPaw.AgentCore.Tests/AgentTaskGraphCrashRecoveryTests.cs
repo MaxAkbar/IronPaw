@@ -179,6 +179,25 @@ public sealed class AgentTaskGraphCrashRecoveryTests
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(timeout.Token);
                 Assert.True(process.HasExited);
+                await Task.WhenAll(stdout, stderr).WaitAsync(timeout.Token);
+                // Process exit and exclusive file availability are separate observations on
+                // Windows. Wait only for a sharing violation, without opening the database
+                // engine or performing recovery, before testing the persisted crash state.
+                var releaseWait = Stopwatch.StartNew();
+                while (true)
+                {
+                    try
+                    {
+                        using var access = File.OpenHandle(CrashFixture.DatabasePath(Root), FileMode.Open,
+                            FileAccess.ReadWrite, FileShare.None);
+                        break;
+                    }
+                    catch (IOException error) when ((error.HResult & 0xFFFF) is 32 or 33 &&
+                        releaseWait.Elapsed < TimeSpan.FromSeconds(5))
+                    {
+                        await Task.Delay(25, timeout.Token);
+                    }
+                }
                 return graphId;
             }
             finally

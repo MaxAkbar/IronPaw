@@ -28,7 +28,6 @@ public sealed class CliOptionsTests
     [InlineData("--max-total-tokens", "100")]
     [InlineData("--max-execution-seconds", "10")]
     [InlineData("--llm-context-window-tokens", "1000")]
-    [InlineData("--store", "json")]
     [InlineData("--message-ttl-days", "30")]
     [InlineData("--no-events")]
     [InlineData("--allow-local-verification")]
@@ -147,7 +146,6 @@ public sealed class CliOptionsTests
             Prompt: "inline",
             PromptFile: "prompt.txt",
             Profile: ToolProfile.Coding,
-            Store: StoreBackend.Json,
             MessageTtlDays: 30,
             AutoCreateSkills: false,
             ListSkills: false,
@@ -160,18 +158,16 @@ public sealed class CliOptionsTests
         Assert.Contains("either --prompt or --prompt-file", error, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public void Parse_ParsesStoreFlag()
+    [Theory]
+    [InlineData("json")]
+    [InlineData("sqlite")]
+    [InlineData("csharpdb")]
+    public void Parse_RejectsObsoleteStoreFlag(string backend)
     {
-        var options = CliOptions.Parse(["--store", "sqlite", "--prompt", "hi"]);
-        Assert.Equal(StoreBackend.Sqlite, options.Store);
-    }
-
-    [Fact]
-    public void Parse_DefaultStoreIsJson()
-    {
-        var options = CliOptions.Parse(["--prompt", "hi"]);
-        Assert.Equal(StoreBackend.Json, options.Store);
+        var error = Assert.Throws<ArgumentException>(() => CliOptions.Parse(["--store", backend, "--prompt", "hi"]));
+        Assert.Contains("CSharpDB", error.Message);
+        Assert.Contains("not imported", error.Message);
+        Assert.Throws<ArgumentException>(() => CliOptions.Parse([$"--store={backend}"]));
     }
 
     [Fact]
@@ -363,7 +359,6 @@ public sealed class CliOptionsTests
             Prompt: "inline",
             PromptFile: null,
             Profile: ToolProfile.Coding,
-            Store: StoreBackend.Json,
             MessageTtlDays: 0,
             AutoCreateSkills: false,
             ListSkills: false,
@@ -386,7 +381,6 @@ public sealed class CliOptionsTests
             Prompt: "inline",
             PromptFile: null,
             Profile: ToolProfile.Coding,
-            Store: StoreBackend.Json,
             MessageTtlDays: 30,
             AutoCreateSkills: false,
             ListSkills: false,
@@ -410,7 +404,6 @@ public sealed class CliOptionsTests
             Prompt: "  hello world  ",
             PromptFile: null,
             Profile: ToolProfile.Coding,
-            Store: StoreBackend.Json,
             MessageTtlDays: 30,
             AutoCreateSkills: false,
             ListSkills: false,

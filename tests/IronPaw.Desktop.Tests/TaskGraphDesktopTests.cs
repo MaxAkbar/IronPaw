@@ -20,6 +20,92 @@ namespace IronPaw.Desktop.Tests;
 public sealed class TaskGraphDesktopTests
 {
     [Fact]
+    public Task TimelineRefreshesPersistedProgressWithoutExecutingWorkOrReplacingUserInput() => RunInSta(() =>
+    {
+        var manager = new PreflightWorkspaces();
+        using var scope = new Scope(manager);
+        var graph = scope.Accept("timeline-progress");
+        var window = scope.ShowWindow();
+        WaitFor(() => ((ComboBox)window.FindName("GraphTasksComboBox")).Items.Count == 2);
+        ((TextBox)window.FindName("GraphReconcileNoteTextBox")).Text = "Keep my evidence draft";
+        ((TabControl)window.FindName("ActivityTabControl")).SelectedIndex = 3;
+        var grid = (DataGrid)window.FindName("TimelineTasksGrid");
+        WaitFor(() => grid.Items.Count == 2);
+        var rows = grid.Items.Cast<ExecutionTimelineTask>().ToArray();
+        Assert.Equal("Ready", rows[0].Status);
+        Assert.Equal("Waiting", rows[1].Status);
+        Assert.Equal("producer", rows[1].WaitingFor);
+        grid.SelectedItem = rows[1];
+        var claim = Background(() => scope.Store.ClaimTaskAsync(graph.Graph.GraphId, CallerIdentity.LocalOwner(), default))!;
+        var candidate = new WorkflowTaskResult(graph.Graph.GraphId, graph.DefinitionFingerprint, "producer",
+            WorkflowTaskStatus.AwaitingVerification, "timeline-revision", "Candidate captured");
+        Background(() => scope.Store.RecordTaskResultAsync(claim, candidate, default));
+        Background(() => scope.Store.RecordTaskAcceptanceAsync(claim, new(TaskAcceptanceOutcome.Accepted, "timeline-test-host", "Artifact checks passed"), default));
+        WaitFor(() => grid.Items.Cast<ExecutionTimelineTask>().FirstOrDefault()?.Accepted == true);
+        rows = grid.Items.Cast<ExecutionTimelineTask>().ToArray();
+        Assert.Equal("Ready", rows[1].Status);
+        Assert.Equal("consumer", ((ExecutionTimelineTask)grid.SelectedItem).Id);
+        Assert.Equal(1, ((ProgressBar)window.FindName("TimelineProgressBar")).Value);
+        Assert.Contains("1 of 2 tasks accepted", ((TextBlock)window.FindName("TimelineSummaryTextBlock")).Text);
+        Assert.Contains("no build/test check configured", rows[0].Checks);
+        Assert.Contains(((ListBox)window.FindName("TimelineEventsListBox")).Items.Cast<ExecutionTimelineEntry>(), entry => entry.EventType == "task_acceptance");
+        var revision = Background(() => scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, default))!.Revision;
+        // A no-change refresh retains the same collection and selection, avoiding scroll resets.
+        var existingItems = grid.ItemsSource;
+        ((CheckBox)window.FindName("TimelineLiveCheckBox")).IsChecked = false;
+        ((TabControl)window.FindName("ActivityTabControl")).SelectedIndex = 0;
+        ((TabControl)window.FindName("ActivityTabControl")).SelectedIndex = 3;
+        WaitFor(() => ((TextBlock)window.FindName("TimelineStatusTextBlock")).Text.StartsWith("Read at", StringComparison.Ordinal));
+        Assert.Same(existingItems, grid.ItemsSource);
+        Assert.Equal(revision, Background(() => scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, default))!.Revision);
+        Assert.Equal("Keep my evidence draft", ((TextBox)window.FindName("GraphReconcileNoteTextBox")).Text);
+        ((CheckBox)window.FindName("GraphLocalVerificationCheckBox")).IsChecked = true;
+        ((Button)window.FindName("TimelineOpenControlsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        WaitFor(() => ((TabControl)window.FindName("ActivityTabControl")).SelectedIndex == 2
+            && ((TextBlock)window.FindName("GraphSummaryTextBlock")).Text.Contains(graph.Graph.GraphId));
+        Assert.False(((CheckBox)window.FindName("GraphLocalVerificationCheckBox")).IsChecked);
+        Assert.Equal(0, scope.Client.Calls);
+        Assert.Equal(0, manager.ExecutionCalls);
+        Assert.Equal(0, manager.ReadOnlyCalls);
+        Assert.Equal(0, manager.ResolveCalls);
+    });
+
+    [Fact]
+    public Task TimelineRendersUncertainCommandAndSavedEvidenceWithoutClaimingSuccess() => RunInSta(() =>
+    {
+        using var scope = new Scope();
+        var graph = scope.Accept("timeline-unknown", command: true);
+        var claim = Background(() => scope.Store.ClaimTaskAsync(graph.Graph.GraphId, CallerIdentity.LocalOwner(), default))!;
+        var candidate = new WorkflowTaskResult(graph.Graph.GraphId, graph.DefinitionFingerprint, "producer",
+            WorkflowTaskStatus.AwaitingVerification, "timeline-candidate", "Candidate awaiting build verification");
+        Background(() => scope.Store.RecordTaskResultAsync(claim, candidate, default));
+        Background(() => scope.Store.BeginTaskVerificationAsync(claim, "build", default));
+        Background(() => scope.Store.AbandonTaskClaimAsync(claim, "Command outcome was not captured", default));
+        var window = scope.ShowWindow();
+        ((TabControl)window.FindName("ActivityTabControl")).SelectedIndex = 3;
+        var grid = (DataGrid)window.FindName("TimelineTasksGrid");
+        WaitFor(() => grid.Items.Count == 2);
+        var row = grid.Items.Cast<ExecutionTimelineTask>().First();
+        Assert.Equal("Needs review", row.Status);
+        Assert.True(row.NeedsAttention);
+        Assert.False(row.Accepted);
+        Assert.Equal("Build: outcome unknown", row.Checks);
+        Assert.Equal("Verification outcome unknown", row.Activity);
+        Assert.Contains("do not retry automatically", ((TextBox)window.FindName("TimelineTaskDetailsTextBox")).Text);
+        Assert.Equal(0, ((ProgressBar)window.FindName("TimelineProgressBar")).Value);
+        Assert.Equal(0, scope.Client.Calls);
+        window.UpdateLayout();
+        var content = (FrameworkElement)window.Content;
+        var bitmap = new RenderTargetBitmap((int)content.ActualWidth, (int)content.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(content);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        var screenshotPath = Path.Combine(Path.GetTempPath(), "IronPaw-desktop-timeline-smoke.png");
+        using (var file = File.Create(screenshotPath)) encoder.Save(file);
+        Console.WriteLine("Desktop timeline render: " + screenshotPath);
+    });
+
+    [Fact]
     public Task GraphWindowRendersDependenciesArtifactsReceiptsBudgetAndChildIdentity() => RunInSta(() =>
     {
         using var scope = new Scope();
@@ -98,7 +184,10 @@ public sealed class TaskGraphDesktopTests
         using var scope = new Scope(manager);
         scope.Accept("close-graph");
         var window = scope.ShowWindow();
-        WaitFor(() => ((ComboBox)window.FindName("GraphsComboBox")).Items.Count == 1);
+        // The list arrives before the selected graph's asynchronous detail read. Wait for
+        // the same readiness users need; a routed event can otherwise hit a disabled button.
+        WaitFor(() => ((ComboBox)window.FindName("GraphsComboBox")).Items.Count == 1
+            && ((Button)window.FindName("ResumeGraphButton")).IsEnabled);
         ((Button)window.FindName("ResumeGraphButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         WaitFor(() => manager.Started.Task.IsCompleted);
         window.Close();
