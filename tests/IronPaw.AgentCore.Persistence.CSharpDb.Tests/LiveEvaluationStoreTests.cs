@@ -176,7 +176,7 @@ public sealed class LiveEvaluationStoreTests
             child.Kill(entireProcessTree: true);
             await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
             Assert.IsTrue(child.HasExited);
-            await using var recovered = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+            await using var recovered = await IronPaw.Testing.ProcessExitRecovery.OpenWorkflowAsync(DatabasePath);
             var checkpoint = await GetAsync(recovered);
             var request = Request("paid", 4m);
             Assert.ContainsSingle(checkpoint.Requests);

@@ -170,18 +170,8 @@ public sealed class WorkflowCrashRecoveryTests
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "IronPawCrashTests", Guid.NewGuid().ToString("n"));
         public CrashScope() => Directory.CreateDirectory(Root);
 
-        public async Task<CSharpDbWorkflowStore> OpenAfterTerminationAsync(TimeProvider? clock = null)
-        {
-            // A signaled process does not establish immediate filesystem availability on Windows.
-            // Still require exclusive recovery within a fixed bound; persistent locks fail the test.
-            var elapsed = Stopwatch.StartNew();
-            while (true)
-            {
-                try { return await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(Root), timeProvider: clock); }
-                catch (IOException error) when ((error.HResult & 0xFFFF) is 32 or 33 && elapsed.Elapsed < TimeSpan.FromSeconds(5))
-                { await Task.Delay(25); }
-            }
-        }
+        public Task<CSharpDbWorkflowStore> OpenAfterTerminationAsync(TimeProvider? clock = null) =>
+            IronPaw.Testing.ProcessExitRecovery.OpenWorkflowAsync(CrashFixture.DatabasePath(Root), timeProvider: clock);
 
         public async Task<string> StartAndKillAsync(CrashPoint point)
         {

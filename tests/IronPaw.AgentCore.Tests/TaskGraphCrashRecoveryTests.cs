@@ -15,7 +15,7 @@ public sealed class TaskGraphCrashRecoveryTests
         using var scope = new GraphCrashScope();
         var graphId = await scope.StartAndKillAsync(CrashPoint.AfterGraphEffect);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), timeout.Token);
+        await using var store = await IronPaw.Testing.ProcessExitRecovery.OpenWorkflowAsync(CrashFixture.DatabasePath(scope.Root), timeout.Token);
         var recovered = (await store.GetTaskGraphAsync(graphId, timeout.Token))!;
         var unknown = Assert.ContainsSingle(recovered.Tasks);
         Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, unknown.Status);
@@ -56,7 +56,7 @@ public sealed class TaskGraphCrashRecoveryTests
         using var scope = new GraphCrashScope();
         var graphId = await scope.StartAndKillAsync(CrashPoint.AfterGraphProposal);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), timeout.Token);
+        await using var store = await IronPaw.Testing.ProcessExitRecovery.OpenWorkflowAsync(CrashFixture.DatabasePath(scope.Root), timeout.Token);
         var recovered = (await store.GetTaskGraphAsync(graphId, timeout.Token))!;
         var proposed = Assert.ContainsSingle(recovered.Tasks);
         Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, proposed.Status);
@@ -84,7 +84,7 @@ public sealed class TaskGraphCrashRecoveryTests
         using var scope = new GraphCrashScope();
         var graphId = await scope.StartAndKillAsync(CrashPoint.AfterGraphAcceptance);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), timeout.Token);
+        await using var store = await IronPaw.Testing.ProcessExitRecovery.OpenWorkflowAsync(CrashFixture.DatabasePath(scope.Root), timeout.Token);
         var recovered = (await store.GetTaskGraphAsync(graphId, timeout.Token))!;
         var accepted = Assert.ContainsSingle(recovered.Tasks);
         AssertAccepted(recovered, accepted.AttemptId!);

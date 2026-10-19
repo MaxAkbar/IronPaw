@@ -24,6 +24,11 @@ their normal composition roots with isolated local state, and the packaged brows
 static JavaScript installation probe without network admission. These are deliberately bounded
 checks, not universal server/site compatibility or hostile-code OS-isolation claims.
 
+Post-termination recovery probes allow up to five seconds for Windows sharing locks to clear.
+They still require exclusive reopening, preserve receipt/effect assertions, and fail on a
+persistent lock. While a writer is alive, separate checks require the normal store API to reject
+a competing open immediately; the recovery probe does not change application storage behavior.
+
 ## External proof gates
 
 - A completed hosted workflow must demonstrate the checks against the published source commit.

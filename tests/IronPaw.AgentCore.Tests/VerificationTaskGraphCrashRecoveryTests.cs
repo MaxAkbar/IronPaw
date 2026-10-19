@@ -18,7 +18,7 @@ public sealed class VerificationTaskGraphCrashRecoveryTests
         var graphId = await scope.StartAndKillAsync(CrashPoint.AfterVerificationStarted);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var ct = timeout.Token;
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), ct);
+        await using var store = await IronPaw.Testing.ProcessExitRecovery.OpenWorkflowAsync(CrashFixture.DatabasePath(scope.Root), ct);
         var recovered = (await store.GetTaskGraphAsync(graphId, ct))!;
         var candidate = Assert.ContainsSingle(recovered.Tasks);
         var invocation = Assert.ContainsSingle(candidate.Verifications);
@@ -64,7 +64,7 @@ public sealed class VerificationTaskGraphCrashRecoveryTests
         var graphId = await scope.StartAndKillAsync(CrashPoint.AfterVerificationCompleted);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var ct = timeout.Token;
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), ct);
+        await using var store = await IronPaw.Testing.ProcessExitRecovery.OpenWorkflowAsync(CrashFixture.DatabasePath(scope.Root), ct);
         var recovered = (await store.GetTaskGraphAsync(graphId, ct))!;
         var candidate = Assert.ContainsSingle(recovered.Tasks);
         var invocation = Assert.ContainsSingle(candidate.Verifications);

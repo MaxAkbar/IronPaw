@@ -30,5 +30,6 @@
 
   <ItemGroup>
     <Compile Include="..\TestAssemblyConfiguration.cs" Link="TestAssemblyConfiguration.cs" />
+    <Compile Include="..\ProcessExitRecovery.cs" Link="ProcessExitRecovery.cs" />
   </ItemGroup>
 </Project>

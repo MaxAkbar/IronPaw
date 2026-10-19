@@ -341,7 +341,7 @@ public sealed class WorkflowStoreTests
             await Assert.ThrowsAsync<IOException>(() => CSharpDbWorkflowStore.OpenAsync(DatabasePath));
             child.Kill(entireProcessTree: true);
             await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
-            await using var recoveredStore = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
+            await using var recoveredStore = await IronPaw.Testing.ProcessExitRecovery.OpenWorkflowAsync(DatabasePath);
             var checkpoint = Assert.IsExactInstanceOfType<WorkflowCheckpoint>(await recoveredStore.GetAsync(new RunId("crash-run"), Ct));
             Assert.AreEqual(WorkflowStatus.NeedsReconciliation, checkpoint.Status);
             Assert.AreEqual(1, checkpoint.Revision);

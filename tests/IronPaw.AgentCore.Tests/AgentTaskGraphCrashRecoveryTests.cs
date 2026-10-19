@@ -18,7 +18,7 @@ public sealed class AgentTaskGraphCrashRecoveryTests
         var graphId = await scope.StartAndKillAsync(CrashPoint.AfterAgentChildSuccess);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var ct = timeout.Token;
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), ct);
+        await using var store = await IronPaw.Testing.ProcessExitRecovery.OpenWorkflowAsync(CrashFixture.DatabasePath(scope.Root), ct);
         var recovered = (await store.GetTaskGraphAsync(graphId, ct))!;
         var unknown = Assert.ContainsSingle(recovered.Tasks);
         Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, unknown.Status);
@@ -64,7 +64,7 @@ public sealed class AgentTaskGraphCrashRecoveryTests
         var graphId = await scope.StartAndKillAsync(CrashPoint.AfterAgentCandidate);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var ct = timeout.Token;
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), ct);
+        await using var store = await IronPaw.Testing.ProcessExitRecovery.OpenWorkflowAsync(CrashFixture.DatabasePath(scope.Root), ct);
         var recovered = (await store.GetTaskGraphAsync(graphId, ct))!;
         var candidate = Assert.ContainsSingle(recovered.Tasks);
         Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, candidate.Status);
