@@ -29,7 +29,6 @@ jobs:
       OLLAMA_API_KEY: ''
       LMSTUDIO_API_KEY: ''
       PLAYWRIGHT_SKIP_BROWSER_GC: '1'
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ironpaw-browsers
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -41,6 +40,8 @@ jobs:
           global-json-file: global.json
       - name: Install pinned browser
         run: |
+          $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:RUNNER_TEMP 'ironpaw-browsers'
+          "PLAYWRIGHT_BROWSERS_PATH=$env:PLAYWRIGHT_BROWSERS_PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           dotnet build src/IronPaw.Cli/IronPaw.Cli.csproj -c Release -warnaserror
           if ($LASTEXITCODE -ne 0) { throw 'Browser installer host build failed.' }
           ./src/IronPaw.Cli/bin/Release/net10.0/playwright.ps1 install chromium --only-shell
