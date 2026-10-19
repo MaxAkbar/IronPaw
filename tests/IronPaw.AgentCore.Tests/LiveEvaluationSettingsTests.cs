@@ -2,29 +2,30 @@ using System.Text.Json;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class LiveEvaluationSettingsTests
 {
-    [Fact]
+    [TestMethod]
     public void DisabledDefaultsRemainUnconfiguredWithoutInventingProviderOrSpend()
     {
         var settings = new LiveEvaluationSettings();
 
         var result = settings.Validate();
 
-        Assert.True(result.IsValid);
-        Assert.False(result.IsReady);
-        Assert.Empty(result.Errors);
-        Assert.Null(settings.Provider);
-        Assert.Null(settings.Model);
-        Assert.Null(settings.MaxTotalSpend);
-        Assert.Throws<InvalidOperationException>(() => settings.RequireEnabled());
+        Assert.IsTrue(result.IsValid);
+        Assert.IsFalse(result.IsReady);
+        Assert.IsEmpty(result.Errors);
+        Assert.IsNull(settings.Provider);
+        Assert.IsNull(settings.Model);
+        Assert.IsNull(settings.MaxTotalSpend);
+        Assert.ThrowsExactly<InvalidOperationException>(() => settings.RequireEnabled());
     }
 
-    [Theory]
-    [InlineData("openai")]
-    [InlineData("ANTHROPIC")]
-    [InlineData("ollama")]
-    [InlineData("lmstudio")]
+    [TestMethod]
+    [DataRow("openai")]
+    [DataRow("ANTHROPIC")]
+    [DataRow("ollama")]
+    [DataRow("lmstudio")]
     public void EnabledSettingsFreezeExplicitProviderModelAndDecimalWholeComparisonCap(string provider)
     {
         var settings = Complete() with { Provider = provider };
@@ -32,49 +33,51 @@ public sealed class LiveEvaluationSettingsTests
         var result = settings.Validate();
         var accepted = settings.RequireEnabled();
 
-        Assert.True(result.IsValid);
-        Assert.True(result.IsReady);
-        Assert.Equal(provider.ToLowerInvariant(), accepted.Provider);
-        Assert.Equal("exact-model-id", accepted.Model);
-        Assert.Equal(12.34m, accepted.MaxTotalSpend);
-        Assert.Equal("USD", accepted.Currency);
-        Assert.Equal(provider, settings.Provider);
+        Assert.IsTrue(result.IsValid);
+        Assert.IsTrue(result.IsReady);
+        Assert.AreEqual(provider.ToLowerInvariant(), accepted.Provider);
+        Assert.AreEqual("exact-model-id", accepted.Model);
+        Assert.AreEqual(12.34m, accepted.MaxTotalSpend);
+        Assert.AreEqual("USD", accepted.Currency);
+        Assert.AreEqual(provider, settings.Provider);
     }
 
-    [Theory]
-    [InlineData("provider")]
-    [InlineData("model")]
-    [InlineData("spend")]
+    [TestMethod]
+    [DataRow("provider")]
+    [DataRow("model")]
+    [DataRow("spend")]
     public void EnabledSettingsCannotOmitRequiredLiveValues(string missing)
     {
-        var settings = missing switch {
+        var settings = missing switch
+        {
             "provider" => Complete() with { Provider = null },
             "model" => Complete() with { Model = null },
             _ => Complete() with { MaxTotalSpend = null }
         };
 
-        Assert.False(settings.Validate().IsValid);
-        Assert.False(settings.Validate().IsReady);
-        Assert.Throws<ArgumentException>(() => settings.RequireEnabled());
+        Assert.IsFalse(settings.Validate().IsValid);
+        Assert.IsFalse(settings.Validate().IsReady);
+        Assert.ThrowsExactly<ArgumentException>(() => settings.RequireEnabled());
     }
 
-    [Theory]
-    [InlineData("schema")]
-    [InlineData("unknown-provider")]
-    [InlineData("rule-based-provider")]
-    [InlineData("padded-provider")]
-    [InlineData("blank-model")]
-    [InlineData("padded-model")]
-    [InlineData("control-model")]
-    [InlineData("zero-cap")]
-    [InlineData("negative-cap")]
-    [InlineData("null-currency")]
-    [InlineData("lowercase-currency")]
-    [InlineData("currency-length")]
-    [InlineData("currency-characters")]
+    [TestMethod]
+    [DataRow("schema")]
+    [DataRow("unknown-provider")]
+    [DataRow("rule-based-provider")]
+    [DataRow("padded-provider")]
+    [DataRow("blank-model")]
+    [DataRow("padded-model")]
+    [DataRow("control-model")]
+    [DataRow("zero-cap")]
+    [DataRow("negative-cap")]
+    [DataRow("null-currency")]
+    [DataRow("lowercase-currency")]
+    [DataRow("currency-length")]
+    [DataRow("currency-characters")]
     public void MalformedProvidedValuesFailEvenWhenLiveExecutionIsDisabled(string defect)
     {
-        var settings = defect switch {
+        var settings = defect switch
+        {
             "schema" => Complete() with { SchemaVersion = 2 },
             "unknown-provider" => Complete() with { Provider = "opneai" },
             "rule-based-provider" => Complete() with { Provider = "local" },
@@ -92,70 +95,72 @@ public sealed class LiveEvaluationSettingsTests
 
         var result = (settings with { Enabled = false }).Validate();
 
-        Assert.False(result.IsValid);
-        Assert.False(result.IsReady);
-        Assert.NotEmpty(result.Errors);
+        Assert.IsFalse(result.IsValid);
+        Assert.IsFalse(result.IsReady);
+        Assert.IsNotEmpty(result.Errors);
     }
 
-    [Theory]
-    [InlineData("{\"enabled\":false,\"apiKey\":\"secret\"}")]
-    [InlineData("{\"provider\":\"openai\",\"PROVIDER\":\"anthropic\"}")]
-    [InlineData("{\"maxTotalSpend\":\"5\"}")]
-    [InlineData("{\"schemaVersion\":\"1\"}")]
-    [InlineData("null")]
+    [TestMethod]
+    [DataRow("{\"enabled\":false,\"apiKey\":\"secret\"}")]
+    [DataRow("{\"provider\":\"openai\",\"PROVIDER\":\"anthropic\"}")]
+    [DataRow("{\"maxTotalSpend\":\"5\"}")]
+    [DataRow("{\"schemaVersion\":\"1\"}")]
+    [DataRow("null")]
     public void StrictConfigurationRejectsSecretFieldsAndAmbiguousDocuments(string json) =>
-        Assert.ThrowsAny<JsonException>(() => TaskGraphDocumentJson.Parse<LiveEvaluationSettings>(json));
+        Assert.Throws<JsonException>(() => TaskGraphDocumentJson.Parse<LiveEvaluationSettings>(json));
 
-    [Fact]
+    [TestMethod]
     public void ConfigurationRoundTripPreservesDecimalCapWithoutEnablingDisabledSettings()
     {
         var settings = Complete() with { Enabled = false, MaxTotalSpend = 0.0001m };
 
         var parsed = TaskGraphDocumentJson.Parse<LiveEvaluationSettings>(TaskGraphDocumentJson.Serialize(settings));
 
-        Assert.Equal(settings, parsed);
-        Assert.True(parsed.Validate().IsValid);
-        Assert.False(parsed.Validate().IsReady);
+        Assert.AreEqual(settings, parsed);
+        Assert.IsTrue(parsed.Validate().IsValid);
+        Assert.IsFalse(parsed.Validate().IsReady);
     }
 
-    [Theory]
-    [InlineData("pricing")]
-    [InlineData("input-ceiling")]
-    [InlineData("output-ceiling")]
-    [InlineData("framing")]
+    [TestMethod]
+    [DataRow("pricing")]
+    [DataRow("input-ceiling")]
+    [DataRow("output-ceiling")]
+    [DataRow("framing")]
     public void EnabledExecutionRequiresDeclaredRatesAndRequestCeilings(string missing)
     {
-        var settings = missing switch {
+        var settings = missing switch
+        {
             "pricing" => Complete() with { Pricing = null },
             "input-ceiling" => Complete() with { MaxInputTokensPerRequest = null },
             "output-ceiling" => Complete() with { MaxOutputTokensPerRequest = null },
             _ => Complete() with { InputFramingTokenAllowance = null }
         };
-        Assert.False(settings.Validate().IsValid);
-        Assert.Throws<ArgumentException>(() => settings.RequireEnabled());
-        Assert.True((settings with { Enabled = false }).Validate().IsValid);
+        Assert.IsFalse(settings.Validate().IsValid);
+        Assert.ThrowsExactly<ArgumentException>(() => settings.RequireEnabled());
+        Assert.IsTrue((settings with { Enabled = false }).Validate().IsValid);
     }
 
-    [Theory]
-    [InlineData("input-negative")]
-    [InlineData("output-negative")]
-    [InlineData("read-negative")]
-    [InlineData("write-negative")]
-    [InlineData("input-missing")]
-    [InlineData("output-missing")]
-    [InlineData("read-missing")]
-    [InlineData("write-missing")]
-    [InlineData("unbounded-rate")]
-    [InlineData("all-zero")]
-    [InlineData("source")]
-    [InlineData("source-control")]
-    [InlineData("source-padding")]
-    [InlineData("asof-missing")]
-    [InlineData("asof-not-utc")]
+    [TestMethod]
+    [DataRow("input-negative")]
+    [DataRow("output-negative")]
+    [DataRow("read-negative")]
+    [DataRow("write-negative")]
+    [DataRow("input-missing")]
+    [DataRow("output-missing")]
+    [DataRow("read-missing")]
+    [DataRow("write-missing")]
+    [DataRow("unbounded-rate")]
+    [DataRow("all-zero")]
+    [DataRow("source")]
+    [DataRow("source-control")]
+    [DataRow("source-padding")]
+    [DataRow("asof-missing")]
+    [DataRow("asof-not-utc")]
     public void SuppliedMalformedPriceSchedulesFailWithoutInventedFallbacks(string defect)
     {
         var pricing = Complete().Pricing!;
-        pricing = defect switch {
+        pricing = defect switch
+        {
             "input-negative" => pricing with { InputPerMillion = -1 },
             "output-negative" => pricing with { OutputPerMillion = -1 },
             "read-negative" => pricing with { CacheReadPerMillion = -1 },
@@ -173,19 +178,20 @@ public sealed class LiveEvaluationSettingsTests
             _ => pricing with { AsOfUtc = new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.FromHours(1)) }
         };
 
-        Assert.False((Complete() with { Pricing = pricing, Enabled = false }).Validate().IsValid);
+        Assert.IsFalse((Complete() with { Pricing = pricing, Enabled = false }).Validate().IsValid);
     }
 
-    [Theory]
-    [InlineData("input")]
-    [InlineData("output")]
-    [InlineData("negative-framing")]
-    [InlineData("framing-exhausts-input")]
-    [InlineData("zero-trials")]
-    [InlineData("too-many-trials")]
+    [TestMethod]
+    [DataRow("input")]
+    [DataRow("output")]
+    [DataRow("negative-framing")]
+    [DataRow("framing-exhausts-input")]
+    [DataRow("zero-trials")]
+    [DataRow("too-many-trials")]
     public void InvalidRequestAndTrialBoundsFailEvenWhenDisabled(string defect)
     {
-        var settings = defect switch {
+        var settings = defect switch
+        {
             "input" => Complete() with { MaxInputTokensPerRequest = 0 },
             "output" => Complete() with { MaxOutputTokensPerRequest = 0 },
             "negative-framing" => Complete() with { InputFramingTokenAllowance = -1 },
@@ -193,22 +199,34 @@ public sealed class LiveEvaluationSettingsTests
             "zero-trials" => Complete() with { PairedTrials = 0 },
             _ => Complete() with { PairedTrials = 1001 }
         };
-        Assert.False((settings with { Enabled = false }).Validate().IsValid);
+        Assert.IsFalse((settings with { Enabled = false }).Validate().IsValid);
     }
 
-    [Fact]
+    [TestMethod]
     public void EnabledExecutionDoesNotSilentlyConvertCurrency()
     {
-        Assert.False((Complete() with { Currency = "EUR" }).Validate().IsValid);
-        Assert.True((Complete() with { Currency = "EUR", Enabled = false }).Validate().IsValid);
+        Assert.IsFalse((Complete() with { Currency = "EUR" }).Validate().IsValid);
+        Assert.IsTrue((Complete() with { Currency = "EUR", Enabled = false }).Validate().IsValid);
     }
 
-    private static LiveEvaluationSettings Complete() => new() {
-        Enabled = true, Provider = "openai", Model = "exact-model-id", MaxTotalSpend = 12.34m, Currency = "USD",
-        MaxInputTokensPerRequest = 10000, MaxOutputTokensPerRequest = 1000, InputFramingTokenAllowance = 1024,
-        Pricing = new() {
-            InputPerMillion = 1m, OutputPerMillion = 2m, CacheReadPerMillion = 0.1m, CacheWritePerMillion = 1.25m,
-            Source = "fixture supplied prices", AsOfUtc = new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero)
+    private static LiveEvaluationSettings Complete() => new()
+    {
+        Enabled = true,
+        Provider = "openai",
+        Model = "exact-model-id",
+        MaxTotalSpend = 12.34m,
+        Currency = "USD",
+        MaxInputTokensPerRequest = 10000,
+        MaxOutputTokensPerRequest = 1000,
+        InputFramingTokenAllowance = 1024,
+        Pricing = new()
+        {
+            InputPerMillion = 1m,
+            OutputPerMillion = 2m,
+            CacheReadPerMillion = 0.1m,
+            CacheWritePerMillion = 1.25m,
+            Source = "fixture supplied prices",
+            AsOfUtc = new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero)
         }
     };
 }

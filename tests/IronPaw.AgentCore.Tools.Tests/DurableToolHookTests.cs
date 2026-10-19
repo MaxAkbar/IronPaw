@@ -3,25 +3,28 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class DurableToolHookTests
 {
-    [Theory]
-    [InlineData("arguments")]
-    [InlineData("name")]
-    [InlineData("id")]
+    [TestMethod]
+    [DataRow("arguments")]
+    [DataRow("name")]
+    [DataRow("id")]
     public async Task HookCannotReplaceRecordedOperationBeforeEffect(string changedField)
     {
         var original = new ToolCall("approved-call", "effect", JsonSerializer.SerializeToElement(new { target = "approved" }));
-        var replacement = changedField switch {
+        var replacement = changedField switch
+        {
             "arguments" => original with { Arguments = JsonSerializer.SerializeToElement(new { target = "different" }) },
             "name" => original with { ToolName = "other-effect" },
-            _ => original with { ToolCallId = "different-call" } };
+            _ => original with { ToolCallId = "different-call" }
+        };
         var tool = new CountingTool();
         var result = await new ToolExecutor(new MutatingHook(replacement)).ExecuteAsync(tool, original,
             new ToolExecutionContext(RunId.New(), SessionKey.New(), "local", "test", CallerIdentity.LocalOwner(),
                 ToolExecutionId: "recorded-execution"), CancellationToken.None);
-        Assert.True(result.IsError);
-        Assert.Equal(0, tool.CallCount);
+        Assert.IsTrue(result.IsError);
+        Assert.AreEqual(0, tool.CallCount);
     }
 
     private sealed class CountingTool : ITool

@@ -6,45 +6,46 @@ using IronPaw.AgentCore.Persistence.CSharpDb;
 
 namespace IronPaw.AgentCore.Persistence.CSharpDb.Tests;
 
-public sealed class AgentTaskGraphStoreTests : IDisposable
+[TestClass]
+public sealed class AgentTaskGraphStoreTests
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "IronPaw-AgentGraph-" + Guid.NewGuid().ToString("n"));
     private string DatabasePath => Path.Combine(_directory, "workflows.cdb");
     private static readonly CancellationToken Ct = CancellationToken.None;
     private static readonly CallerIdentity Caller = new("caller", "Original caller", true);
 
-    [Fact]
+    [TestMethod]
     public async Task AcceptanceAtomicallyBindsImmutableAgentConfigurationAndNonExecutableRoot()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var graph = Graph(Task("a"));
         var binding = Binding(graph);
         var accepted = await store.AcceptAgentTaskGraphAsync(graph, Caller, 1, binding, Ct);
-        Assert.Equal(2, accepted.SchemaVersion);
+        Assert.AreEqual(2, accepted.SchemaVersion);
         var root = (await store.GetAsync(new(binding.RootRunId), Ct))!;
-        Assert.Equal(root.RunId, root.RootRunId);
-        Assert.Null(root.ParentRunId);
-        Assert.Equal(binding.SharedBudget, root.Budget);
-        Assert.Equal(0, root.Usage!.ModelCalls);
-        Assert.Equal(0, (await store.AcceptAgentTaskGraphAsync(graph, Caller, 1, binding, Ct)).Revision);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.AcceptAgentTaskGraphAsync(graph, Caller, 1, binding with { Model = "changed" }, Ct));
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.AcceptTaskGraphAsync(graph, Caller, 1, Ct));
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(root with { LeaseOwner = "forbidden", Status = WorkflowStatus.Running }, root.Revision, "must-not-execute", Ct));
-        Assert.Single(await store.ReadJournalAsync(new(binding.RootRunId), Ct));
+        Assert.AreEqual(root.RunId, root.RootRunId);
+        Assert.IsNull(root.ParentRunId);
+        Assert.AreEqual(binding.SharedBudget, root.Budget);
+        Assert.AreEqual(0, root.Usage!.ModelCalls);
+        Assert.AreEqual(0, (await store.AcceptAgentTaskGraphAsync(graph, Caller, 1, binding, Ct)).Revision);
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.AcceptAgentTaskGraphAsync(graph, Caller, 1, binding with { Model = "changed" }, Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.AcceptTaskGraphAsync(graph, Caller, 1, Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.SaveAsync(root with { LeaseOwner = "forbidden", Status = WorkflowStatus.Running }, root.Revision, "must-not-execute", Ct));
+        Assert.ContainsSingle(await store.ReadJournalAsync(new(binding.RootRunId), Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task GenericGraphCannotBeReboundAndRemainsSchemaOne()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var graph = Graph(Task("a"));
         await store.AcceptTaskGraphAsync(graph, Caller, 1, Ct);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.AcceptAgentTaskGraphAsync(graph, Caller, 1, Binding(graph), Ct));
-        Assert.Equal(1, (await store.GetTaskGraphAsync(graph.GraphId, Ct))!.SchemaVersion);
-        Assert.Null(await store.GetAsync(AgentTaskIdentity.RootRunId(graph.GraphId), Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.AcceptAgentTaskGraphAsync(graph, Caller, 1, Binding(graph), Ct));
+        Assert.AreEqual(1, (await store.GetTaskGraphAsync(graph.GraphId, Ct))!.SchemaVersion);
+        Assert.IsNull(await store.GetAsync(AgentTaskIdentity.RootRunId(graph.GraphId), Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task GraphJournalFailureRollsBackSyntheticRootAndBinding()
     {
         await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath)) { }
@@ -54,13 +55,13 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
         }
         await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var graph = Graph(Task("a"));
-        await Assert.ThrowsAnyAsync<Exception>(() => reopened.AcceptAgentTaskGraphAsync(graph, Caller, 1, Binding(graph), Ct));
-        Assert.Null(await reopened.GetTaskGraphAsync(graph.GraphId, Ct));
-        Assert.Null(await reopened.GetAsync(AgentTaskIdentity.RootRunId(graph.GraphId), Ct));
-        Assert.Empty(await reopened.ReadJournalAsync(AgentTaskIdentity.RootRunId(graph.GraphId), Ct));
+        await Assert.ThrowsAsync<Exception>(() => reopened.AcceptAgentTaskGraphAsync(graph, Caller, 1, Binding(graph), Ct));
+        Assert.IsNull(await reopened.GetTaskGraphAsync(graph.GraphId, Ct));
+        Assert.IsNull(await reopened.GetAsync(AgentTaskIdentity.RootRunId(graph.GraphId), Ct));
+        Assert.IsEmpty(await reopened.ReadJournalAsync(AgentTaskIdentity.RootRunId(graph.GraphId), Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ChildCreationAndEveryAdmissionRequireMatchingLiveGraphClaim()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -68,21 +69,26 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
         var accepted = await store.AcceptAgentTaskGraphAsync(graph, Caller, 1, Binding(graph), Ct);
         var claim = (await store.ClaimTaskAsync(graph.GraphId, Caller, Ct))!;
         var child = Child(accepted, claim);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.CreateAsync(child with { Request = child.Request with { Provider = "different" } }, Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.CreateAsync(child with { Request = child.Request with { Provider = "different" } }, Ct));
         await store.CreateAsync(child, Ct);
         await store.AbandonTaskClaimAsync(claim, "Executor stopped before dispatch", Ct);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(child with { LeaseOwner = "bypass", Status = WorkflowStatus.Running }, 0, "bypass-claim", Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.SaveAsync(child with { LeaseOwner = "bypass", Status = WorkflowStatus.Running }, 0, "bypass-claim", Ct));
         var reclaimed = await store.ReclaimAgentTaskAsync(graph.GraphId, "a", Caller, Ct);
-        Assert.Equal(claim.AttemptId, reclaimed.AttemptId);
-        Assert.NotEqual(claim.LeaseToken, reclaimed.LeaseToken);
+        Assert.AreEqual(claim.AttemptId, reclaimed.AttemptId);
+        Assert.AreNotEqual(claim.LeaseToken, reclaimed.LeaseToken);
         child = await store.SaveAsync(child with { LeaseOwner = "valid", Status = WorkflowStatus.Running }, 0, "claimed", Ct);
-        var nested = child with { RunId = "nested", ParentRunId = child.RunId,
+        var nested = child with
+        {
+            RunId = "nested",
+            ParentRunId = child.RunId,
             Request = child.Request with { SessionKey = new("nested"), ParentRunId = new(child.RunId), RequestedRunId = new("nested") },
-            Revision = 0, LeaseOwner = null };
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.CreateAsync(nested, Ct));
+            Revision = 0,
+            LeaseOwner = null
+        };
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.CreateAsync(nested, Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SharedModelCallBudgetCannotResetAcrossIndependentAgentTasks()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -93,12 +99,12 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
         await store.CreateAsync(a, Ct);
         await store.CreateAsync(b, Ct);
         await store.SaveAsync(a with { Usage = new(ModelCalls: 1), ModelCalls = [new("model-a")] }, 0, "model_started", Ct);
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(b with { Usage = new(ModelCalls: 1), ModelCalls = [new("model-b")] }, 0, "model_started", Ct));
-        Assert.Equal(1, (await ((IWorkflowStore)store).GetUsageAsync(new(accepted.AgentBinding!.RootRunId), Ct)).ModelCalls);
-        Assert.Equal(0, (await store.GetAsync(new(b.RunId), Ct))!.Revision);
+        await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(b with { Usage = new(ModelCalls: 1), ModelCalls = [new("model-b")] }, 0, "model_started", Ct));
+        Assert.AreEqual(1, (await ((IWorkflowStore)store).GetUsageAsync(new(accepted.AgentBinding!.RootRunId), Ct)).ModelCalls);
+        Assert.AreEqual(0, (await store.GetAsync(new(b.RunId), Ct))!.Revision);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SharedTokenReservationsCoverAllBoundChildren()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -109,11 +115,11 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
         await store.CreateAsync(a, Ct);
         await store.CreateAsync(b, Ct);
         await store.SaveAsync(a with { Usage = new(ModelCalls: 1), ModelCalls = [new("a", Attempts: [new("attempt-a", 5, 2)])] }, 0, "model_started", Ct);
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(b with { Usage = new(ModelCalls: 1), ModelCalls = [new("b", Attempts: [new("attempt-b", 6, 2)])] }, 0, "model_started", Ct));
-        Assert.Equal(5, (await store.GetBudgetAsync(new(accepted.AgentBinding!.RootRunId), Ct)).ReservedTokens);
+        await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(b with { Usage = new(ModelCalls: 1), ModelCalls = [new("b", Attempts: [new("attempt-b", 6, 2)])] }, 0, "model_started", Ct));
+        Assert.AreEqual(5, (await store.GetBudgetAsync(new(accepted.AgentBinding!.RootRunId), Ct)).ReservedTokens);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task GraphAndChildLeasesShareOneExecutionIntervalAndExcludeSettledTime()
     {
         var time = new ManualTimeProvider();
@@ -128,10 +134,10 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
         await store.SaveAsync(child with { LeaseOwner = null, Status = WorkflowStatus.Interrupted }, 0, "settled", Ct);
         await store.RecordTaskResultAsync(claim, Failure(claim), Ct);
         time.Advance(TimeSpan.FromSeconds(20));
-        Assert.Equal(TimeSpan.FromSeconds(8), (await store.GetBudgetAsync(new(accepted.AgentBinding!.RootRunId), Ct)).ExecutionTime);
+        Assert.AreEqual(TimeSpan.FromSeconds(8), (await store.GetBudgetAsync(new(accepted.AgentBinding!.RootRunId), Ct)).ExecutionTime);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReopenChargesUncleanGraphDowntimeThenStopsClockAndRequiresExplicitSafeReclaim()
     {
         var time = new ManualTimeProvider();
@@ -145,15 +151,15 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
         }
         time.Advance(TimeSpan.FromSeconds(7));
         await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath, timeProvider: time);
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, (await reopened.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks[0].Status);
-        Assert.Equal(TimeSpan.FromSeconds(7), (await reopened.GetBudgetAsync(new(binding.RootRunId), Ct)).ExecutionTime);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, (await reopened.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks[0].Status);
+        Assert.AreEqual(TimeSpan.FromSeconds(7), (await reopened.GetBudgetAsync(new(binding.RootRunId), Ct)).ExecutionTime);
         time.Advance(TimeSpan.FromSeconds(10));
-        Assert.Equal(TimeSpan.FromSeconds(7), (await reopened.GetBudgetAsync(new(binding.RootRunId), Ct)).ExecutionTime);
-        Assert.Null(await reopened.ClaimTaskAsync(graph.GraphId, Caller, Ct));
-        Assert.Equal(attempt, (await reopened.ReclaimAgentTaskAsync(graph.GraphId, "a", Caller, Ct)).AttemptId);
+        Assert.AreEqual(TimeSpan.FromSeconds(7), (await reopened.GetBudgetAsync(new(binding.RootRunId), Ct)).ExecutionTime);
+        Assert.IsNull(await reopened.ClaimTaskAsync(graph.GraphId, Caller, Ct));
+        Assert.AreEqual(attempt, (await reopened.ReclaimAgentTaskAsync(graph.GraphId, "a", Caller, Ct)).AttemptId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task MirroredPauseCannotBeClearedThroughWorkflowAndWaitsForGraphAndChildLeases()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -164,18 +170,18 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
         await store.CreateAsync(child, Ct);
         await store.ControlTaskGraphAsync(graph.GraphId, WorkflowControl.Pause, Caller, Ct);
         var root = (await store.GetAsync(new(accepted.AgentBinding!.RootRunId), Ct))!;
-        Assert.Equal(WorkflowControl.Pause, root.Control);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(root with { Control = WorkflowControl.None }, root.Revision, "resume_requested", Ct));
+        Assert.AreEqual(WorkflowControl.Pause, root.Control);
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.SaveAsync(root with { Control = WorkflowControl.None }, root.Revision, "resume_requested", Ct));
         await store.AbandonTaskClaimAsync(claim, "Pause settled at graph boundary", Ct);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.ControlTaskGraphAsync(graph.GraphId, WorkflowControl.None, Caller, Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.ControlTaskGraphAsync(graph.GraphId, WorkflowControl.None, Caller, Ct));
         await store.SaveAsync(child with { LeaseOwner = null, Status = WorkflowStatus.Interrupted }, 0, "settled", Ct);
         await store.ControlTaskGraphAsync(graph.GraphId, WorkflowControl.None, Caller, Ct);
         await store.ControlTaskGraphAsync(graph.GraphId, WorkflowControl.Cancel, Caller, Ct);
-        Assert.Equal(WorkflowControl.Cancel, (await store.GetAsync(new(accepted.AgentBinding.RootRunId), Ct))!.Control);
-        await Assert.ThrowsAsync<WorkflowCancelledException>(() => store.ReclaimAgentTaskAsync(graph.GraphId, "a", Caller, Ct));
+        Assert.AreEqual(WorkflowControl.Cancel, (await store.GetAsync(new(accepted.AgentBinding.RootRunId), Ct))!.Control);
+        await Assert.ThrowsExactlyAsync<WorkflowCancelledException>(() => store.ReclaimAgentTaskAsync(graph.GraphId, "a", Caller, Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task UnknownToolEffectsBlockExplicitReclaimUntilKnownReceiptIsRecorded()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -186,12 +192,12 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
         var child = Child(accepted, claim) with { ToolExecutions = [tool], Usage = new(ToolCalls: 1) };
         await store.CreateAsync(child, Ct);
         await store.AbandonTaskClaimAsync(claim, "Lost outcome", Ct);
-        await Assert.ThrowsAsync<WorkflowReconciliationRequiredException>(() => store.ReclaimAgentTaskAsync(graph.GraphId, "a", Caller, Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowReconciliationRequiredException>(() => store.ReclaimAgentTaskAsync(graph.GraphId, "a", Caller, Ct));
         await store.SaveAsync(child with { ToolExecutions = [tool with { State = WorkflowToolState.Completed, Result = ToolResult.Success("Observed saved file"), ReconciliationNote = "Inspected external state" }] }, 0, "reconciled", Ct);
-        Assert.Equal(claim.AttemptId, (await store.ReclaimAgentTaskAsync(graph.GraphId, "a", Caller, Ct)).AttemptId);
+        Assert.AreEqual(claim.AttemptId, (await store.ReclaimAgentTaskAsync(graph.GraphId, "a", Caller, Ct)).AttemptId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task PendingVerificationNeedsTrustedAcceptanceAndCanEstablishBudgetExhaustion()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -203,16 +209,16 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
         await store.RecordTaskResultAsync(claim, proposal, Ct);
         await store.RecordTaskAcceptanceAsync(claim, new(TaskAcceptanceOutcome.BudgetExhausted, "host", "No execution time remains for verification"), Ct);
         var saved = (await store.GetTaskGraphAsync(graph.GraphId, Ct))!;
-        Assert.Equal(TaskGraphTaskStatus.BudgetExhausted, saved.Tasks[0].Status);
-        Assert.Equal(TaskGraphTaskStatus.Pending, saved.Tasks[1].Status);
-        Assert.Null(await store.ClaimTaskAsync(graph.GraphId, Caller, Ct));
+        Assert.AreEqual(TaskGraphTaskStatus.BudgetExhausted, saved.Tasks[0].Status);
+        Assert.AreEqual(TaskGraphTaskStatus.Pending, saved.Tasks[1].Status);
+        Assert.IsNull(await store.ClaimTaskAsync(graph.GraphId, Caller, Ct));
     }
 
-    [Theory]
-    [InlineData("no-criteria")]
-    [InlineData("missing-artifact")]
-    [InlineData("unresolved-issue")]
-    [InlineData("nonpassing-evidence")]
+    [TestMethod]
+    [DataRow("no-criteria")]
+    [DataRow("missing-artifact")]
+    [DataRow("unresolved-issue")]
+    [DataRow("nonpassing-evidence")]
     public async Task TrustedAcceptanceCannotBypassCandidateStructuralRequirements(string defect)
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -229,12 +235,12 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
             VerificationEvidence = defect == "nonpassing-evidence" ? [new("evidence", "criterion", "revision", TaskVerificationOutcome.Failed, "Required check failed")] : []
         };
         var before = await store.RecordTaskResultAsync(claim, proposal, Ct);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.RecordTaskAcceptanceAsync(claim,
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.RecordTaskAcceptanceAsync(claim,
             new(TaskAcceptanceOutcome.Accepted, "trusted-host", "Must not bypass protocol requirements"), Ct));
         var saved = (await store.GetTaskGraphAsync(graph.GraphId, Ct))!;
-        Assert.Equal(before.Revision, saved.Revision);
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, saved.Tasks[0].Status);
-        Assert.Null(saved.Tasks[0].Acceptance);
+        Assert.AreEqual(before.Revision, saved.Revision);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, saved.Tasks[0].Status);
+        Assert.IsNull(saved.Tasks[0].Acceptance);
     }
 
     private TaskGraphAgentBinding Binding(WorkflowTaskGraph graph) => new(AgentTaskIdentity.RootRunId(graph.GraphId).Value,
@@ -243,7 +249,8 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
     private static WorkflowTaskGraph Graph(params WorkflowTaskDefinition[] tasks) => new("graph", "Deliver objective", tasks.ToImmutableArray());
     private static WorkflowTaskDefinition Task(string id, params string[] dependencies) => new(id, "Execute " + id)
     {
-        Dependencies = dependencies.ToImmutableArray(), AcceptanceCriteria = [new("criterion", "Verify exact result")]
+        Dependencies = dependencies.ToImmutableArray(),
+        AcceptanceCriteria = [new("criterion", "Verify exact result")]
     };
     private static WorkflowCheckpoint Child(TaskGraphCheckpoint accepted, TaskGraphClaim claim)
     {
@@ -259,5 +266,6 @@ public sealed class AgentTaskGraphStoreTests : IDisposable
         public override DateTimeOffset GetUtcNow() => _now;
         public void Advance(TimeSpan elapsed) => _now += elapsed;
     }
-    public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true); }
+    [TestCleanup]
+    public void Cleanup() { if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true); }
 }

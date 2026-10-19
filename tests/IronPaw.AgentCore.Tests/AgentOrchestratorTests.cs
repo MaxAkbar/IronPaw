@@ -6,9 +6,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class AgentOrchestratorTests
 {
-    [Fact]
+    [TestMethod]
     public async Task RunAsync_LocalProviderPlanPrompt_WritesPlanAndEmitsToolEvents()
     {
         var root = CreateTempDirectory();
@@ -53,13 +54,13 @@ public sealed class AgentOrchestratorTests
             var result = await orchestrator.RunAsync(request, sink, CancellationToken.None);
 
             Assert.Contains("Tool execution completed", result.FinalAssistantMessage, StringComparison.OrdinalIgnoreCase);
-            Assert.True(File.Exists(Path.Combine(workspaceRoot, "Plan.md")));
-            Assert.Contains(sink.Events, evt => evt.Type == "tool_call");
-            Assert.Contains(sink.Events, evt => evt.Type == "tool_result");
+            Assert.IsTrue(File.Exists(Path.Combine(workspaceRoot, "Plan.md")));
+            Assert.Contains(evt => evt.Type == "tool_call", sink.Events);
+            Assert.Contains(evt => evt.Type == "tool_result", sink.Events);
 
             var savedSession = await sessionStore.GetAsync(sessionKey, CancellationToken.None);
-            Assert.NotNull(savedSession);
-            Assert.True(savedSession!.TotalTokens > 0);
+            Assert.IsNotNull(savedSession);
+            Assert.IsTrue(savedSession!.TotalTokens > 0);
         }
         finally
         {

@@ -4,9 +4,10 @@ using Spectre.Console;
 
 namespace IronPaw.Cli.Tests;
 
+[TestClass]
 public sealed class WorkflowCommandsTests
 {
-    [Fact]
+    [TestMethod]
     public async Task ListWorkflows_DoesNotResolveProviderOrStartRun()
     {
         var store = new FakeWorkflowStore(CreateCheckpoint());
@@ -17,11 +18,11 @@ public sealed class WorkflowCommandsTests
             NullAgentEventSink.Instance, _ => throw new InvalidOperationException("Provider must not be resolved"),
             CancellationToken.None);
 
-        Assert.Equal(0, exitCode);
-        Assert.Null(orchestrator.ResumedRunId);
+        Assert.AreEqual(0, exitCode);
+        Assert.IsNull(orchestrator.ResumedRunId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Resume_LoadsOriginalProviderAndRunId()
     {
         var checkpoint = CreateCheckpoint();
@@ -34,13 +35,13 @@ public sealed class WorkflowCommandsTests
             store, orchestrator, NullAgentEventSink.Instance,
             provider => { requestedProvider = provider; return (true, false); }, CancellationToken.None);
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal(checkpoint.Request.Provider, requestedProvider);
-        Assert.Equal(checkpoint.RunId, orchestrator.ResumedRunId?.Value);
-        Assert.True(orchestrator.Caller!.IsOwner);
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(checkpoint.Request.Provider, requestedProvider);
+        Assert.AreEqual(checkpoint.RunId, orchestrator.ResumedRunId?.Value);
+        Assert.IsTrue(orchestrator.Caller!.IsOwner);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Resume_UnknownWorkflowDoesNotAskForProviderConfiguration()
     {
         var orchestrator = new FakeOrchestrator();
@@ -49,11 +50,11 @@ public sealed class WorkflowCommandsTests
             new FakeWorkflowStore(), orchestrator, NullAgentEventSink.Instance,
             _ => throw new InvalidOperationException("Provider must not be resolved"), CancellationToken.None);
 
-        Assert.Equal(2, exitCode);
-        Assert.Null(orchestrator.ResumedRunId);
+        Assert.AreEqual(2, exitCode);
+        Assert.IsNull(orchestrator.ResumedRunId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Resume_CompletedWorkflowDoesNotRequireProviderCredentials()
     {
         var checkpoint = CreateCheckpoint();
@@ -69,12 +70,12 @@ public sealed class WorkflowCommandsTests
             new FakeWorkflowStore(checkpoint), orchestrator, NullAgentEventSink.Instance,
             _ => throw new InvalidOperationException("Completed workflow must not require credentials"), CancellationToken.None);
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal(checkpoint.RunId, orchestrator.ResumedRunId?.Value);
-        Assert.True(orchestrator.Caller!.IsOwner);
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(checkpoint.RunId, orchestrator.ResumedRunId?.Value);
+        Assert.IsTrue(orchestrator.Caller!.IsOwner);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Resume_DoesNotRunWithoutSavedProviderConfiguration()
     {
         var checkpoint = CreateCheckpoint();
@@ -84,11 +85,11 @@ public sealed class WorkflowCommandsTests
             new FakeWorkflowStore(checkpoint), orchestrator, NullAgentEventSink.Instance,
             _ => (false, false), CancellationToken.None);
 
-        Assert.Equal(2, exitCode);
-        Assert.Null(orchestrator.ResumedRunId);
+        Assert.AreEqual(2, exitCode);
+        Assert.IsNull(orchestrator.ResumedRunId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Reconcile_SuppliesVerifiedOutcomeBeforeResume()
     {
         var checkpoint = CreateCheckpoint();
@@ -103,12 +104,13 @@ public sealed class WorkflowCommandsTests
             var exitCode = await WorkflowCommands.ExecuteAsync(options, new FakeWorkflowStore(checkpoint),
                 orchestrator, NullAgentEventSink.Instance, _ => (true, false), CancellationToken.None);
 
-            Assert.Equal(0, exitCode);
-            Assert.Equal("tool-execution", orchestrator.ReconciledExecutionId);
-            Assert.Equal("Verified file contents", orchestrator.ReconciledResult!.Content);
-            Assert.Equal(ContentTrust.Local, orchestrator.ReconciledResult.Trust);
+            Assert.AreEqual(0, exitCode);
+            Assert.AreEqual("tool-execution", orchestrator.ReconciledExecutionId);
+            Assert.AreEqual("Verified file contents", orchestrator.ReconciledResult!.Content);
+            Assert.AreEqual(ContentTrust.Local, orchestrator.ReconciledResult.Trust);
+            Assert.IsNotNull(orchestrator.ReconciliationNote);
             Assert.Contains("destination file", orchestrator.ReconciliationNote);
-            Assert.Equal(new[] { "reconcile", "resume" }, orchestrator.Calls);
+            Assert.AreSequenceEqual(new[] { "reconcile", "resume" }, orchestrator.Calls);
         }
         finally
         {
@@ -116,9 +118,9 @@ public sealed class WorkflowCommandsTests
         }
     }
 
-    [Theory]
-    [InlineData("--pause", "pause")]
-    [InlineData("--cancel", "cancel")]
+    [TestMethod]
+    [DataRow("--pause", "pause")]
+    [DataRow("--cancel", "cancel")]
     public async Task HumanControl_DoesNotResolveProviderOrResume(string option, string expectedCall)
     {
         var checkpoint = CreateCheckpoint();
@@ -127,14 +129,14 @@ public sealed class WorkflowCommandsTests
             new FakeWorkflowStore(checkpoint), orchestrator, NullAgentEventSink.Instance,
             _ => throw new InvalidOperationException("Control must not require provider credentials"), CancellationToken.None);
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal(new[] { expectedCall }, orchestrator.Calls);
-        Assert.Equal(checkpoint.RunId, orchestrator.ControlledRunId?.Value);
-        Assert.True(orchestrator.Caller!.IsOwner);
-        Assert.Null(orchestrator.ResumedRunId);
+        Assert.AreEqual(0, exitCode);
+        Assert.AreSequenceEqual(new[] { expectedCall }, orchestrator.Calls);
+        Assert.AreEqual(checkpoint.RunId, orchestrator.ControlledRunId?.Value);
+        Assert.IsTrue(orchestrator.Caller!.IsOwner);
+        Assert.IsNull(orchestrator.ResumedRunId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Answer_IsSavedBeforeProviderConfigurationAndResume()
     {
         var pending = CreateCheckpoint() with
@@ -152,15 +154,15 @@ public sealed class WorkflowCommandsTests
             store, orchestrator, NullAgentEventSink.Instance,
             _ => { orchestrator.Calls.Add("configure"); return (true, false); }, CancellationToken.None);
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal("question-1", orchestrator.AnsweredRequestId);
-        Assert.Equal("Use CSharpDB", orchestrator.Answer);
-        Assert.Equal(new[] { "answer", "configure", "resume" }, orchestrator.Calls);
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual("question-1", orchestrator.AnsweredRequestId);
+        Assert.AreEqual("Use CSharpDB", orchestrator.Answer);
+        Assert.AreSequenceEqual(new[] { "answer", "configure", "resume" }, orchestrator.Calls);
     }
 
-    [Theory]
-    [InlineData("--approve-request", true)]
-    [InlineData("--deny-request", false)]
+    [TestMethod]
+    [DataRow("--approve-request", true)]
+    [DataRow("--deny-request", false)]
     public async Task ApprovalDecision_IsSavedBeforeResume(string option, bool approved)
     {
         var checkpoint = CreateCheckpoint();
@@ -169,15 +171,15 @@ public sealed class WorkflowCommandsTests
             new FakeWorkflowStore(checkpoint), orchestrator, NullAgentEventSink.Instance,
             _ => { orchestrator.Calls.Add("configure"); return (true, false); }, CancellationToken.None);
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal("approval-1", orchestrator.DecidedRequestId);
-        Assert.Equal(approved, orchestrator.Approved);
-        Assert.Equal(new[] { "decide", "configure", "resume" }, orchestrator.Calls);
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual("approval-1", orchestrator.DecidedRequestId);
+        Assert.AreEqual(approved, orchestrator.Approved);
+        Assert.AreSequenceEqual(new[] { "decide", "configure", "resume" }, orchestrator.Calls);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task Resume_WithPendingHumanRequestDoesNotRequireProvider(bool inChild)
     {
         var parent = CreateCheckpoint();
@@ -192,11 +194,11 @@ public sealed class WorkflowCommandsTests
             store, orchestrator, NullAgentEventSink.Instance,
             _ => throw new InvalidOperationException("Pending human input must not require provider credentials"), CancellationToken.None);
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal(parent.RunId, orchestrator.ResumedRunId?.Value);
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(parent.RunId, orchestrator.ResumedRunId?.Value);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Resume_RunnableChildConfiguresProviderEvenWhenSiblingIsWaiting()
     {
         var parent = CreateCheckpoint();
@@ -208,17 +210,19 @@ public sealed class WorkflowCommandsTests
             new FakeWorkflowStore(parent, child, sibling), orchestrator, NullAgentEventSink.Instance,
             _ => { configured = true; return (true, false); }, CancellationToken.None);
 
-        Assert.Equal(0, exitCode);
-        Assert.True(configured);
-        Assert.Equal(child.RunId, orchestrator.ResumedRunId?.Value);
+        Assert.AreEqual(0, exitCode);
+        Assert.IsTrue(configured);
+        Assert.AreEqual(child.RunId, orchestrator.ResumedRunId?.Value);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ListWorkflows_DisplaysPendingRequestsLineageAndControlWithoutMarkupInterpretation()
     {
         var checkpoint = CreateCheckpoint() with
         {
-            RunId = "child-run", ParentRunId = "workflow", Status = WorkflowStatus.AwaitingInput,
+            RunId = "child-run",
+            ParentRunId = "workflow",
+            Status = WorkflowStatus.AwaitingInput,
             Control = WorkflowControl.Pause,
             HumanRequests = [InputRequest(), new WorkflowHumanRequest("approval-1", WorkflowHumanRequestKind.ToolApproval,
                 "Approve write [file]?", "source", DateTimeOffset.UtcNow, "execution-1", "operation-hash")],
@@ -245,7 +249,7 @@ public sealed class WorkflowCommandsTests
         Assert.DoesNotContain("Outcome unknown", rendered);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ListWorkflows_DisplaysSharedRootBudgetOnceForParentAndChild()
     {
         var parent = CreateCheckpoint() with { Budget = new WorkflowBudget(MaxTotalTokens: 1000, MaxExecutionTime: TimeSpan.FromSeconds(20)) };
@@ -261,14 +265,14 @@ public sealed class WorkflowCommandsTests
             store, new FakeOrchestrator(), NullAgentEventSink.Instance,
             _ => throw new InvalidOperationException("No provider needed"), CancellationToken.None, console);
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal(new[] { parent.RunId }, store.BudgetQueries);
+        Assert.AreEqual(0, exitCode);
+        Assert.AreSequenceEqual(new[] { parent.RunId }, store.BudgetQueries);
         var rendered = output.ToString();
         Assert.Contains("tokens charged=300, reserved=200, remaining=500, limit=1000", rendered);
         Assert.Contains("execution consumed=7s, remaining=13s, limit=20s", rendered);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Resume_BudgetExhaustedResultUsesNonSuccessExitCode()
     {
         var checkpoint = CreateCheckpoint();
@@ -286,12 +290,12 @@ public sealed class WorkflowCommandsTests
         var exitCode = await WorkflowCommands.ExecuteAsync(CliOptions.Parse(["--resume", checkpoint.RunId]),
             new FakeWorkflowStore(checkpoint), orchestrator, NullAgentEventSink.Instance, _ => (true, false), CancellationToken.None, console);
 
-        Assert.Equal(2, exitCode);
+        Assert.AreEqual(2, exitCode);
         Assert.Contains("BudgetExhausted", output.ToString());
         Assert.Contains("tokens charged=100, reserved=0, remaining=0, limit=100", output.ToString());
     }
 
-    [Fact]
+    [TestMethod]
     public void RenderFinal_DisplaysBudgetSnapshotRestoredFromJsonMetadata()
     {
         var snapshot = new WorkflowBudgetSnapshot("workflow", new WorkflowBudget(MaxTotalTokens: 1000),

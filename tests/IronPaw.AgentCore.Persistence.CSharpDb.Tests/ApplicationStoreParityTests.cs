@@ -3,11 +3,12 @@ using IronPaw.AgentCore.Persistence.CSharpDb;
 
 namespace IronPaw.AgentCore.Persistence.CSharpDb.Tests;
 
+[TestClass]
 public sealed class ApplicationStoreParityTests
 {
     // --- Session Store ---
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_UpsertAndGet_RoundTripsData()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -28,9 +29,9 @@ public sealed class ApplicationStoreParityTests
                 CancellationToken.None);
 
             var entry = await store.GetAsync(key, CancellationToken.None);
-            Assert.NotNull(entry);
-            Assert.Equal("local", entry!.ProviderOverride);
-            Assert.Equal("rule-based-v1", entry.ModelOverride);
+            Assert.IsNotNull(entry);
+            Assert.AreEqual("local", entry!.ProviderOverride);
+            Assert.AreEqual("rule-based-v1", entry.ModelOverride);
         }
         finally
         {
@@ -38,7 +39,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_UpsertMutatesExisting()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -59,8 +60,8 @@ public sealed class ApplicationStoreParityTests
                 CancellationToken.None);
 
             var entry = await store.GetAsync(key, CancellationToken.None);
-            Assert.NotNull(entry);
-            Assert.Equal(150, entry!.InputTokens);
+            Assert.IsNotNull(entry);
+            Assert.AreEqual(150, entry!.InputTokens);
         }
         finally
         {
@@ -68,7 +69,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_LoadAll_ReturnsAllSessions()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -81,7 +82,7 @@ public sealed class ApplicationStoreParityTests
             await store.UpsertAsync(new SessionKey("b"), _ => new SessionEntry("b", DateTimeOffset.UtcNow), CancellationToken.None);
 
             var all = await store.LoadAllAsync(CancellationToken.None);
-            Assert.Equal(2, all.Count);
+            Assert.AreEqual(2, all.Count);
             Assert.Contains(new SessionKey("a"), all.Keys);
             Assert.Contains(new SessionKey("b"), all.Keys);
         }
@@ -91,7 +92,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_GetNonExistent_ReturnsNull()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -101,7 +102,7 @@ public sealed class ApplicationStoreParityTests
             var store = new CSharpDbApplicationStore(options);
 
             var entry = await store.GetAsync(new SessionKey("nope"), CancellationToken.None);
-            Assert.Null(entry);
+            Assert.IsNull(entry);
         }
         finally
         {
@@ -111,7 +112,7 @@ public sealed class ApplicationStoreParityTests
 
     // --- Transcript Store ---
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_AppendLoadAndReplace_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -127,15 +128,15 @@ public sealed class ApplicationStoreParityTests
             ], CancellationToken.None);
 
             var loaded = await store.LoadAsync(key, CancellationToken.None);
-            Assert.Equal(2, loaded.Count);
-            Assert.Equal(ChatRole.User, loaded[0].Role);
-            Assert.Equal("hello", loaded[0].Content);
+            Assert.AreEqual(2, loaded.Count);
+            Assert.AreEqual(ChatRole.User, loaded[0].Role);
+            Assert.AreEqual("hello", loaded[0].Content);
 
             await store.ReplaceAsync(key, [new ChatMessage(ChatRole.Assistant, "replaced")], CancellationToken.None);
 
             var replaced = await store.LoadAsync(key, CancellationToken.None);
-            Assert.Single(replaced);
-            Assert.Equal("replaced", replaced[0].Content);
+            Assert.ContainsSingle(replaced);
+            Assert.AreEqual("replaced", replaced[0].Content);
         }
         finally
         {
@@ -143,7 +144,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_AppendPreservesOrder()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -158,10 +159,10 @@ public sealed class ApplicationStoreParityTests
             await store.AppendAsync(key, [new ChatMessage(ChatRole.User, "third")], CancellationToken.None);
 
             var loaded = await store.LoadAsync(key, CancellationToken.None);
-            Assert.Equal(3, loaded.Count);
-            Assert.Equal("first", loaded[0].Content);
-            Assert.Equal("second", loaded[1].Content);
-            Assert.Equal("third", loaded[2].Content);
+            Assert.AreEqual(3, loaded.Count);
+            Assert.AreEqual("first", loaded[0].Content);
+            Assert.AreEqual("second", loaded[1].Content);
+            Assert.AreEqual("third", loaded[2].Content);
         }
         finally
         {
@@ -169,7 +170,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_PreservesToolCallFields()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -184,10 +185,10 @@ public sealed class ApplicationStoreParityTests
             ], CancellationToken.None);
 
             var loaded = await store.LoadAsync(key, CancellationToken.None);
-            Assert.Single(loaded);
-            Assert.Equal(ChatRole.Tool, loaded[0].Role);
-            Assert.Equal("call-123", loaded[0].ToolCallId);
-            Assert.Equal("read_file", loaded[0].ToolName);
+            Assert.ContainsSingle(loaded);
+            Assert.AreEqual(ChatRole.Tool, loaded[0].Role);
+            Assert.AreEqual("call-123", loaded[0].ToolCallId);
+            Assert.AreEqual("read_file", loaded[0].ToolName);
         }
         finally
         {
@@ -197,7 +198,7 @@ public sealed class ApplicationStoreParityTests
 
     // --- Memory Store ---
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_AddAndLoadGlobal_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -216,8 +217,8 @@ public sealed class ApplicationStoreParityTests
             await store.AddAsync(entry, CancellationToken.None);
 
             var globalMemories = await store.LoadGlobalAsync(CancellationToken.None);
-            Assert.Single(globalMemories);
-            Assert.Equal("remember this", globalMemories[0].Content);
+            Assert.ContainsSingle(globalMemories);
+            Assert.AreEqual("remember this", globalMemories[0].Content);
         }
         finally
         {
@@ -225,7 +226,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_AddAndLoadSession_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -246,12 +247,12 @@ public sealed class ApplicationStoreParityTests
             await store.AddAsync(entry, CancellationToken.None);
 
             var sessionMemories = await store.LoadSessionAsync(sessionKey, CancellationToken.None);
-            Assert.Single(sessionMemories);
-            Assert.Equal("session memory", sessionMemories[0].Content);
+            Assert.ContainsSingle(sessionMemories);
+            Assert.AreEqual("session memory", sessionMemories[0].Content);
 
             // Should not appear in global
             var globalMemories = await store.LoadGlobalAsync(CancellationToken.None);
-            Assert.Empty(globalMemories);
+            Assert.IsEmpty(globalMemories);
         }
         finally
         {
@@ -259,7 +260,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_Remove_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -272,13 +273,13 @@ public sealed class ApplicationStoreParityTests
             await store.AddAsync(new MemoryEntry(id, "to forget", MemoryScope.Global, DateTimeOffset.UtcNow), CancellationToken.None);
 
             var removed = await store.RemoveAsync(id, CancellationToken.None);
-            Assert.True(removed);
+            Assert.IsTrue(removed);
 
             var globalMemories = await store.LoadGlobalAsync(CancellationToken.None);
-            Assert.Empty(globalMemories);
+            Assert.IsEmpty(globalMemories);
 
             var removedAgain = await store.RemoveAsync(id, CancellationToken.None);
-            Assert.False(removedAgain);
+            Assert.IsFalse(removedAgain);
         }
         finally
         {
@@ -286,7 +287,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_EnforcesCapacityLimit()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -307,11 +308,11 @@ public sealed class ApplicationStoreParityTests
             }
 
             var memories = await store.LoadGlobalAsync(CancellationToken.None);
-            Assert.Equal(3, memories.Count);
+            Assert.AreEqual(3, memories.Count);
             // Oldest should have been evicted
-            Assert.Equal("memory-2", memories[0].Content);
-            Assert.Equal("memory-3", memories[1].Content);
-            Assert.Equal("memory-4", memories[2].Content);
+            Assert.AreEqual("memory-2", memories[0].Content);
+            Assert.AreEqual("memory-3", memories[1].Content);
+            Assert.AreEqual("memory-4", memories[2].Content);
         }
         finally
         {
@@ -319,7 +320,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CSharpDbApplicationStore_Search_FindsMatches()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -333,7 +334,7 @@ public sealed class ApplicationStoreParityTests
             await store.AddAsync(new MemoryEntry("3", "Fox jumps high", MemoryScope.Global, DateTimeOffset.UtcNow), CancellationToken.None);
 
             var results = await store.SearchAsync("fox", null, null, CancellationToken.None);
-            Assert.Equal(2, results.Count);
+            Assert.AreEqual(2, results.Count);
         }
         finally
         {
@@ -343,7 +344,7 @@ public sealed class ApplicationStoreParityTests
 
     // --- Run History Store ---
 
-    [Fact]
+    [TestMethod]
     public async Task ApplicationHistory_RecordAndLoad_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -366,12 +367,12 @@ public sealed class ApplicationStoreParityTests
             await store.RecordAsync(summary, CancellationToken.None);
 
             var all = await store.LoadAllAsync(CancellationToken.None);
-            Assert.Single(all);
-            Assert.Equal("run-1", all[0].RunId);
-            Assert.Equal("default", all[0].SessionId);
-            Assert.Equal(3, all[0].Rounds);
-            Assert.Equal(1500, all[0].TotalTokens);
-            Assert.Equal(2, all[0].ToolsUsed.Count);
+            Assert.ContainsSingle(all);
+            Assert.AreEqual("run-1", all[0].RunId);
+            Assert.AreEqual("default", all[0].SessionId);
+            Assert.AreEqual(3, all[0].Rounds);
+            Assert.AreEqual(1500, all[0].TotalTokens);
+            Assert.AreEqual(2, all[0].ToolsUsed.Count);
             Assert.Contains("read_file", all[0].ToolsUsed);
         }
         finally
@@ -380,7 +381,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ApplicationHistory_GetById_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -393,11 +394,11 @@ public sealed class ApplicationStoreParityTests
             await store.RecordAsync(new RunSummary("run-b", "s1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "p2", "r2", 2, 200, []), CancellationToken.None);
 
             var found = await store.GetAsync("run-b", CancellationToken.None);
-            Assert.NotNull(found);
-            Assert.Equal("p2", found!.UserPrompt);
+            Assert.IsNotNull(found);
+            Assert.AreEqual("p2", found!.UserPrompt);
 
             var notFound = await store.GetAsync("run-missing", CancellationToken.None);
-            Assert.Null(notFound);
+            Assert.IsNull(notFound);
         }
         finally
         {
@@ -405,7 +406,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ApplicationHistory_LoadBySession_Filters()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -419,10 +420,10 @@ public sealed class ApplicationStoreParityTests
             await store.RecordAsync(new RunSummary("r3", "s1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "p3", "r3", 1, 100, []), CancellationToken.None);
 
             var s1Runs = await store.LoadBySessionAsync(new SessionKey("s1"), CancellationToken.None);
-            Assert.Equal(2, s1Runs.Count);
+            Assert.AreEqual(2, s1Runs.Count);
 
             var s2Runs = await store.LoadBySessionAsync(new SessionKey("s2"), CancellationToken.None);
-            Assert.Single(s2Runs);
+            Assert.ContainsSingle(s2Runs);
         }
         finally
         {
@@ -432,7 +433,7 @@ public sealed class ApplicationStoreParityTests
 
     // --- Agent Message Bus ---
 
-    [Fact]
+    [TestMethod]
     public async Task ApplicationMessages_SendAndRead_PersistsAcrossInstances()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -468,12 +469,12 @@ public sealed class ApplicationStoreParityTests
                     RecipientAgentId: "reviewer"),
                 CancellationToken.None);
 
-            Assert.Single(inbox);
-            Assert.Equal(sent.MessageId, inbox[0].MessageId);
-            Assert.Equal("codegen", inbox[0].SenderAgentId);
-            Assert.Equal("reviewer", inbox[0].RecipientAgentId);
-            Assert.Equal("Please review the latest patch.", inbox[0].Content);
-            Assert.Equal("corr-123", inbox[0].CorrelationId);
+            Assert.ContainsSingle(inbox);
+            Assert.AreEqual(sent.MessageId, inbox[0].MessageId);
+            Assert.AreEqual("codegen", inbox[0].SenderAgentId);
+            Assert.AreEqual("reviewer", inbox[0].RecipientAgentId);
+            Assert.AreEqual("Please review the latest patch.", inbox[0].Content);
+            Assert.AreEqual("corr-123", inbox[0].CorrelationId);
         }
         finally
         {
@@ -481,7 +482,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ApplicationMessages_UnauthorizedSender_Throws()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -494,7 +495,7 @@ public sealed class ApplicationStoreParityTests
             ]);
             var bus = new CSharpDbAgentMessageBus(new CSharpDbApplicationStore(options), registry);
 
-            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() =>
                 bus.SendAsync(
                     new AgentMessageSendRequest(
                         SessionKey: new SessionKey("s-msg"),
@@ -510,7 +511,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ApplicationMessages_ReadWithoutMarkAsRead_DoesNotConsume()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -544,7 +545,7 @@ public sealed class ApplicationStoreParityTests
                     MaxMessages: 10,
                     MarkAsRead: false),
                 CancellationToken.None);
-            Assert.Single(peek);
+            Assert.ContainsSingle(peek);
 
             var consume = await bus.ReadAsync(
                 new AgentMessageReadRequest(
@@ -552,7 +553,7 @@ public sealed class ApplicationStoreParityTests
                     ScopeRunId: runId,
                     RecipientAgentId: "reviewer"),
                 CancellationToken.None);
-            Assert.Single(consume);
+            Assert.ContainsSingle(consume);
         }
         finally
         {
@@ -560,7 +561,7 @@ public sealed class ApplicationStoreParityTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ApplicationMessages_ReadWithSenderAndCorrelationFilters_Works()
     {
         var (dbPath, cleanup) = CreateTempDb();
@@ -616,10 +617,10 @@ public sealed class ApplicationStoreParityTests
                     CorrelationId: "corr-1"),
                 CancellationToken.None);
 
-            Assert.Single(filtered);
-            Assert.Equal("codegen", filtered[0].SenderAgentId);
-            Assert.Equal("corr-1", filtered[0].CorrelationId);
-            Assert.Equal("codegen/corr-1", filtered[0].Content);
+            Assert.ContainsSingle(filtered);
+            Assert.AreEqual("codegen", filtered[0].SenderAgentId);
+            Assert.AreEqual("corr-1", filtered[0].CorrelationId);
+            Assert.AreEqual("codegen/corr-1", filtered[0].Content);
         }
         finally
         {
@@ -637,7 +638,8 @@ public sealed class ApplicationStoreParityTests
         return (dbPath, () =>
         {
             Directory.Delete(dir, recursive: true);
-        });
+        }
+        );
     }
 
     private static AgentDefinition CreateAgent(string id, IReadOnlyCollection<string> allowedSenders)

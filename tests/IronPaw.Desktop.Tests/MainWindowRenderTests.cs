@@ -15,11 +15,12 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace IronPaw.Desktop.Tests;
 
+[TestClass]
 public sealed class MainWindowRenderTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public Task RealWorkflowCanFinishAndPersistWhileTheDesktopDispatcherIsBlocked(bool resume) => RunInSta(() =>
     {
         var directory = Directory.CreateTempSubdirectory("IronPaw-desktop-background-");
@@ -44,8 +45,14 @@ public sealed class MainWindowRenderTests
             }
             var services = new ServiceCollection().AddSingleton<IResumableAgentOrchestrator>(runtime).AddSingleton<IWorkflowStore>(store)
                 .AddSingleton(new SkillAddinLoadResult([], [], [])).BuildServiceProvider();
-            window = new MainWindow(new DesktopBootstrap(services)) { WindowStartupLocation = WindowStartupLocation.Manual,
-                Left = -10000, Top = -10000, ShowInTaskbar = false, ShowActivated = false };
+            window = new MainWindow(new DesktopBootstrap(services))
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -10000,
+                Top = -10000,
+                ShowInTaskbar = false,
+                ShowActivated = false
+            };
             window.Show();
             if (resume)
             {
@@ -55,9 +62,10 @@ public sealed class MainWindowRenderTests
             else ((Button)window.FindName("RunButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             // Do not pump the dispatcher from admission through saved completion.
             var runId = client.Started.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
-            Assert.False(client.CapturedDispatcher);
+            Assert.IsFalse(client.CapturedDispatcher);
             client.Release.TrySetResult();
-            var saved = Task.Run(async () => {
+            var saved = Task.Run(async () =>
+            {
                 using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 while (true)
                 {
@@ -66,17 +74,17 @@ public sealed class MainWindowRenderTests
                     await Task.Delay(10, deadline.Token);
                 }
             }).GetAwaiter().GetResult();
-            Assert.Null(saved.LeaseOwner);
-            Assert.Equal(AgentRunStatus.Succeeded, saved.Result!.Status);
-            Assert.Equal(HeldLocalClient.Response, saved.Result.FinalAssistantMessage);
-            Assert.Equal(1, saved.Usage!.ModelCalls);
-            Assert.False(((Button)window.FindName("RunButton")).IsEnabled);
-            Assert.Empty(((TextBox)window.FindName("AssistantOutputTextBox")).Text);
+            Assert.IsNull(saved.LeaseOwner);
+            Assert.AreEqual(AgentRunStatus.Succeeded, saved.Result!.Status);
+            Assert.AreEqual(HeldLocalClient.Response, saved.Result.FinalAssistantMessage);
+            Assert.AreEqual(1, saved.Usage!.ModelCalls);
+            Assert.IsFalse(((Button)window.FindName("RunButton")).IsEnabled);
+            Assert.IsEmpty(((TextBox)window.FindName("AssistantOutputTextBox")).Text);
             WaitFor(() => ((Button)window.FindName("RunButton")).IsEnabled);
-            Assert.Equal(HeldLocalClient.Response, ((TextBox)window.FindName("AssistantOutputTextBox")).Text);
-            Assert.NotNull(application.GetAsync(saved.Request.SessionKey, default).GetAwaiter().GetResult());
-            Assert.Equal(HeldLocalClient.Response, application.LoadAsync(saved.Request.SessionKey, default).GetAwaiter().GetResult()[^1].Content);
-            Assert.Equal(AgentRunStatus.Succeeded, application.GetAsync(runId.Value, default).GetAwaiter().GetResult()!.Status);
+            Assert.AreEqual(HeldLocalClient.Response, ((TextBox)window.FindName("AssistantOutputTextBox")).Text);
+            Assert.IsNotNull(application.GetAsync(saved.Request.SessionKey, default).GetAwaiter().GetResult());
+            Assert.AreEqual(HeldLocalClient.Response, application.LoadAsync(saved.Request.SessionKey, default).GetAwaiter().GetResult()[^1].Content);
+            Assert.AreEqual(AgentRunStatus.Succeeded, application.GetAsync(runId.Value, default).GetAwaiter().GetResult()!.Status);
         }
         finally
         {
@@ -88,9 +96,9 @@ public sealed class MainWindowRenderTests
         }
     });
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public Task EventFloodCompletesWithoutPumpingDispatcher_FinalResultAndCloseRejectLateText(bool stress) => RunInSta(() =>
     {
         var store = new WorkflowRecoveryControllerTests.MemoryStore();
@@ -99,32 +107,39 @@ public sealed class MainWindowRenderTests
         agent.PendingRun = final.Task;
         var services = new ServiceCollection().AddSingleton<IResumableAgentOrchestrator>(agent).AddSingleton<IWorkflowStore>(store)
             .AddSingleton(new SkillAddinLoadResult([], [], [])).BuildServiceProvider();
-        var window = new MainWindow(new DesktopBootstrap(services)) { WindowStartupLocation = WindowStartupLocation.Manual,
-            Left = -10000, Top = -10000, ShowInTaskbar = false, ShowActivated = false };
+        var window = new MainWindow(new DesktopBootstrap(services))
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = -10000,
+            Top = -10000,
+            ShowInTaskbar = false,
+            ShowActivated = false
+        };
         try
         {
             window.Show();
             ((Button)window.FindName("RunButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             WaitFor(() => agent.LastRequest is not null);
             var run = agent.LastRequest!.RequestedRunId!.Value;
-            var sink = Assert.IsType<UiEventSink>(agent.LastSink);
+            var sink = Assert.IsExactInstanceOfType<UiEventSink>(agent.LastSink);
             if (stress)
             {
                 var failures = 0;
                 window.Events.CollectionChanged += (_, _) => { if (failures++ == 0) throw new InvalidOperationException("display observer failed"); };
             }
             // Keep the dispatcher blocked: producers must finish without any UI callback.
-            Task.Run(async () => {
+            Task.Run(async () =>
+            {
                 for (var i = 0; i < 10000; i++) await sink.PublishAsync(new(run, new("default"), AgentEventStream.Assistant,
                     "assistant_delta", DateTimeOffset.UtcNow, EventData.Of(("text", "x"))), default);
             }).WaitAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
-            Assert.Empty(((TextBox)window.FindName("AssistantOutputTextBox")).Text);
+            Assert.IsEmpty(((TextBox)window.FindName("AssistantOutputTextBox")).Text);
             WaitFor(() => ((TextBox)window.FindName("AssistantOutputTextBox")).Text.Length > 0);
-            Assert.InRange(window.Events.Count, 1, MainWindow.MaxVisibleEvents);
+            Assert.IsInRange(1, MainWindow.MaxVisibleEvents, window.Events.Count);
             for (var i = 0; i < 600; i++) sink.PublishAsync(new(run, new("default"), AgentEventStream.Lifecycle,
                 "event_" + i, DateTimeOffset.UtcNow, EventData.Of()), default).GetAwaiter().GetResult();
             WaitFor(() => window.Events.Any(line => line.Contains("event_599", StringComparison.Ordinal)));
-            Assert.Equal(MainWindow.MaxVisibleEvents, window.Events.Count);
+            Assert.AreEqual(MainWindow.MaxVisibleEvents, window.Events.Count);
             var finalText = stress ? new string('Z', 90000) : "Authoritative final response";
             final.SetResult(agent.Result with { RunId = run, FinalAssistantMessage = finalText });
             sink.PublishAsync(new(run, new("default"), AgentEventStream.Assistant, "assistant_delta", DateTimeOffset.UtcNow,
@@ -135,9 +150,9 @@ public sealed class MainWindowRenderTests
             {
                 Assert.StartsWith(new string('Z', MainWindow.MaxVisibleResponseCharacters), shown);
                 Assert.Contains("Response shortened", shown);
-                Assert.True(shown.Length < MainWindow.MaxVisibleResponseCharacters + 100);
+                Assert.IsTrue(shown.Length < MainWindow.MaxVisibleResponseCharacters + 100);
             }
-            else Assert.Equal(finalText, shown);
+            else Assert.AreEqual(finalText, shown);
             if (!stress)
             {
                 window.UpdateLayout();
@@ -152,7 +167,7 @@ public sealed class MainWindowRenderTests
             }
             window.Close();
             sink.PublishAsync(new(run, new("default"), AgentEventStream.Lifecycle, "late_after_close", DateTimeOffset.UtcNow, EventData.Of()), default).GetAwaiter().GetResult();
-            Assert.Equal(0, sink.PendingCount);
+            Assert.AreEqual(0, sink.PendingCount);
         }
         finally
         {
@@ -162,7 +177,7 @@ public sealed class MainWindowRenderTests
         }
     });
 
-    [Fact]
+    [TestMethod]
     public Task ApplicationPersistenceCanBeAwaitedFromBlockedDispatcherWithoutExpandingTools() => RunInSta(() =>
     {
         var root = Directory.CreateTempSubdirectory("IronPaw-desktop-application-").FullName;
@@ -172,26 +187,26 @@ public sealed class MainWindowRenderTests
             var key = new SessionKey("desktop-storage");
             using (var host = DesktopBootstrapper.Build(state, root))
             {
-                Assert.IsType<CSharpDbApplicationStore>(host.SessionStore);
-                Assert.Same(host.SessionStore, host.TranscriptStore);
-                Assert.Same(host.SessionStore, host.RunHistoryStore);
-                Assert.Same(host.SessionStore, host.MemoryStore);
-                Assert.IsType<CSharpDbAgentMessageBus>(host.MessageBus);
+                Assert.IsExactInstanceOfType<CSharpDbApplicationStore>(host.SessionStore);
+                Assert.AreSame<object>(host.SessionStore, host.TranscriptStore);
+                Assert.AreSame<object>(host.SessionStore, host.RunHistoryStore);
+                Assert.AreSame<object>(host.SessionStore, host.MemoryStore);
+                Assert.IsExactInstanceOfType<CSharpDbAgentMessageBus>(host.MessageBus);
                 // Synchronously await on a real dispatcher: store operations must move themselves off it.
                 host.SessionStore.UpsertAsync(key, _ => new(key.Value, DateTimeOffset.UtcNow), default).WaitAsync(TimeSpan.FromSeconds(20)).GetAwaiter().GetResult();
                 host.TranscriptStore.AppendAsync(key, [new(ChatRole.User, "saved")], default).WaitAsync(TimeSpan.FromSeconds(20)).GetAwaiter().GetResult();
                 var tools = host.ToolRegistry.ResolveTools(new(ToolProfile.Full, SenderIsOwner: true)).Select(t => t.Descriptor.Name).Order();
-                Assert.Equal(new[] { "current_time", "request_input", "list_files", "read_file", "write_file", "web_navigate", "web_extract_structured",
+                Assert.AreSequenceEqual(new[] { "current_time", "request_input", "list_files", "read_file", "write_file", "web_navigate", "web_extract_structured",
                     "review_runs", "review_run_detail", "create_skill", "send_agent_message", "read_agent_messages", "invoke_agent", "list_agents" }.Order(), tools);
             }
             using var reopened = DesktopBootstrapper.Build(state, root);
-            Assert.NotNull(reopened.SessionStore.GetAsync(key, default).WaitAsync(TimeSpan.FromSeconds(20)).GetAwaiter().GetResult());
-            Assert.Equal("saved", Assert.Single(reopened.TranscriptStore.LoadAsync(key, default).WaitAsync(TimeSpan.FromSeconds(20)).GetAwaiter().GetResult()).Content);
+            Assert.IsNotNull(reopened.SessionStore.GetAsync(key, default).WaitAsync(TimeSpan.FromSeconds(20)).GetAwaiter().GetResult());
+            Assert.AreEqual("saved", Assert.ContainsSingle(reopened.TranscriptStore.LoadAsync(key, default).WaitAsync(TimeSpan.FromSeconds(20)).GetAwaiter().GetResult()).Content);
         }
         finally { Directory.Delete(root, true); }
     });
 
-    [Fact]
+    [TestMethod]
     public Task SharedSettingsPrefillNewRunControlsWithoutExecutingAProvider() => RunInSta(() =>
     {
         var temporaryRoot = Path.Combine(Path.GetTempPath(), "IronPaw-desktop-settings-" + Guid.NewGuid().ToString("n"));
@@ -209,12 +224,12 @@ public sealed class MainWindowRenderTests
             var settings = IronPaw.AgentCore.IronPawSettingsLoader.Load(settingsFile, _ => null);
             bootstrap = DesktopBootstrapper.Build(Path.Combine(temporaryRoot, "state"), Path.Combine(temporaryRoot, "workspace"), settings);
             window = new MainWindow(bootstrap);
-            Assert.Equal("openai", (string)((ComboBoxItem)((ComboBox)window.FindName("ProviderComboBox")).SelectedItem).Content);
-            Assert.Equal("configured-model", ((TextBox)window.FindName("ModelTextBox")).Text);
-            Assert.Equal("12345", ((TextBox)window.FindName("TokenLimitTextBox")).Text);
-            Assert.Equal("90", ((TextBox)window.FindName("ExecutionLimitTextBox")).Text);
-            Assert.Equal("review-model", bootstrap.Settings.Agents.Reviewer.Model);
-            Assert.Empty(Task.Run(() => bootstrap.WorkflowStore.ListAsync(default)).GetAwaiter().GetResult());
+            Assert.AreEqual("openai", (string)((ComboBoxItem)((ComboBox)window.FindName("ProviderComboBox")).SelectedItem).Content);
+            Assert.AreEqual("configured-model", ((TextBox)window.FindName("ModelTextBox")).Text);
+            Assert.AreEqual("12345", ((TextBox)window.FindName("TokenLimitTextBox")).Text);
+            Assert.AreEqual("90", ((TextBox)window.FindName("ExecutionLimitTextBox")).Text);
+            Assert.AreEqual("review-model", bootstrap.Settings.Agents.Reviewer.Model);
+            Assert.IsEmpty(Task.Run(() => bootstrap.WorkflowStore.ListAsync(default)).GetAwaiter().GetResult());
         }
         finally
         {
@@ -222,7 +237,7 @@ public sealed class MainWindowRenderTests
         }
     });
 
-    [Fact]
+    [TestMethod]
     public Task RecoveryWindowRendersPersistedChildApprovalAndBudgetFromIsolatedState() => RunInSta(() =>
     {
         var temporaryRoot = Path.Combine(Path.GetTempPath(), "IronPaw-desktop-render-" + Guid.NewGuid().ToString("n"));
@@ -232,24 +247,36 @@ public sealed class MainWindowRenderTests
         try
         {
             bootstrap = DesktopBootstrapper.Build(Path.Combine(temporaryRoot, "state"), Path.Combine(temporaryRoot, "workspace"));
-            var root = WorkflowRecoveryControllerTests.MakeRun("root-render", "root-render", null) with {
-                Status = WorkflowStatus.AwaitingInput, Budget = new(MaxTotalTokens: 20000, MaxExecutionTime: TimeSpan.FromSeconds(120)),
+            var root = WorkflowRecoveryControllerTests.MakeRun("root-render", "root-render", null) with
+            {
+                Status = WorkflowStatus.AwaitingInput,
+                Budget = new(MaxTotalTokens: 20000, MaxExecutionTime: TimeSpan.FromSeconds(120)),
                 Usage = new(2, 1, InputTokens: 2400, OutputTokens: 300),
-                ModelCalls = [new("render-root-model", [], Attempts: [new("render-root-attempt", 2700, 300, 2700, true, WorkflowReservationState.Settled)])] };
-            var child = WorkflowRecoveryControllerTests.MakeRun("child-render", "root-render", "root-render") with {
-                Status = WorkflowStatus.AwaitingInput, Usage = new(1, 0, InputTokens: 1200, OutputTokens: 200),
+                ModelCalls = [new("render-root-model", [], Attempts: [new("render-root-attempt", 2700, 300, 2700, true, WorkflowReservationState.Settled)])]
+            };
+            var child = WorkflowRecoveryControllerTests.MakeRun("child-render", "root-render", "root-render") with
+            {
+                Status = WorkflowStatus.AwaitingInput,
+                Usage = new(1, 0, InputTokens: 1200, OutputTokens: 200),
                 Request = WorkflowRecoveryControllerTests.MakeRun("child-render", "root-render", "root-render").Request with { SessionKey = new("render-child"), AgentId = "codegen", ParentRunId = new("root-render"), RootRunId = new("root-render") },
                 ModelCalls = [new("render-child-model", [], Attempts: [new("render-child-attempt", 1400, 200, 1400, true, WorkflowReservationState.Settled)])],
                 ToolExecutions = [new("execution-render", new("call-render", "write_file", JsonSerializer.SerializeToElement(new { path = "Plan.md", content = "Verified design" })), State: WorkflowToolState.Planned)],
                 HumanRequests = [new("request-render", WorkflowHumanRequestKind.ToolApproval, "Approve writing the project plan?", "tool:execution-render", DateTimeOffset.UtcNow,
-                    ExecutionId: "execution-render", OperationFingerprint: "exact-operation-render")] };
+                    ExecutionId: "execution-render", OperationFingerprint: "exact-operation-render")]
+            };
             Task.Run(async () =>
             {
                 await bootstrap.WorkflowStore.CreateAsync(root, default);
                 await bootstrap.WorkflowStore.CreateAsync(child, default);
             }).GetAwaiter().GetResult();
-            window = new MainWindow(bootstrap) { WindowStartupLocation = WindowStartupLocation.Manual,
-                Left = -10000, Top = -10000, ShowInTaskbar = false, ShowActivated = false };
+            window = new MainWindow(bootstrap)
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -10000,
+                Top = -10000,
+                ShowInTaskbar = false,
+                ShowActivated = false
+            };
             window.Show();
             WaitFor(() => window.FindName("InvocationsComboBox") is ComboBox { Items.Count: 2 });
             var tabs = (TabControl)window.FindName("ActivityTabControl");
@@ -260,16 +287,16 @@ public sealed class MainWindowRenderTests
             Assert.Contains("Plan.md", ((TextBox)window.FindName("HumanRequestTextBox")).Text);
             Assert.Contains("root-render", ((TextBlock)window.FindName("WorkflowSummaryTextBlock")).Text);
             Assert.Contains("Tokens charged: 4100", ((TextBlock)window.FindName("WorkflowSummaryTextBlock")).Text);
-            Assert.True(((Button)window.FindName("ApproveButton")).IsEnabled);
-            Assert.True(((Button)window.FindName("DenyButton")).IsEnabled);
-            Assert.False(((Button)window.FindName("AnswerButton")).IsEnabled);
+            Assert.IsTrue(((Button)window.FindName("ApproveButton")).IsEnabled);
+            Assert.IsTrue(((Button)window.FindName("DenyButton")).IsEnabled);
+            Assert.IsFalse(((Button)window.FindName("AnswerButton")).IsEnabled);
             Assert.Contains("child-render", ((TextBox)window.FindName("WorkflowDetailTextBox")).Text);
             window.UpdateLayout();
             var content = (FrameworkElement)window.Content;
             var bitmap = new RenderTargetBitmap((int)content.ActualWidth, (int)content.ActualHeight, 96, 96, PixelFormats.Pbgra32);
             bitmap.Render(content);
-            Assert.True(bitmap.PixelWidth >= 980);
-            Assert.True(bitmap.PixelHeight >= 600);
+            Assert.IsTrue(bitmap.PixelWidth >= 980);
+            Assert.IsTrue(bitmap.PixelHeight >= 600);
             var encoder = new PngBitmapEncoder();
             encoder.Frames.Add(BitmapFrame.Create(bitmap));
             var screenshotPath = Path.Combine(Path.GetTempPath(), "IronPaw-desktop-recovery-smoke.png");
@@ -285,7 +312,7 @@ public sealed class MainWindowRenderTests
         }
     });
 
-    [Fact]
+    [TestMethod]
     public Task ActiveCancelTargetsOriginalRootWhileBrowserSelectsIdleWorkflow() => RunInSta(() =>
     {
         var store = new WorkflowRecoveryControllerTests.MemoryStore();
@@ -295,23 +322,29 @@ public sealed class MainWindowRenderTests
         orchestrator.PendingRun = pending.Task;
         var services = new ServiceCollection().AddSingleton<IResumableAgentOrchestrator>(orchestrator)
             .AddSingleton<IWorkflowStore>(store).AddSingleton(new SkillAddinLoadResult([], [], [])).BuildServiceProvider();
-        var window = new MainWindow(new DesktopBootstrap(services)) { WindowStartupLocation = WindowStartupLocation.Manual,
-            Left = -10000, Top = -10000, ShowInTaskbar = false, ShowActivated = false };
+        var window = new MainWindow(new DesktopBootstrap(services))
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = -10000,
+            Top = -10000,
+            ShowInTaskbar = false,
+            ShowActivated = false
+        };
         try
         {
             window.Show();
             WaitFor(() => ((ComboBox)window.FindName("WorkflowsComboBox")).Items.Count == 1);
             ((Button)window.FindName("RunButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             WaitFor(() => orchestrator.LastRequest is not null);
-            Assert.NotNull(orchestrator.LastRequest?.RequestedRunId);
+            Assert.IsNotNull(orchestrator.LastRequest?.RequestedRunId);
             var active = orchestrator.LastRequest!.RequestedRunId!.Value;
-            Assert.False(((Button)window.FindName("CancelWorkflowButton")).IsEnabled);
-            Assert.True(((Button)window.FindName("CancelButton")).IsEnabled);
+            Assert.IsFalse(((Button)window.FindName("CancelWorkflowButton")).IsEnabled);
+            Assert.IsTrue(((Button)window.FindName("CancelButton")).IsEnabled);
             ((Button)window.FindName("CancelWorkflowButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Assert.DoesNotContain("cancel:idle-root", orchestrator.Calls);
             ((Button)window.FindName("CancelButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             WaitFor(() => orchestrator.Calls.Contains("cancel:" + active));
-            Assert.Equal(CallerIdentity.LocalOwner(), orchestrator.LastCaller);
+            Assert.AreEqual(CallerIdentity.LocalOwner(), orchestrator.LastCaller);
             Assert.DoesNotContain("cancel:idle-root", orchestrator.Calls);
             pending.SetResult(orchestrator.Result with { RunId = active, Status = AgentRunStatus.Cancelled });
             WaitFor(() => ((Button)window.FindName("RunButton")).IsEnabled);
@@ -365,6 +398,6 @@ public sealed class MainWindowRenderTests
         timer.Start();
         Dispatcher.PushFrame(frame);
         timer.Stop();
-        Assert.True(condition(), "The WPF state did not settle before the probe deadline.");
+        Assert.IsTrue(condition(), "The WPF state did not settle before the probe deadline.");
     }
 }

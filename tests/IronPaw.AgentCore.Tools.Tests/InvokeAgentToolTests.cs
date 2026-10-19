@@ -4,9 +4,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class InvokeAgentToolTests
 {
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_UnknownAgent_ReturnsError()
     {
         var registry = new InMemoryAgentRegistry();
@@ -16,11 +17,11 @@ public sealed class InvokeAgentToolTests
         var call = CreateToolCall(new { agent_id = "nonexistent", task = "do something" });
         var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-        Assert.True(result.IsError);
+        Assert.IsTrue(result.IsError);
         Assert.Contains("not found", result.Content);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_ExceedsMaxDepth_ReturnsError()
     {
         var registry = new InMemoryAgentRegistry();
@@ -33,11 +34,11 @@ public sealed class InvokeAgentToolTests
         var call = CreateToolCall(new { agent_id = "coder", task = "do something" });
         var result = await tool.ExecuteAsync(call, context, CancellationToken.None);
 
-        Assert.True(result.IsError);
+        Assert.IsTrue(result.IsError);
         Assert.Contains("depth", result.Content, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_Success_ReturnsChildFinalMessage()
     {
         var registry = new InMemoryAgentRegistry();
@@ -48,11 +49,11 @@ public sealed class InvokeAgentToolTests
         var call = CreateToolCall(new { agent_id = "coder", task = "refactor UserService" });
         var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-        Assert.False(result.IsError);
-        Assert.Equal("I refactored the code.", result.Content);
+        Assert.IsFalse(result.IsError);
+        Assert.AreEqual("I refactored the code.", result.Content);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_ChildSessionKey_IsEphemeral()
     {
         var registry = new InMemoryAgentRegistry();
@@ -65,12 +66,12 @@ public sealed class InvokeAgentToolTests
         var call = CreateToolCall(new { agent_id = "coder", task = "do work" });
         await tool.ExecuteAsync(call, parentContext, CancellationToken.None);
 
-        Assert.NotNull(capturedSessionKey);
+        Assert.IsNotNull(capturedSessionKey);
         Assert.Contains("coder", capturedSessionKey.Value.Value);
-        Assert.NotEqual(parentContext.SessionKey, capturedSessionKey.Value);
+        Assert.AreNotEqual(parentContext.SessionKey, capturedSessionKey.Value);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_ChildRequest_IncrementsSubagentDepth()
     {
         var registry = new InMemoryAgentRegistry();
@@ -83,13 +84,13 @@ public sealed class InvokeAgentToolTests
         var call = CreateToolCall(new { agent_id = "coder", task = "do work" });
         await tool.ExecuteAsync(call, parentContext, CancellationToken.None);
 
-        Assert.NotNull(capturedRequest);
-        Assert.Equal(2, capturedRequest.ToolPolicy.SubagentDepth);
-        Assert.Equal("coder", capturedRequest.AgentId);
-        Assert.NotNull(capturedRequest.ParentRunId);
+        Assert.IsNotNull(capturedRequest);
+        Assert.AreEqual(2, capturedRequest.ToolPolicy.SubagentDepth);
+        Assert.AreEqual("coder", capturedRequest.AgentId);
+        Assert.IsNotNull(capturedRequest.ParentRunId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_ChildRequest_PropagatesImmediateParentAndRootLineage()
     {
         var registry = new InMemoryAgentRegistry();
@@ -113,15 +114,15 @@ public sealed class InvokeAgentToolTests
         var call = CreateToolCall(new { agent_id = "coder", task = "do work" });
         await tool.ExecuteAsync(call, parentContext, CancellationToken.None);
 
-        Assert.NotNull(capturedRequest);
-        Assert.NotNull(capturedRequest.ParentRunId);
-        Assert.Equal("child-run", capturedRequest.ParentRunId!.Value.Value);
-        Assert.Equal("root-run", capturedRequest.RootRunId!.Value.Value);
-        Assert.NotNull(capturedRequest.ParentSessionKey);
-        Assert.Equal("root-session", capturedRequest.ParentSessionKey!.Value.Value);
+        Assert.IsNotNull(capturedRequest);
+        Assert.IsNotNull(capturedRequest.ParentRunId);
+        Assert.AreEqual("child-run", capturedRequest.ParentRunId!.Value.Value);
+        Assert.AreEqual("root-run", capturedRequest.RootRunId!.Value.Value);
+        Assert.IsNotNull(capturedRequest.ParentSessionKey);
+        Assert.AreEqual("root-session", capturedRequest.ParentSessionKey!.Value.Value);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_MissingAgentId_ReturnsError()
     {
         var registry = new InMemoryAgentRegistry();
@@ -131,11 +132,11 @@ public sealed class InvokeAgentToolTests
         var call = CreateToolCall(new { task = "do something" });
         var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-        Assert.True(result.IsError);
+        Assert.IsTrue(result.IsError);
         Assert.Contains("agent_id", result.Content);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_MissingTask_ReturnsError()
     {
         var registry = new InMemoryAgentRegistry();
@@ -145,11 +146,11 @@ public sealed class InvokeAgentToolTests
         var call = CreateToolCall(new { agent_id = "coder" });
         var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-        Assert.True(result.IsError);
+        Assert.IsTrue(result.IsError);
         Assert.Contains("task", result.Content);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_UsesAgentProviderOverride()
     {
         var registry = new InMemoryAgentRegistry();
@@ -161,12 +162,12 @@ public sealed class InvokeAgentToolTests
         var call = CreateToolCall(new { agent_id = "coder", task = "do work" });
         await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-        Assert.NotNull(capturedRequest);
-        Assert.Equal("anthropic", capturedRequest.Provider);
-        Assert.Equal("claude-3", capturedRequest.Model);
+        Assert.IsNotNull(capturedRequest);
+        Assert.AreEqual("anthropic", capturedRequest.Provider);
+        Assert.AreEqual("claude-3", capturedRequest.Model);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_InheritsParentProviderWhenAgentHasNoOverride()
     {
         var registry = new InMemoryAgentRegistry();
@@ -186,12 +187,12 @@ public sealed class InvokeAgentToolTests
         var call = CreateToolCall(new { agent_id = "coder", task = "do work" });
         await tool.ExecuteAsync(call, parentContext, CancellationToken.None);
 
-        Assert.NotNull(capturedRequest);
-        Assert.Equal("openai", capturedRequest.Provider);
-        Assert.Equal("gpt-4", capturedRequest.Model);
+        Assert.IsNotNull(capturedRequest);
+        Assert.AreEqual("openai", capturedRequest.Provider);
+        Assert.AreEqual("gpt-4", capturedRequest.Model);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_ChildPolicyPreservesParentRestrictions()
     {
         var registry = new InMemoryAgentRegistry();
@@ -203,15 +204,15 @@ public sealed class InvokeAgentToolTests
         await new InvokeAgentTool(registry, orchestrator).ExecuteAsync(
             CreateToolCall(new { agent_id = "coder", task = "inspect only" }),
             CreateContext() with { ToolPolicy = parentPolicy }, CancellationToken.None);
-        Assert.NotNull(captured);
+        Assert.IsNotNull(captured);
         var tools = BuiltInToolFactory.CreateDefault(Path.GetTempPath());
         var available = new InMemoryToolRegistry(tools).ResolveTools(captured.ToolPolicy);
-        Assert.Contains(available, tool => tool.Descriptor.Name == "read_file");
-        Assert.DoesNotContain(available, tool => tool.Descriptor.Name == "write_file");
-        Assert.DoesNotContain(available, tool => tool.Descriptor.Group != "group:fs");
+        Assert.Contains(tool => tool.Descriptor.Name == "read_file", available);
+        Assert.DoesNotContain(tool => tool.Descriptor.Name == "write_file", available);
+        Assert.DoesNotContain(tool => tool.Descriptor.Group != "group:fs", available);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_MissingParentPolicyFailsClosed()
     {
         var registry = new InMemoryAgentRegistry();
@@ -221,11 +222,11 @@ public sealed class InvokeAgentToolTests
         var result = await new InvokeAgentTool(registry, orchestrator).ExecuteAsync(
             CreateToolCall(new { agent_id = "coder", task = "do work" }),
             CreateContext() with { ToolPolicy = null }, CancellationToken.None);
-        Assert.True(result.IsError);
-        Assert.False(invoked);
+        Assert.IsTrue(result.IsError);
+        Assert.IsFalse(invoked);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecuteAsync_ForwardsChildEventsToParentSink()
     {
         var registry = new InMemoryAgentRegistry();
@@ -234,22 +235,22 @@ public sealed class InvokeAgentToolTests
         await new InvokeAgentTool(registry, new StubOrchestrator("done")).ExecuteAsync(
             CreateToolCall(new { agent_id = "coder", task = "do work" }),
             CreateContext() with { EventSink = sink }, CancellationToken.None);
-        Assert.Equal("coder", Assert.Single(sink.Events).AgentId);
+        Assert.AreEqual("coder", Assert.ContainsSingle(sink.Events).AgentId);
     }
 
-    [Theory]
-    [InlineData(AgentRunStatus.RoundLimitReached)]
-    [InlineData(AgentRunStatus.Failed)]
-    [InlineData(AgentRunStatus.Cancelled)]
-    [InlineData(AgentRunStatus.AwaitingInput)]
+    [TestMethod]
+    [DataRow(AgentRunStatus.RoundLimitReached)]
+    [DataRow(AgentRunStatus.Failed)]
+    [DataRow(AgentRunStatus.Cancelled)]
+    [DataRow(AgentRunStatus.AwaitingInput)]
     public async Task ExecuteAsync_IncompleteChildResultIsAnError(AgentRunStatus status)
     {
         var registry = new InMemoryAgentRegistry();
         registry.Register(CreateAgentDef("coder"));
         var result = await new InvokeAgentTool(registry, new StubOrchestrator("incomplete", status: status)).ExecuteAsync(
             CreateToolCall(new { agent_id = "coder", task = "do work" }), CreateContext(), CancellationToken.None);
-        Assert.True(result.IsError);
-        Assert.Equal(status.ToString(), result.Details!["status"]);
+        Assert.IsTrue(result.IsError);
+        Assert.AreEqual(status.ToString(), result.Details!["status"]);
     }
 
     private sealed class CapturingSink : IAgentEventSink

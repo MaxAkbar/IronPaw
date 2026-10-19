@@ -2,74 +2,79 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class TaskResultValidatorTests
 {
     private const string Revision = "working-tree:content-snapshot-42";
-    private static WorkflowTaskDefinition TaskDefinition() => new("implement", "Implement and verify the change") {
+    private static WorkflowTaskDefinition TaskDefinition() => new("implement", "Implement and verify the change")
+    {
         ExpectedArtifacts = [new("patch", "Reviewed source patch", TaskArtifactKind.Patch)],
-        AcceptanceCriteria = [new("tests", "The resulting revision passes the relevant tests") { ArtifactIds = ["patch"] }] };
+        AcceptanceCriteria = [new("tests", "The resulting revision passes the relevant tests") { ArtifactIds = ["patch"] }]
+    };
     private static WorkflowTaskArtifact Artifact() => new("patch", "implement", TaskArtifactKind.Patch,
         "artifacts/change.patch", "sha256:reported-content-digest", Revision);
     private static TaskVerificationEvidence Evidence() => new("test-run", "tests", Revision,
-        TaskVerificationOutcome.Passed, "Relevant tests passed") { ArtifactIds = ["patch"], Command = "dotnet test", ExitCode = 0 };
+        TaskVerificationOutcome.Passed, "Relevant tests passed")
+    { ArtifactIds = ["patch"], Command = "dotnet test", ExitCode = 0 };
     private static WorkflowTaskGraph Graph(WorkflowTaskDefinition? task = null) =>
         new("feature-42", "Implement the feature", [task ?? TaskDefinition()]);
     private static WorkflowTaskResult Result(WorkflowTaskGraph? graph = null)
     {
         var accepted = TaskGraphValidator.Validate(graph ?? Graph());
         return new(accepted.Graph!.GraphId, accepted.DefinitionFingerprint!, "implement", WorkflowTaskStatus.Succeeded,
-            Revision, "Implemented and verified") { Artifacts = [Artifact()], VerificationEvidence = [Evidence()] };
+            Revision, "Implemented and verified")
+        { Artifacts = [Artifact()], VerificationEvidence = [Evidence()] };
     }
 
-    [Fact]
+    [TestMethod]
     public void MatchingArtifactsAndEvidence_SatisfyStructuralAcceptanceWithoutExecutingAnything()
     {
         var result = TaskResultValidator.Validate(Graph(), "implement", Result());
-        Assert.True(result.IsValid);
-        Assert.True(result.HasConsistentSuccessClaim);
-        Assert.Empty(result.Errors);
+        Assert.IsTrue(result.IsValid);
+        Assert.IsTrue(result.HasConsistentSuccessClaim);
+        Assert.IsEmpty(result.Errors);
     }
 
-    [Fact]
+    [TestMethod]
     public void ResultFromAnotherGraphWithIdenticalTaskIds_CannotBeReused()
     {
         var other = Graph() with { GraphId = "other-feature" };
         Reject(Result(other), "GraphIdentityMismatch");
     }
 
-    [Fact]
+    [TestMethod]
     public void ChangedAcceptedDefinitionWithSameIdentities_RejectsOldEvidenceEnvelope()
     {
         var changed = Graph(TaskDefinition() with { Objective = "A materially different objective" });
         var validation = TaskResultValidator.Validate(changed, "implement", Result());
-        Assert.False(validation.HasConsistentSuccessClaim);
-        Assert.Contains(validation.Errors, error => error.Code == "GraphFingerprintMismatch");
+        Assert.IsFalse(validation.HasConsistentSuccessClaim);
+        Assert.Contains(error => error.Code == "GraphFingerprintMismatch", validation.Errors);
     }
 
-    [Fact]
+    [TestMethod]
     public void MissingFingerprintCannotClaimTheAcceptedPlan()
         => Reject(Result() with { GraphFingerprint = null! }, "GraphFingerprintMismatch");
 
-    [Fact]
+    [TestMethod]
     public void CallerMustValidateTheExpectedTaskRatherThanLetAResultChooseItsOwnTarget()
     {
         var graph = Graph() with { Tasks = [new("inspect", "Inspect the code"), TaskDefinition()] };
         var validation = TaskResultValidator.Validate(graph, "inspect", Result(graph));
-        Assert.False(validation.HasConsistentSuccessClaim);
-        Assert.Contains(validation.Errors, error => error.Code == "TaskIdentityMismatch");
-        Assert.Contains(TaskResultValidator.Validate(graph, "missing", Result(graph)).Errors, error => error.Code == "UnknownTask");
+        Assert.IsFalse(validation.HasConsistentSuccessClaim);
+        Assert.Contains(error => error.Code == "TaskIdentityMismatch", validation.Errors);
+        Assert.Contains(error => error.Code == "UnknownTask", TaskResultValidator.Validate(graph, "missing", Result(graph)).Errors);
     }
 
-    [Fact]
+    [TestMethod]
     public void InvalidGraphCannotBeValidatedThroughAnIsolatedTaskDefinition()
     {
         var graph = Graph(TaskDefinition() with { Dependencies = ["missing"] });
         var validation = TaskResultValidator.Validate(graph, "implement", Result());
-        Assert.False(validation.HasConsistentSuccessClaim);
-        Assert.Contains(validation.Errors, error => error.Code == "InvalidGraphDefinition");
+        Assert.IsFalse(validation.HasConsistentSuccessClaim);
+        Assert.Contains(error => error.Code == "InvalidGraphDefinition", validation.Errors);
     }
 
-    [Fact]
+    [TestMethod]
     public void OriginalMutablePolicyCannotAlterAcceptedGraphOrItsResultBinding()
     {
         var allowed = new List<string> { "read_file" };
@@ -77,115 +82,124 @@ public sealed class TaskResultValidatorTests
         var accepted = TaskGraphValidator.Validate(proposal).Graph!;
         var receipt = Result(accepted);
         allowed.Add("run_command");
-        Assert.True(TaskResultValidator.Validate(accepted, "implement", receipt).HasConsistentSuccessClaim);
-        Assert.False(TaskResultValidator.Validate(proposal, "implement", receipt).HasConsistentSuccessClaim);
+        Assert.IsTrue(TaskResultValidator.Validate(accepted, "implement", receipt).HasConsistentSuccessClaim);
+        Assert.IsFalse(TaskResultValidator.Validate(proposal, "implement", receipt).HasConsistentSuccessClaim);
     }
 
-    [Theory]
-    [InlineData("other-revision", "EvidenceRevisionMismatch")]
-    [InlineData("", "EvidenceRevisionMismatch")]
+    [TestMethod]
+    [DataRow("other-revision", "EvidenceRevisionMismatch")]
+    [DataRow("", "EvidenceRevisionMismatch")]
     public void StaleOrMissingEvidenceRevision_CannotEstablishSuccess(string revision, string code)
     {
         Reject(Result() with { VerificationEvidence = [Evidence() with { Revision = revision }] }, code);
     }
 
-    [Fact]
+    [TestMethod]
     public void ArtifactFromAnotherRevision_CannotBeVerifiedByCurrentResult()
         => Reject(Result() with { Artifacts = [Artifact() with { Revision = "old-revision" }] }, "ArtifactRevisionMismatch");
 
-    [Fact]
+    [TestMethod]
     public void AnotherTasksArtifact_CannotReplaceExpectedOutput()
         => Reject(Result() with { Artifacts = [Artifact() with { ProducerTaskId = "other-task" }] }, "ArtifactProducerMismatch");
 
-    [Fact]
+    [TestMethod]
     public void ExecutionSuccessWithoutVerification_CannotEstablishTaskSuccess()
         => Reject(Result() with { VerificationEvidence = [] }, "RequiredEvidenceMissing");
 
-    [Theory]
-    [InlineData(TaskVerificationOutcome.Failed)]
-    [InlineData(TaskVerificationOutcome.Inconclusive)]
+    [TestMethod]
+    [DataRow(TaskVerificationOutcome.Failed)]
+    [DataRow(TaskVerificationOutcome.Inconclusive)]
     public void RequiredEvidenceThatDidNotPass_CannotEstablishSuccess(TaskVerificationOutcome outcome)
         => Reject(Result() with { VerificationEvidence = [Evidence() with { Outcome = outcome }] }, "CriterionNotPassed");
 
-    [Fact]
+    [TestMethod]
     public void ConflictingEvidence_CannotChooseOnlyThePassingReceipt()
-        => Reject(Result() with { VerificationEvidence = [Evidence(), Evidence() with {
-            EvidenceId = "second-run", Outcome = TaskVerificationOutcome.Failed, ExitCode = 1 }] }, "CriterionNotPassed");
+        => Reject(Result() with
+        {
+            VerificationEvidence = [Evidence(), Evidence() with {
+            EvidenceId = "second-run", Outcome = TaskVerificationOutcome.Failed, ExitCode = 1 }]
+        }, "CriterionNotPassed");
 
-    [Fact]
+    [TestMethod]
     public void MissingRequiredOutput_CannotBeHiddenByPassingEvidence()
         => Reject(Result() with { Artifacts = [], VerificationEvidence = [Evidence() with { ArtifactIds = [] }] }, "RequiredArtifactMissing");
 
-    [Fact]
+    [TestMethod]
     public void CriterionEvidenceMustCoverItsRequiredArtifacts()
         => Reject(Result() with { VerificationEvidence = [Evidence() with { ArtifactIds = [] }] }, "CriterionArtifactNotVerified");
 
-    [Fact]
+    [TestMethod]
     public void UndeclaredCriterion_CannotSubstituteForRequiredCriterion()
         => Reject(Result() with { VerificationEvidence = [Evidence() with { CriterionId = "unrelated" }] }, "UnknownCriterion");
 
-    [Fact]
+    [TestMethod]
     public void EvidenceCannotReferenceAnArtifactMissingFromTheResult()
         => Reject(Result() with { VerificationEvidence = [Evidence() with { ArtifactIds = ["unknown"] }] }, "UnknownEvidenceArtifact");
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData(1)]
+    [TestMethod]
+    [DataRow(null)]
+    [DataRow(1)]
     public void PassingCommandRequiresZeroExitCode(int? exitCode)
         => Reject(Result() with { VerificationEvidence = [Evidence() with { ExitCode = exitCode }] }, "CommandOutcomeMismatch");
 
-    [Fact]
+    [TestMethod]
     public void UnresolvedIssuesPreventSuccess()
         => Reject(Result() with { UnresolvedIssues = ["A required scenario remains unverified"] }, "UnresolvedIssuesRemain");
 
-    [Theory]
-    [InlineData(WorkflowTaskStatus.Failed)]
-    [InlineData(WorkflowTaskStatus.Cancelled)]
-    [InlineData(WorkflowTaskStatus.BudgetExhausted)]
-    [InlineData(WorkflowTaskStatus.Blocked)]
+    [TestMethod]
+    [DataRow(WorkflowTaskStatus.Failed)]
+    [DataRow(WorkflowTaskStatus.Cancelled)]
+    [DataRow(WorkflowTaskStatus.BudgetExhausted)]
+    [DataRow(WorkflowTaskStatus.Blocked)]
     public void IncompleteResultsPreservePartialArtifactsAndIssuesWithoutClaimingAcceptance(WorkflowTaskStatus status)
     {
-        var result = TaskResultValidator.Validate(Graph(), "implement", Result() with {
-            Status = status, VerificationEvidence = [], UnresolvedIssues = ["Verification did not finish"] });
-        Assert.True(result.IsValid);
-        Assert.False(result.HasConsistentSuccessClaim);
+        var result = TaskResultValidator.Validate(Graph(), "implement", Result() with
+        {
+            Status = status,
+            VerificationEvidence = [],
+            UnresolvedIssues = ["Verification did not finish"]
+        });
+        Assert.IsTrue(result.IsValid);
+        Assert.IsFalse(result.HasConsistentSuccessClaim);
     }
 
-    [Fact]
+    [TestMethod]
     public void NoRequiredAcceptanceCriteria_CannotBecomeImplicitSuccess()
     {
         var task = TaskDefinition() with { AcceptanceCriteria = [] };
         var graph = Graph(task);
         var result = TaskResultValidator.Validate(graph, "implement", Result(graph) with { VerificationEvidence = [] });
-        Assert.False(result.HasConsistentSuccessClaim);
-        Assert.Contains(result.Errors, error => error.Code == "AcceptanceCriteriaRequired");
+        Assert.IsFalse(result.HasConsistentSuccessClaim);
+        Assert.Contains(error => error.Code == "AcceptanceCriteriaRequired", result.Errors);
     }
 
-    [Fact]
+    [TestMethod]
     public void OptionalOutputAndCriteriaMayBeOmittedWhileRequiredAcceptancePasses()
     {
-        var task = TaskDefinition() with {
+        var task = TaskDefinition() with
+        {
             ExpectedArtifacts = [.. TaskDefinition().ExpectedArtifacts, new("notes", "Optional notes", TaskArtifactKind.Report, Required: false)],
-            AcceptanceCriteria = [.. TaskDefinition().AcceptanceCriteria, new("extra", "Optional scenario", Required: false)] };
+            AcceptanceCriteria = [.. TaskDefinition().AcceptanceCriteria, new("extra", "Optional scenario", Required: false)]
+        };
         var graph = Graph(task);
-        Assert.True(TaskResultValidator.Validate(graph, "implement", Result(graph)).HasConsistentSuccessClaim);
+        Assert.IsTrue(TaskResultValidator.Validate(graph, "implement", Result(graph)).HasConsistentSuccessClaim);
     }
 
-    [Fact]
+    [TestMethod]
     public void AcceptedTaskMayDependOnUpstreamWorkWhileRetainingTheAcceptedGraphEnvelope()
     {
         var graph = Graph() with { Tasks = [new("inspect", "Inspect the relevant code"), TaskDefinition() with { Dependencies = ["inspect"] }] };
-        Assert.True(TaskResultValidator.Validate(graph, "implement", Result(graph)).HasConsistentSuccessClaim);
+        Assert.IsTrue(TaskResultValidator.Validate(graph, "implement", Result(graph)).HasConsistentSuccessClaim);
     }
 
-    [Fact]
+    [TestMethod]
     public void DuplicateArtifactOrEvidenceIdentitiesAreRejected()
     {
         Reject(Result() with { Artifacts = [Artifact(), Artifact()] }, "DuplicateArtifactId");
         Reject(Result() with { VerificationEvidence = [Evidence(), Evidence()] }, "DuplicateEvidenceId");
     }
 
-    [Fact]
+    [TestMethod]
     public void UnsupportedEnumsCannotBeInterpretedAsSuccess()
     {
         Reject(Result() with { Status = (WorkflowTaskStatus)99 }, "InvalidStatus");
@@ -193,10 +207,10 @@ public sealed class TaskResultValidatorTests
         Reject(Result() with { Artifacts = [Artifact() with { Kind = (TaskArtifactKind)99 }] }, "InvalidArtifactKind");
     }
 
-    [Fact]
+    [TestMethod]
     public void MalformedNullAndDefaultCollectionsProduceErrorsWithoutThrowing()
     {
-        Assert.False(TaskResultValidator.Validate(null, "implement", null).IsValid);
+        Assert.IsFalse(TaskResultValidator.Validate(null, "implement", null).IsValid);
         Reject(Result() with { Artifacts = default, VerificationEvidence = default, UnresolvedIssues = default }, "InvalidCollection");
         Reject(Result() with { Artifacts = [null!] }, "InvalidArtifact");
         Reject(Result() with { VerificationEvidence = [null!] }, "InvalidEvidence");
@@ -206,8 +220,8 @@ public sealed class TaskResultValidatorTests
     private static void Reject(WorkflowTaskResult receipt, string code)
     {
         var result = TaskResultValidator.Validate(Graph(), "implement", receipt);
-        Assert.False(result.IsValid);
-        Assert.False(result.HasConsistentSuccessClaim);
-        Assert.Contains(result.Errors, error => error.Code == code);
+        Assert.IsFalse(result.IsValid);
+        Assert.IsFalse(result.HasConsistentSuccessClaim);
+        Assert.Contains(error => error.Code == code, result.Errors);
     }
 }

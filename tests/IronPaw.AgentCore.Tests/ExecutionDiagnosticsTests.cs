@@ -10,81 +10,95 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
-[CollectionDefinition("Execution diagnostics", DisableParallelization = true)]
-public sealed class ExecutionDiagnosticsCollection;
-
-[Collection("Execution diagnostics")]
+[TestClass]
+[DoNotParallelize]
 public sealed class ExecutionDiagnosticsTests
 {
-    [Fact]
+    [TestMethod]
     public async Task RealAdapterCallsHaveCorrelatedPayloadFreeTracesAndMetrics_ReplayAddsNoCalls()
     {
         using var probe = new Probe();
         await using var scope = await Scope.OpenAsync();
         var result = await scope.Runtime.RunAsync(scope.Request, NullAgentEventSink.Instance, default);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Equal(2, scope.Client.Calls);
-        Assert.Equal(1, scope.Tool.Calls);
-        var root = Assert.Single(probe.Spans, activity => activity.OperationName == "ironpaw.run");
-        Assert.Equal(result.RunId.Value, root.GetTagItem("ironpaw.run.id"));
-        Assert.Equal("completed", root.GetTagItem("ironpaw.outcome"));
-        var tool = Assert.Single(probe.Spans, activity => activity.OperationName == "ironpaw.tool");
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        Assert.AreEqual(2, scope.Client.Calls);
+        Assert.AreEqual(1, scope.Tool.Calls);
+        var root = Assert.ContainsSingle(activity => activity.OperationName == "ironpaw.run", probe.Spans);
+        Assert.AreEqual(result.RunId.Value, root.GetTagItem("ironpaw.run.id"));
+        Assert.AreEqual("completed", root.GetTagItem("ironpaw.outcome"));
+        var tool = Assert.ContainsSingle(activity => activity.OperationName == "ironpaw.tool", probe.Spans);
         var saved = (await scope.Store.GetAsync(result.RunId, default))!;
-        Assert.Equal(saved.ToolExecutions![0].ExecutionId, tool.GetTagItem("ironpaw.tool.execution_id"));
-        Assert.Equal(root.SpanId, tool.ParentSpanId);
-        Assert.All(probe.Spans.Where(activity => activity.OperationName == "ironpaw.model"), activity => {
-            Assert.Equal(root.TraceId, activity.TraceId); Assert.Equal(root.SpanId, activity.ParentSpanId);
-        });
-        Assert.Equal(2, probe.Count("model"));
-        Assert.Equal(1, probe.Count("tool"));
-        Assert.Equal(4, probe.Durations.Count);
-        Assert.All(probe.Durations, seconds => Assert.True(seconds >= 0));
-        Assert.Equal(8, probe.Measurements.Where(m => m.Name == "ironpaw.model.reported_tokens" && m.Tags["direction"] == "input").Sum(m => m.Value));
-        Assert.All(probe.Measurements, measurement => Assert.All(measurement.Tags.Keys,
-            key => Assert.Contains(key, new[] { "operation", "outcome", "direction" })));
-        Assert.DoesNotContain(probe.Spans.SelectMany(activity => activity.Tags), tag => tag.Value?.Contains("PRIVATE", StringComparison.Ordinal) == true);
-        Assert.All(probe.Measurements.Where(m => m.Name == "ironpaw.operations.active").GroupBy(m => m.Tags["operation"]), group => Assert.Equal(0, group.Sum(m => m.Value)));
+        Assert.AreEqual(saved.ToolExecutions![0].ExecutionId, tool.GetTagItem("ironpaw.tool.execution_id"));
+        Assert.AreEqual(root.SpanId, tool.ParentSpanId);
+        foreach (var activity in probe.Spans.Where(activity => activity.OperationName == "ironpaw.model"))
+        {
+            Assert.AreEqual(root.TraceId, activity.TraceId);
+            Assert.AreEqual(root.SpanId, activity.ParentSpanId);
+        }
+        Assert.AreEqual(2, probe.Count("model"));
+        Assert.AreEqual(1, probe.Count("tool"));
+        Assert.AreEqual(4, probe.Durations.Count);
+        foreach (var seconds in probe.Durations)
+        {
+            Assert.IsTrue(seconds >= 0);
+        }
+        Assert.AreEqual(8, probe.Measurements.Where(m => m.Name == "ironpaw.model.reported_tokens" && m.Tags["direction"] == "input").Sum(m => m.Value));
+        foreach (var measurement in probe.Measurements)
+        {
+            foreach (var key in measurement.Tags.Keys)
+            {
+                Assert.Contains(key, new[] { "operation", "outcome", "direction" });
+            }
+        }
+        Assert.DoesNotContain(tag => tag.Value?.Contains("PRIVATE", StringComparison.Ordinal) == true, probe.Spans.SelectMany(activity => activity.Tags));
+        foreach (var group in probe.Measurements.Where(m => m.Name == "ironpaw.operations.active").GroupBy(m => m.Tags["operation"]))
+        {
+            Assert.AreEqual(0, group.Sum(m => m.Value));
+        }
         var measurements = probe.Measurements.Count;
         var replay = await scope.Runtime.ResumeAsync(result.RunId, scope.Request.Caller, NullAgentEventSink.Instance, default);
-        Assert.Equal(result.RunId, replay.RunId);
-        Assert.Equal(result.Status, replay.Status);
-        Assert.Equal(result.FinalAssistantMessage, replay.FinalAssistantMessage);
-        Assert.Equal(measurements, probe.Measurements.Count);
-        Assert.Equal(2, scope.Client.Calls);
-        Assert.Equal(1, scope.Tool.Calls);
+        Assert.AreEqual(result.RunId, replay.RunId);
+        Assert.AreEqual(result.Status, replay.Status);
+        Assert.AreEqual(result.FinalAssistantMessage, replay.FinalAssistantMessage);
+        Assert.AreEqual(measurements, probe.Measurements.Count);
+        Assert.AreEqual(2, scope.Client.Calls);
+        Assert.AreEqual(1, scope.Tool.Calls);
     }
 
-    [Theory]
-    [InlineData("run_started", false)]
-    [InlineData("assistant_delta", false)]
-    [InlineData("tool_call", false)]
-    [InlineData("tool_result", false)]
-    [InlineData("run_started", true)]
-    [InlineData("assistant_delta", true)]
-    [InlineData("tool_call", true)]
-    [InlineData("tool_result", true)]
-    [InlineData("direct_tool", true)]
+    [TestMethod]
+    [DataRow("run_started", false)]
+    [DataRow("assistant_delta", false)]
+    [DataRow("tool_call", false)]
+    [DataRow("tool_result", false)]
+    [DataRow("run_started", true)]
+    [DataRow("assistant_delta", true)]
+    [DataRow("tool_call", true)]
+    [DataRow("tool_result", true)]
+    [DataRow("direct_tool", true)]
     public async Task IntermediateObserverErrorsCannotChangeDurableWorkOrCauseARepeat(string eventType, bool asyncFailure)
     {
         await using var scope = await Scope.OpenAsync();
-        var sink = new DelegateSink(evt => {
+        var sink = new DelegateSink(evt =>
+        {
             if (evt.Type != eventType) return ValueTask.CompletedTask;
             if (asyncFailure) return ValueTask.FromException(new InvalidOperationException("observer failed"));
             throw new InvalidOperationException("observer failed");
         });
         var result = await scope.Runtime.RunAsync(scope.Request, sink, default);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Contains("observer failed", result.Metadata["eventDeliveryError"]!.ToString());
-        Assert.True((long)result.Metadata["eventDeliveryFailures"]! > 0);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        var deliveryError = result.Metadata["eventDeliveryError"]!.ToString();
+        Assert.IsNotNull(deliveryError);
+        Assert.Contains("observer failed", deliveryError);
+        Assert.IsTrue((long)result.Metadata["eventDeliveryFailures"]! > 0);
         var checkpoint = (await scope.Store.GetAsync(result.RunId, default))!;
-        Assert.Equal(WorkflowStatus.Succeeded, checkpoint.Status);
-        Assert.Equal(WorkflowToolState.Completed, Assert.Single(checkpoint.ToolExecutions!).State);
+        Assert.AreEqual(WorkflowStatus.Succeeded, checkpoint.Status);
+        Assert.AreEqual(WorkflowToolState.Completed, Assert.ContainsSingle(checkpoint.ToolExecutions!).State);
         await scope.Runtime.ResumeAsync(result.RunId, scope.Request.Caller, sink, default);
-        Assert.Equal(1, scope.Tool.Calls);
-        Assert.Equal(2, scope.Client.Calls);
+        Assert.AreEqual(1, scope.Tool.Calls);
+        Assert.AreEqual(2, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DelegatedRunsShareTheParentTraceAndKeepTheirOwnInvocationIdentities()
     {
         using var probe = new Probe();
@@ -95,20 +109,20 @@ public sealed class ExecutionDiagnosticsTests
         agents.Register(new("codegen", "Coder", "Inspects candidates", "Inspect the candidate", new(ToolProfile.Coding)));
         scope.Tools.RegisterTools([new ListAgentsTool(agents), new InvokeAgentTool(agents, scope.Runtime)]);
         var result = await scope.Runtime.RunAsync(scope.Request, NullAgentEventSink.Instance, default);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        var root = Assert.Single(probe.Spans, span => span.OperationName == "ironpaw.run" && Equals(span.GetTagItem("ironpaw.run.id"), result.RunId.Value));
-        var child = Assert.Single(probe.Spans, span => span.OperationName == "ironpaw.run" && Equals(span.GetTagItem("ironpaw.agent.id"), "codegen"));
-        Assert.Equal(root.TraceId, child.TraceId);
-        Assert.Equal(result.RunId.Value, child.GetTagItem("ironpaw.parent_run.id"));
-        Assert.Equal(result.RunId.Value, child.GetTagItem("ironpaw.workflow.root_id"));
-        Assert.Contains(probe.Spans, span => span.OperationName == "ironpaw.tool" && span.SpanId == child.ParentSpanId);
-        var savedChild = Assert.Single(await scope.Store.ListAsync(default), run => run.ParentRunId is not null);
-        Assert.Equal(savedChild.RunId, child.GetTagItem("ironpaw.run.id"));
-        Assert.Equal(2, probe.Count("run"));
-        Assert.Equal(3, probe.Count("model"));
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        var root = Assert.ContainsSingle(span => span.OperationName == "ironpaw.run" && Equals(span.GetTagItem("ironpaw.run.id"), result.RunId.Value), probe.Spans);
+        var child = Assert.ContainsSingle(span => span.OperationName == "ironpaw.run" && Equals(span.GetTagItem("ironpaw.agent.id"), "codegen"), probe.Spans);
+        Assert.AreEqual(root.TraceId, child.TraceId);
+        Assert.AreEqual(result.RunId.Value, child.GetTagItem("ironpaw.parent_run.id"));
+        Assert.AreEqual(result.RunId.Value, child.GetTagItem("ironpaw.workflow.root_id"));
+        Assert.Contains(span => span.OperationName == "ironpaw.tool" && span.SpanId == child.ParentSpanId, probe.Spans);
+        var savedChild = Assert.ContainsSingle(run => run.ParentRunId is not null, await scope.Store.ListAsync(default));
+        Assert.AreEqual(savedChild.RunId, child.GetTagItem("ironpaw.run.id"));
+        Assert.AreEqual(2, probe.Count("run"));
+        Assert.AreEqual(3, probe.Count("model"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CancellationEscapesAnUncooperativeAsyncObserverBeforeAnyProviderWork()
     {
         using var probe = new Probe();
@@ -116,63 +130,69 @@ public sealed class ExecutionDiagnosticsTests
         using var cancellation = new CancellationTokenSource();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var sink = new DelegateSink(evt => {
+        var sink = new DelegateSink(evt =>
+        {
             if (evt.Type != "run_started") return ValueTask.CompletedTask;
             entered.TrySetResult(); return new(release.Task);
         });
         var pending = scope.Runtime.RunAsync(scope.Request, sink, cancellation.Token);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
-        try { await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(5))); }
+        try { await Assert.ThrowsAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(5))); }
         finally { release.TrySetResult(); }
-        Assert.Equal(0, scope.Client.Calls);
-        Assert.Equal(0, scope.Tool.Calls);
-        Assert.Null((await scope.Store.GetAsync(scope.Request.RequestedRunId!.Value, default))!.LeaseOwner);
-        Assert.Equal("cancelled", Assert.Single(probe.Spans, span => span.OperationName == "ironpaw.run").GetTagItem("ironpaw.outcome"));
+        Assert.AreEqual(0, scope.Client.Calls);
+        Assert.AreEqual(0, scope.Tool.Calls);
+        Assert.IsNull((await scope.Store.GetAsync(scope.Request.RequestedRunId!.Value, default))!.LeaseOwner);
+        Assert.AreEqual("cancelled", Assert.ContainsSingle(span => span.OperationName == "ironpaw.run", probe.Spans).GetTagItem("ironpaw.outcome"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ThrowingTelemetryListenersCannotFailExecutionOrLeakAmbientActivities()
     {
         using var probe = new Probe();
         await using var scope = await Scope.OpenAsync();
         using var parent = new Activity("test-parent").SetIdFormat(ActivityIdFormat.W3C).Start();
-        using var activityFailures = new ActivityListener {
+        using var activityFailures = new ActivityListener
+        {
             ShouldListenTo = source => source.Name == ExecutionDiagnostics.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
             ActivityStarted = _ => throw new InvalidOperationException("bad trace observer"),
             ActivityStopped = _ => throw new InvalidOperationException("bad trace observer")
         };
         ActivitySource.AddActivityListener(activityFailures);
-        using var metricFailures = new MeterListener { InstrumentPublished = (instrument, listener) => {
-            if (instrument.Meter.Name == ExecutionDiagnostics.MeterName) listener.EnableMeasurementEvents(instrument);
-        } };
+        using var metricFailures = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (instrument.Meter.Name == ExecutionDiagnostics.MeterName) listener.EnableMeasurementEvents(instrument);
+            }
+        };
         metricFailures.SetMeasurementEventCallback<long>((_, _, _, _) => throw new InvalidOperationException("bad metric observer"));
         metricFailures.SetMeasurementEventCallback<double>((_, _, _, _) => throw new InvalidOperationException("bad metric observer"));
         metricFailures.Start();
         var result = await scope.Runtime.RunAsync(scope.Request, NullAgentEventSink.Instance, default);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Equal(2, scope.Client.Calls);
-        Assert.Equal(1, scope.Tool.Calls);
-        Assert.Same(parent, Activity.Current);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        Assert.AreEqual(2, scope.Client.Calls);
+        Assert.AreEqual(1, scope.Tool.Calls);
+        Assert.AreSame<object>(parent, Activity.Current);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ProviderFailureIsRecordedAsFailureWithoutAnAcceptedOrCompletedRun()
     {
         using var probe = new Probe();
         await using var scope = await Scope.OpenAsync([new AssistantTextDelta("PRIVATE partial"), new LlmErrorDelta("PRIVATE failure")]);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Runtime.RunAsync(scope.Request, NullAgentEventSink.Instance, default));
-        Assert.Equal("failed", Assert.Single(probe.Spans, span => span.OperationName == "ironpaw.run").GetTagItem("ironpaw.outcome"));
-        Assert.Equal("failed", Assert.Single(probe.Spans, span => span.OperationName == "ironpaw.model").GetTagItem("ironpaw.outcome"));
-        Assert.NotEqual(WorkflowStatus.Succeeded, (await scope.Store.GetAsync(scope.Request.RequestedRunId!.Value, default))!.Status);
-        Assert.DoesNotContain(probe.Spans.SelectMany(span => span.Tags), tag => tag.Value?.Contains("PRIVATE", StringComparison.Ordinal) == true);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => scope.Runtime.RunAsync(scope.Request, NullAgentEventSink.Instance, default));
+        Assert.AreEqual("failed", Assert.ContainsSingle(span => span.OperationName == "ironpaw.run", probe.Spans).GetTagItem("ironpaw.outcome"));
+        Assert.AreEqual("failed", Assert.ContainsSingle(span => span.OperationName == "ironpaw.model", probe.Spans).GetTagItem("ironpaw.outcome"));
+        Assert.AreNotEqual(WorkflowStatus.Succeeded, (await scope.Store.GetAsync(scope.Request.RequestedRunId!.Value, default))!.Status);
+        Assert.DoesNotContain(tag => tag.Value?.Contains("PRIVATE", StringComparison.Ordinal) == true, probe.Spans.SelectMany(span => span.Tags));
     }
 
-    [Theory]
-    [InlineData(TaskAcceptanceOutcome.Accepted, "accepted")]
-    [InlineData(TaskAcceptanceOutcome.Rejected, "failed")]
-    [InlineData(TaskAcceptanceOutcome.Inconclusive, "inconclusive")]
+    [TestMethod]
+    [DataRow(TaskAcceptanceOutcome.Accepted, "accepted")]
+    [DataRow(TaskAcceptanceOutcome.Rejected, "failed")]
+    [DataRow(TaskAcceptanceOutcome.Inconclusive, "inconclusive")]
     public async Task TaskSpansUseTheSavedHostDecisionInsteadOfTheExecutorCompletionClaim(TaskAcceptanceOutcome decision, string expected)
     {
         using var probe = new Probe();
@@ -182,13 +202,13 @@ public sealed class ExecutionDiagnosticsTests
         }]);
         var scheduler = new TaskGraphScheduler(scope.Store, new GraphExecutor(), new GraphVerifier(decision));
         await scheduler.StartAsync(graph, scope.Request.Caller, 1, default);
-        var span = Assert.Single(probe.Spans, activity => activity.OperationName == "ironpaw.task");
-        Assert.Equal(expected, span.GetTagItem("ironpaw.outcome"));
-        Assert.Equal("observed-graph", span.GetTagItem("ironpaw.graph.id"));
-        Assert.NotNull(span.GetTagItem("ironpaw.task.attempt_id"));
-        var graphSpan = Assert.Single(probe.Spans, activity => activity.OperationName == "ironpaw.graph");
-        Assert.Equal(graphSpan.TraceId, span.TraceId);
-        Assert.Equal(graphSpan.SpanId, span.ParentSpanId);
+        var span = Assert.ContainsSingle(activity => activity.OperationName == "ironpaw.task", probe.Spans);
+        Assert.AreEqual(expected, span.GetTagItem("ironpaw.outcome"));
+        Assert.AreEqual("observed-graph", span.GetTagItem("ironpaw.graph.id"));
+        Assert.IsNotNull(span.GetTagItem("ironpaw.task.attempt_id"));
+        var graphSpan = Assert.ContainsSingle(activity => activity.OperationName == "ironpaw.graph", probe.Spans);
+        Assert.AreEqual(graphSpan.TraceId, span.TraceId);
+        Assert.AreEqual(graphSpan.SpanId, span.ParentSpanId);
     }
 
     private sealed class DelegateSink(Func<AgentEvent, ValueTask> publish) : IAgentEventSink
@@ -196,9 +216,10 @@ public sealed class ExecutionDiagnosticsTests
     private sealed class GraphExecutor : IWorkflowTaskExecutor
     {
         public Task<WorkflowTaskResult> ExecuteAsync(TaskGraphClaim claim, CancellationToken ct) => Task.FromResult(new WorkflowTaskResult(
-            claim.GraphId, claim.GraphFingerprint, claim.Task.TaskId, WorkflowTaskStatus.Succeeded, "candidate", "Executor claims completion") {
-                VerificationEvidence = [new("evidence", "accepted", "candidate", TaskVerificationOutcome.Passed, "Executor evidence claim")]
-            });
+            claim.GraphId, claim.GraphFingerprint, claim.Task.TaskId, WorkflowTaskStatus.Succeeded, "candidate", "Executor claims completion")
+        {
+            VerificationEvidence = [new("evidence", "accepted", "candidate", TaskVerificationOutcome.Passed, "Executor evidence claim")]
+        });
     }
     private sealed class GraphVerifier(TaskAcceptanceOutcome outcome) : ITaskAcceptanceVerifier
     { public Task<TaskAcceptanceDecision> VerifyAsync(TaskGraphClaim claim, WorkflowTaskResult result, CancellationToken ct) => Task.FromResult(new TaskAcceptanceDecision(outcome, "host", "Independent decision")); }
@@ -212,13 +233,20 @@ public sealed class ExecutionDiagnosticsTests
         public ConcurrentQueue<(string Name, long Value, Dictionary<string, string> Tags)> Measurements { get; } = new();
         public Probe()
         {
-            _activities = new() { ShouldListenTo = source => source.Name == ExecutionDiagnostics.SourceName,
+            _activities = new()
+            {
+                ShouldListenTo = source => source.Name == ExecutionDiagnostics.SourceName,
                 Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-                ActivityStopped = span => Spans.Enqueue(span) };
+                ActivityStopped = span => Spans.Enqueue(span)
+            };
             ActivitySource.AddActivityListener(_activities);
-            _metrics = new() { InstrumentPublished = (instrument, listener) => {
-                if (instrument.Meter.Name == ExecutionDiagnostics.MeterName) listener.EnableMeasurementEvents(instrument);
-            } };
+            _metrics = new()
+            {
+                InstrumentPublished = (instrument, listener) =>
+                {
+                    if (instrument.Meter.Name == ExecutionDiagnostics.MeterName) listener.EnableMeasurementEvents(instrument);
+                }
+            };
             _metrics.SetMeasurementEventCallback<long>((instrument, value, tags, _) => Measurements.Enqueue((instrument.Name, value,
                 tags.ToArray().ToDictionary(tag => tag.Key, tag => tag.Value?.ToString() ?? ""))));
             _metrics.SetMeasurementEventCallback<double>((_, value, _, _) => Durations.Enqueue(value));
@@ -258,8 +286,11 @@ public sealed class ExecutionDiagnosticsTests
     private sealed class CountingTool : ITool
     {
         public int Calls;
-        public ToolDescriptor Descriptor { get; } = new("record_effect", "Record an effect", JsonSerializer.SerializeToElement(new {
-            type = "object", properties = new { secret = new { type = "string" } } }), "group:system");
+        public ToolDescriptor Descriptor { get; } = new("record_effect", "Record an effect", JsonSerializer.SerializeToElement(new
+        {
+            type = "object",
+            properties = new { secret = new { type = "string" } }
+        }), "group:system");
         public async Task<ToolResult> ExecuteAsync(ToolCall call, ToolExecutionContext context, CancellationToken ct)
         {
             Calls++;

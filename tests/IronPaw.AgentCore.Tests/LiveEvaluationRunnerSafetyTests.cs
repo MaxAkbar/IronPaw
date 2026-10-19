@@ -6,33 +6,38 @@ using IronPaw.AgentCore.Persistence.CSharpDb;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class LiveEvaluationRunnerSafetyTests
 {
     private static readonly CallerIdentity Owner = new("evaluation-safety-owner", "Safety fixture owner", true);
     private static readonly CancellationToken Ct = CancellationToken.None;
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task PlausibleWrongImplementationNeverPassesHostBehavioralVerification(bool attemptProtectedHarnessWrite)
     {
         await using var scope = await Scope.OpenAsync();
         var provider = new WrongImplementationClient(attemptProtectedHarnessWrite);
         var report = await scope.Runner(provider).StartAsync(Settings(), "wrong-output", scope.Root, Owner, true, Ct);
 
-        Assert.Equal("Completed", report.Status);
-        Assert.Equal("NOT_ESTABLISHED", report.LiveBaselineQualification);
-        Assert.Equal(2, report.Trials.Length);
-        Assert.All(report.Trials, trial => {
-            Assert.False(trial.VerifiedCompletion);
-            Assert.Equal(TaskGraphRunStatus.Failed, trial.Status);
+        Assert.AreEqual("Completed", report.Status);
+        Assert.AreEqual("NOT_ESTABLISHED", report.LiveBaselineQualification);
+        Assert.AreEqual(2, report.Trials.Length);
+        foreach (var trial in report.Trials)
+        {
+            Assert.IsFalse(trial.VerifiedCompletion);
+            Assert.AreEqual(TaskGraphRunStatus.Failed, trial.Status);
             var final = trial.Tasks.Single(task => task.TaskId is "join" or "direct");
-            Assert.Equal(TaskCommandOutcome.Passed, final.Verifications.Single(item => item.ProfileId == "build").Completion!.Outcome);
-            Assert.Equal(TaskCommandOutcome.Failed, final.Verifications.Single(item => item.ProfileId == "tests").Completion!.Outcome);
-            Assert.NotEqual(TaskAcceptanceOutcome.Accepted, final.Acceptance?.Outcome);
-        });
-        Assert.All(report.Checkpoint.Requests, request => Assert.Equal(LiveEvaluationRequestState.Completed, request.State));
-        Assert.True(report.Checkpoint.ChargedSpend > 0);
+            Assert.AreEqual(TaskCommandOutcome.Passed, final.Verifications.Single(item => item.ProfileId == "build").Completion!.Outcome);
+            Assert.AreEqual(TaskCommandOutcome.Failed, final.Verifications.Single(item => item.ProfileId == "tests").Completion!.Outcome);
+            Assert.AreNotEqual(TaskAcceptanceOutcome.Accepted, final.Acceptance?.Outcome);
+        }
+        foreach (var request in report.Checkpoint.Requests)
+        {
+            Assert.AreEqual(LiveEvaluationRequestState.Completed, request.State);
+        }
+        Assert.IsTrue(report.Checkpoint.ChargedSpend > 0);
         foreach (var caseDirectory in Directory.EnumerateDirectories(Path.Combine(scope.Root, "source")))
         {
             var program = await File.ReadAllTextAsync(Path.Combine(caseDirectory, "Program.cs"));
@@ -44,38 +49,58 @@ public sealed class LiveEvaluationRunnerSafetyTests
             var workflows = await scope.Store.ListAsync(Ct);
             var attempts = workflows.SelectMany(workflow => workflow.ToolExecutions ?? [])
                 .Where(tool => tool.Call.ToolName == "write_file" && tool.Call.Arguments.TryGetProperty("path", out var path) && path.GetString() == "Program.cs").ToArray();
-            Assert.NotEmpty(attempts);
-            Assert.All(attempts, attempt => Assert.True(attempt.Result?.IsError));
+            Assert.IsNotEmpty(attempts);
+            foreach (var attempt in attempts)
+            {
+                Assert.IsTrue(attempt.Result?.IsError);
+            }
         }
         await scope.ReopenAsync();
         var reject = new RejectClient();
         var resumed = await scope.Runner(reject).ResumeAsync("wrong-output", scope.Root, Owner, true, Ct);
-        Assert.Equal("Completed", resumed.Status);
-        Assert.All(resumed.Trials, trial => Assert.False(trial.VerifiedCompletion));
-        Assert.Equal(0, reject.Calls);
-        Assert.Equal(report.Checkpoint.ChargedSpend, resumed.Checkpoint.ChargedSpend);
+        Assert.AreEqual("Completed", resumed.Status);
+        foreach (var trial in resumed.Trials)
+        {
+            Assert.IsFalse(trial.VerifiedCompletion);
+        }
+        Assert.AreEqual(0, reject.Calls);
+        Assert.AreEqual(report.Checkpoint.ChargedSpend, resumed.Checkpoint.ChargedSpend);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ChangedFrozenSourceIsRejectedBeforeResumeCanDispatchPaidWork()
     {
         await using var scope = await Scope.OpenAsync();
         var reject = new RejectClient();
         var initial = await scope.Runner(reject).StartAsync(Settings() with { MaxTotalSpend = 0.000001m },
             "source-drift", scope.Root, Owner, true, Ct);
-        Assert.Equal("BudgetExhausted", initial.Status);
-        Assert.Equal(0, reject.Calls);
+        Assert.AreEqual("BudgetExhausted", initial.Status);
+        Assert.AreEqual(0, reject.Calls);
         await File.AppendAllTextAsync(Path.Combine(scope.Root, "source", "addition", "Program.cs"), "\n// changed frozen assertions\n");
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => scope.Runner(reject).ResumeAsync("source-drift", scope.Root, Owner, true, Ct));
-        Assert.Equal(0, reject.Calls);
-        Assert.Empty((await ((ILiveEvaluationStore)scope.Store).GetEvaluationAsync("source-drift", Owner, Ct))!.Requests);
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => scope.Runner(reject).ResumeAsync("source-drift", scope.Root, Owner, true, Ct));
+        Assert.AreEqual(0, reject.Calls);
+        Assert.IsEmpty((await ((ILiveEvaluationStore)scope.Store).GetEvaluationAsync("source-drift", Owner, Ct))!.Requests);
     }
 
-    private static LiveEvaluationSettings Settings() => new() {
-        Enabled = true, Provider = "openai", Model = "controlled-safety-fixture", MaxTotalSpend = 10,
-        Pricing = new() { InputPerMillion = 1, OutputPerMillion = 1, CacheReadPerMillion = 1, CacheWritePerMillion = 1,
-            Source = "Synthetic safety fixture prices", AsOfUtc = new(2026, 10, 18, 0, 0, 0, TimeSpan.Zero) },
-        MaxInputTokensPerRequest = 50_000, MaxOutputTokensPerRequest = 1000, InputFramingTokenAllowance = 1024, PairedTrials = 1
+    private static LiveEvaluationSettings Settings() => new()
+    {
+        Enabled = true,
+        Provider = "openai",
+        Model = "controlled-safety-fixture",
+        MaxTotalSpend = 10,
+        Pricing = new()
+        {
+            InputPerMillion = 1,
+            OutputPerMillion = 1,
+            CacheReadPerMillion = 1,
+            CacheWritePerMillion = 1,
+            Source = "Synthetic safety fixture prices",
+            AsOfUtc = new(2026, 10, 18, 0, 0, 0, TimeSpan.Zero)
+        },
+        MaxInputTokensPerRequest = 50_000,
+        MaxOutputTokensPerRequest = 1000,
+        InputFramingTokenAllowance = 1024,
+        PairedTrials = 1
     };
 
     private sealed class WrongImplementationClient(bool tamper) : ILlmClient

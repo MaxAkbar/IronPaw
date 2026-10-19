@@ -79,6 +79,12 @@ TRX results with zero failures/skips, and validates both example settings docume
 provider credentials and runtime defaults within the script process, uses the safe application
 example, then restores that process's environment. It does not run live evaluation campaigns.
 
+The nine test projects use MSTest 4.5.1 with Microsoft's test SDK and adapter. Test classes can run
+concurrently; methods and data rows within each class stay sequential. Execution-diagnostics tests
+run separately because they observe process-wide telemetry. Fixture cleanup uses `TestCleanup`,
+and desktop tests retain their explicit STA dispatcher probes. CSharpDB process-recovery tests
+retain their dedicated subprocess entry point. Coverage uses the existing Coverlet collector.
+
 Evidence includes the build/test log, every TRX, selected SDK, source revision, dirty-worktree flag,
 SHA-256 source-file manifest and final summary. Source changes during validation prevent a passing
 summary. The source manifest includes uncommitted local

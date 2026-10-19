@@ -9,12 +9,13 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class AgentTaskGraphRunnerTests
 {
     private static readonly CallerIdentity Owner = new("graph-owner", "Graph owner", true);
     private static readonly CancellationToken Ct = CancellationToken.None;
 
-    [Fact]
+    [TestMethod]
     public async Task ScopedExecution_UsesCommittedSourceAndSeparateWorkspaces_LeavesDirtyCheckoutUntouched()
     {
         await using var scope = await Scope.OpenAsync();
@@ -28,26 +29,31 @@ public sealed class AgentTaskGraphRunnerTests
 
         var completed = await scope.Runner(client).StartAsync(graph, Owner, 2, scope.Options(graph), Ct);
 
-        Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
-        Assert.All(completed.Tasks, state => Assert.Equal(TaskAcceptanceOutcome.Accepted, state.Acceptance!.Outcome));
-        var artifacts = completed.Tasks.Select(state => Assert.Single(state.Result!.Artifacts)).ToArray();
-        Assert.NotEqual(artifacts[0].Location, artifacts[1].Location);
-        Assert.Equal("Objective first", await File.ReadAllTextAsync(artifacts[0].Location));
-        Assert.Equal("Objective second", await File.ReadAllTextAsync(artifacts[1].Location));
-        Assert.All(client.Requests.Where(request => request.Messages.Any(message => message.Role == ChatRole.Tool)), request =>
-            Assert.Contains(request.Messages, message => message.Role == ChatRole.Tool && message.Content.Contains("committed source", StringComparison.Ordinal)));
-        Assert.Equal("dirty local work", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
-        Assert.Equal("untracked local work", await File.ReadAllTextAsync(Path.Combine(scope.Source, "untracked.txt")));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "result.txt")));
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
+        foreach (var state in completed.Tasks)
+        {
+            Assert.AreEqual(TaskAcceptanceOutcome.Accepted, state.Acceptance!.Outcome);
+        }
+        var artifacts = completed.Tasks.Select(state => Assert.ContainsSingle(state.Result!.Artifacts)).ToArray();
+        Assert.AreNotEqual(artifacts[0].Location, artifacts[1].Location);
+        Assert.AreEqual("Objective first", await File.ReadAllTextAsync(artifacts[0].Location));
+        Assert.AreEqual("Objective second", await File.ReadAllTextAsync(artifacts[1].Location));
+        foreach (var request in client.Requests.Where(request => request.Messages.Any(message => message.Role == ChatRole.Tool)))
+        {
+            Assert.Contains(message => message.Role == ChatRole.Tool && message.Content.Contains("committed source", StringComparison.Ordinal), request.Messages);
+        }
+        Assert.AreEqual("dirty local work", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
+        Assert.AreEqual("untracked local work", await File.ReadAllTextAsync(Path.Combine(scope.Source, "untracked.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "result.txt")));
         var budget = await scope.Store.GetBudgetAsync(new RunId(completed.AgentBinding!.RootRunId), Ct);
-        Assert.Equal(40, budget.ChargedTokens);
-        Assert.Equal(0, budget.ReservedTokens);
+        Assert.AreEqual(40, budget.ChargedTokens);
+        Assert.AreEqual(0, budget.ReservedTokens);
         var usage = await ((IWorkflowStore)scope.Store).GetUsageAsync(new RunId(completed.AgentBinding.RootRunId), Ct);
-        Assert.Equal(4, usage.ModelCalls);
-        Assert.Equal(4, usage.ToolCalls);
+        Assert.AreEqual(4, usage.ModelCalls);
+        Assert.AreEqual(4, usage.ToolCalls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task MissingExplicitIntegrityRule_StaysAwaitingAcceptance_ResumeDoesNotReplayProvider()
     {
         await using var scope = await Scope.OpenAsync();
@@ -57,34 +63,34 @@ public sealed class AgentTaskGraphRunnerTests
 
         var pending = await runner.StartAsync(graph, Owner, 1,
             scope.Options(graph) with { ArtifactVerificationRules = [] }, Ct);
-        Assert.Equal(TaskGraphRunStatus.AwaitingAcceptance, TaskGraphProgress.Inspect(pending).Status);
-        Assert.Equal(TaskAcceptanceOutcome.Inconclusive, Assert.Single(pending.Tasks).Acceptance!.Outcome);
+        Assert.AreEqual(TaskGraphRunStatus.AwaitingAcceptance, TaskGraphProgress.Inspect(pending).Status);
+        Assert.AreEqual(TaskAcceptanceOutcome.Inconclusive, Assert.ContainsSingle(pending.Tasks).Acceptance!.Outcome);
         var count = client.Requests.Count;
         var resumed = await runner.ResumeAsync(graph.GraphId, Owner, Ct);
-        Assert.Equal(TaskGraphRunStatus.AwaitingAcceptance, TaskGraphProgress.Inspect(resumed).Status);
-        Assert.Equal(count, client.Requests.Count);
+        Assert.AreEqual(TaskGraphRunStatus.AwaitingAcceptance, TaskGraphProgress.Inspect(resumed).Status);
+        Assert.AreEqual(count, client.Requests.Count);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CompletedGraphAcrossReopen_ReturnsAcceptedResultWithoutAnyProviderCalls()
     {
         await using var scope = await Scope.OpenAsync();
         var graph = Graph(Task("first"));
         var completed = await scope.Runner(Writer()).StartAsync(graph, Owner, 1, scope.Options(graph), Ct);
-        Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
         var before = await scope.Store.GetBudgetAsync(new RunId(completed.AgentBinding!.RootRunId), Ct);
         await scope.ReopenAsync();
         var unused = new ScriptedClient((_, _) => throw new InvalidOperationException("Completed work was replayed."));
 
         var replay = await scope.Runner(unused).ResumeAsync(graph.GraphId, Owner, Ct);
 
-        Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(replay).Status);
-        Assert.Empty(unused.Requests);
-        Assert.Equal(before.ChargedTokens, (await scope.Store.GetBudgetAsync(new RunId(completed.AgentBinding.RootRunId), Ct)).ChargedTokens);
-        Assert.Equal(completed.Tasks[0].Result!.Revision, replay.Tasks[0].Result!.Revision);
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(replay).Status);
+        Assert.IsEmpty(unused.Requests);
+        Assert.AreEqual(before.ChargedTokens, (await scope.Store.GetBudgetAsync(new RunId(completed.AgentBinding.RootRunId), Ct)).ChargedTokens);
+        Assert.AreEqual(completed.Tasks[0].Result!.Revision, replay.Tasks[0].Result!.Revision);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SharedModelCap_StopsSiblingTasksWithoutGrantingFreshBudgets()
     {
         await using var scope = await Scope.OpenAsync();
@@ -94,17 +100,20 @@ public sealed class AgentTaskGraphRunnerTests
         var stopped = await scope.Runner(client).StartAsync(graph, Owner, 1,
             scope.Options(graph) with { SharedBudget = new(1, 10, 100_000) }, Ct);
 
-        Assert.Equal(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(stopped).Status);
-        Assert.Single(client.Requests);
-        Assert.All(stopped.Tasks, state => Assert.Equal(TaskGraphTaskStatus.BudgetExhausted, state.Status));
+        Assert.AreEqual(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(stopped).Status);
+        Assert.ContainsSingle(client.Requests);
+        foreach (var state in stopped.Tasks)
+        {
+            Assert.AreEqual(TaskGraphTaskStatus.BudgetExhausted, state.Status);
+        }
         var usage = await ((IWorkflowStore)scope.Store).GetUsageAsync(new RunId(stopped.AgentBinding!.RootRunId), Ct);
-        Assert.Equal(1, usage.ModelCalls);
-        Assert.Equal(1, usage.ToolCalls);
-        Assert.Single(Directory.EnumerateFiles(scope.Managed, "workspace.json", SearchOption.AllDirectories));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "result.txt")));
+        Assert.AreEqual(1, usage.ModelCalls);
+        Assert.AreEqual(1, usage.ToolCalls);
+        Assert.ContainsSingle(Directory.EnumerateFiles(scope.Managed, "workspace.json", SearchOption.AllDirectories));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "result.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SharedTokenOvershoot_PreservesReceiptAndBlocksToolsAndSiblings()
     {
         await using var scope = await Scope.OpenAsync();
@@ -115,16 +124,16 @@ public sealed class AgentTaskGraphRunnerTests
         var stopped = await scope.Runner(client).StartAsync(graph, Owner, 1,
             scope.Options(graph) with { SharedBudget = new(20, 20, 10_000) }, Ct);
 
-        Assert.Equal(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(stopped).Status);
-        Assert.Single(client.Requests);
+        Assert.AreEqual(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(stopped).Status);
+        Assert.ContainsSingle(client.Requests);
         var budget = await scope.Store.GetBudgetAsync(new RunId(stopped.AgentBinding!.RootRunId), Ct);
-        Assert.Equal(200_005, budget.ChargedTokens);
+        Assert.AreEqual(200_005, budget.ChargedTokens);
         var usage = await ((IWorkflowStore)scope.Store).GetUsageAsync(new RunId(stopped.AgentBinding.RootRunId), Ct);
-        Assert.Equal(0, usage.ToolCalls);
-        Assert.Empty(Directory.EnumerateFiles(scope.Managed, "result.txt", SearchOption.AllDirectories));
+        Assert.AreEqual(0, usage.ToolCalls);
+        Assert.IsEmpty(Directory.EnumerateFiles(scope.Managed, "result.txt", SearchOption.AllDirectories));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task TaskTools_ExcludeUnscopedCapabilities_AndEnforceWritablePaths()
     {
         await using var scope = await Scope.OpenAsync();
@@ -135,66 +144,73 @@ public sealed class AgentTaskGraphRunnerTests
 
         var stopped = await scope.Runner(client).StartAsync(graph, Owner, 1, scope.Options(graph), Ct);
 
-        Assert.Equal(TaskGraphRunStatus.Failed, TaskGraphProgress.Inspect(stopped).Status);
-        Assert.All(client.Requests, request => Assert.DoesNotContain(request.Tools, tool =>
-            tool.Name is "invoke_agent" or "request_input" or "web_navigate" or "save_memory" or "run_command" or "send_agent_message"));
-        var child = Assert.Single(await scope.Store.ListAsync(Ct), run => run.ParentRunId is not null);
-        Assert.True(Assert.Single(child.ToolExecutions!).Result!.IsError);
-        Assert.Equal("committed source", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
-        Assert.All(Directory.EnumerateFiles(scope.Managed, "source.txt", SearchOption.AllDirectories),
-            path => Assert.Equal("committed source", File.ReadAllText(path)));
+        Assert.AreEqual(TaskGraphRunStatus.Failed, TaskGraphProgress.Inspect(stopped).Status);
+        foreach (var request in client.Requests)
+        {
+            Assert.DoesNotContain(tool => tool.Name is "invoke_agent" or "request_input" or "web_navigate" or "save_memory" or "run_command" or "send_agent_message", request.Tools);
+        }
+        var child = Assert.ContainsSingle(run => run.ParentRunId is not null, await scope.Store.ListAsync(Ct));
+        Assert.IsTrue(Assert.ContainsSingle(child.ToolExecutions!).Result!.IsError);
+        Assert.AreEqual("committed source", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
+        foreach (var path in Directory.EnumerateFiles(scope.Managed, "source.txt", SearchOption.AllDirectories))
+        {
+            Assert.AreEqual("committed source", File.ReadAllText(path));
+        }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExplicitRootToolPolicy_RestrictsTaskToolsWithoutLosingTaskRestrictions()
     {
         await using var scope = await Scope.OpenAsync();
-        var task = Task("first") with { ToolPolicy = new(ToolProfile.Coding,
-            InheritedPolicy: new(ToolProfile.Coding, DenyList: ["list_files"])) };
+        var task = Task("first") with
+        {
+            ToolPolicy = new(ToolProfile.Coding,
+            InheritedPolicy: new(ToolProfile.Coding, DenyList: ["list_files"]))
+        };
         var graph = Graph(task);
         var client = new ScriptedClient((_, _) => Final());
 
         await scope.Runner(client).StartAsync(graph, Owner, 1, scope.Options(graph) with
         { RootToolPolicy = new(ToolProfile.Coding, DenyList: ["write_file"]) }, Ct);
 
-        var request = Assert.Single(client.Requests);
-        Assert.DoesNotContain(request.Tools, tool => tool.Name is "write_file" or "list_files");
-        Assert.Contains(request.Tools, tool => tool.Name == "read_file");
-        Assert.False(File.Exists(Path.Combine(scope.Source, "result.txt")));
+        var request = Assert.ContainsSingle(client.Requests);
+        Assert.DoesNotContain(tool => tool.Name is "write_file" or "list_files", request.Tools);
+        Assert.Contains(tool => tool.Name == "read_file", request.Tools);
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "result.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task InterruptedProvider_ExplicitRecoveryReusesAttemptChildAndWorkspaceAcrossReopen()
     {
         await using var scope = await Scope.OpenAsync();
         var graph = Graph(Task("first"));
         var failing = new ScriptedClient((_, _) => [new AssistantTextDelta("partial"), new LlmErrorDelta("connection interrupted")]);
         var interrupted = await scope.Runner(failing).StartAsync(graph, Owner, 1, scope.Options(graph), Ct);
-        var state = Assert.Single(interrupted.Tasks);
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, state.Status);
-        var child = Assert.Single(await scope.Store.ListAsync(Ct), run => run.ParentRunId is not null);
-        Assert.False(WorkflowIdentity.HasUnknownEffects(child));
-        var marker = Assert.Single(Directory.EnumerateFiles(scope.Managed, "workspace.json", SearchOption.AllDirectories));
+        var state = Assert.ContainsSingle(interrupted.Tasks);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, state.Status);
+        var child = Assert.ContainsSingle(run => run.ParentRunId is not null, await scope.Store.ListAsync(Ct));
+        Assert.IsFalse(WorkflowIdentity.HasUnknownEffects(child));
+        var marker = Assert.ContainsSingle(Directory.EnumerateFiles(scope.Managed, "workspace.json", SearchOption.AllDirectories));
         var workspaceBefore = JsonSerializer.Deserialize<TaskWorkspace>(await File.ReadAllTextAsync(marker))!;
         await scope.ReopenAsync();
         var recovery = Writer();
 
         var completed = await scope.Runner(recovery).RecoverTaskAsync(graph.GraphId, "first", Owner, Ct);
 
-        Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
-        Assert.Equal(state.AttemptId, completed.Tasks[0].AttemptId);
-        var reused = Assert.Single(await scope.Store.ListAsync(Ct), run => run.ParentRunId is not null);
-        Assert.Equal(child.RunId, reused.RunId);
-        Assert.Equal(child.Request.SessionKey, reused.Request.SessionKey);
-        Assert.Equal(workspaceBefore, JsonSerializer.Deserialize<TaskWorkspace>(await File.ReadAllTextAsync(marker)));
-        Assert.Single(Directory.EnumerateFiles(scope.Managed, "workspace.json", SearchOption.AllDirectories));
-        Assert.Equal(2, recovery.Requests.Count);
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
+        Assert.AreEqual(state.AttemptId, completed.Tasks[0].AttemptId);
+        var reused = Assert.ContainsSingle(run => run.ParentRunId is not null, await scope.Store.ListAsync(Ct));
+        Assert.AreEqual(child.RunId, reused.RunId);
+        Assert.AreEqual(child.Request.SessionKey, reused.Request.SessionKey);
+        Assert.AreEqual(workspaceBefore, JsonSerializer.Deserialize<TaskWorkspace>(await File.ReadAllTextAsync(marker)));
+        Assert.ContainsSingle(Directory.EnumerateFiles(scope.Managed, "workspace.json", SearchOption.AllDirectories));
+        Assert.AreEqual(2, recovery.Requests.Count);
         var usage = await ((IWorkflowStore)scope.Store).GetUsageAsync(new RunId(completed.AgentBinding!.RootRunId), Ct);
-        Assert.Equal(3, usage.ModelCalls);
-        Assert.Equal(1, usage.ToolCalls);
+        Assert.AreEqual(3, usage.ModelCalls);
+        Assert.AreEqual(1, usage.ToolCalls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SharedExecutionTime_IncludesWorkspacePreparationBeforeAnyProviderCall()
     {
         var clock = new ManualTimeProvider();
@@ -208,16 +224,16 @@ public sealed class AgentTaskGraphRunnerTests
         var stopped = await scope.Runner(client, delayed).StartAsync(graph, Owner, 1,
             scope.Options(graph) with { SharedBudget = new(10, 10, MaxExecutionTime: TimeSpan.FromHours(1)) }, Ct);
 
-        Assert.Equal(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(stopped).Status);
-        Assert.Empty(client.Requests);
+        Assert.AreEqual(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(stopped).Status);
+        Assert.IsEmpty(client.Requests);
         var snapshot = await scope.Store.GetBudgetAsync(new RunId(stopped.AgentBinding!.RootRunId), Ct);
-        Assert.True(snapshot.ExecutionTime >= TimeSpan.FromHours(2));
-        Assert.Equal(TimeSpan.Zero, snapshot.RemainingExecutionTime);
+        Assert.IsTrue(snapshot.ExecutionTime >= TimeSpan.FromHours(2));
+        Assert.AreEqual(TimeSpan.Zero, snapshot.RemainingExecutionTime);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task ActiveGraphControl_SettlesChildAndNeverRepeatsConfirmedWrite(bool permanent)
     {
         await using var scope = await Scope.OpenAsync();
@@ -231,34 +247,34 @@ public sealed class AgentTaskGraphRunnerTests
         else await runner.PauseAsync(graph.GraphId, Owner, Ct);
         var stopped = await active.WaitAsync(TimeSpan.FromSeconds(10));
 
-        Assert.Equal(permanent ? WorkflowControl.Cancel : WorkflowControl.Pause, stopped.Control);
+        Assert.AreEqual(permanent ? WorkflowControl.Cancel : WorkflowControl.Pause, stopped.Control);
         var root = (await scope.Store.GetAsync(new RunId(stopped.AgentBinding!.RootRunId), Ct))!;
-        Assert.Equal(stopped.Control, root.Control);
-        var child = Assert.Single(await scope.Store.ListAsync(Ct), run => run.ParentRunId is not null);
-        Assert.Null(child.LeaseOwner);
-        Assert.False(WorkflowIdentity.HasUnknownEffects(child));
-        var write = Assert.Single(child.ToolExecutions!);
-        Assert.Equal(WorkflowToolState.Completed, write.State);
-        Assert.False(write.Result!.IsError);
-        Assert.True(client.Interrupted);
+        Assert.AreEqual(stopped.Control, root.Control);
+        var child = Assert.ContainsSingle(run => run.ParentRunId is not null, await scope.Store.ListAsync(Ct));
+        Assert.IsNull(child.LeaseOwner);
+        Assert.IsFalse(WorkflowIdentity.HasUnknownEffects(child));
+        var write = Assert.ContainsSingle(child.ToolExecutions!);
+        Assert.AreEqual(WorkflowToolState.Completed, write.State);
+        Assert.IsFalse(write.Result!.IsError);
+        Assert.IsTrue(client.Interrupted);
         if (permanent)
         {
-            Assert.Equal(WorkflowTaskStatus.Cancelled, stopped.Tasks[0].Result!.Status);
-            await Assert.ThrowsAsync<WorkflowCancelledException>(() => runner.ResumeAsync(graph.GraphId, Owner, Ct));
-            await Assert.ThrowsAsync<WorkflowCancelledException>(() => runner.RecoverTaskAsync(graph.GraphId, "first", Owner, Ct));
+            Assert.AreEqual(WorkflowTaskStatus.Cancelled, stopped.Tasks[0].Result!.Status);
+            await Assert.ThrowsExactlyAsync<WorkflowCancelledException>(() => runner.ResumeAsync(graph.GraphId, Owner, Ct));
+            await Assert.ThrowsExactlyAsync<WorkflowCancelledException>(() => runner.RecoverTaskAsync(graph.GraphId, "first", Owner, Ct));
         }
         else
         {
-            Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, stopped.Tasks[0].Status);
+            Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, stopped.Tasks[0].Status);
             await runner.ResumeAsync(graph.GraphId, Owner, Ct);
             var completed = await runner.RecoverTaskAsync(graph.GraphId, "first", Owner, Ct);
-            Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
+            Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
             var resumedChild = (await scope.Store.GetAsync(new RunId(child.RunId), Ct))!;
-            Assert.Equal(write.ExecutionId, Assert.Single(resumedChild.ToolExecutions!).ExecutionId);
-            Assert.Equal(1, resumedChild.Usage!.ToolCalls);
-            Assert.Equal(3, client.Requests);
+            Assert.AreEqual(write.ExecutionId, Assert.ContainsSingle(resumedChild.ToolExecutions!).ExecutionId);
+            Assert.AreEqual(1, resumedChild.Usage!.ToolCalls);
+            Assert.AreEqual(3, client.Requests);
         }
-        Assert.Equal("committed source", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
+        Assert.AreEqual("committed source", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
     }
 
     private static WorkflowTaskDefinition Task(string id) => new(id, "Objective " + id)
@@ -385,8 +401,13 @@ public sealed class AgentTaskGraphRunnerTests
         }
         private static async Task GitAsync(string path, params string[] arguments)
         {
-            var info = new ProcessStartInfo("git") { UseShellExecute = false, CreateNoWindow = true,
-                RedirectStandardOutput = true, RedirectStandardError = true };
+            var info = new ProcessStartInfo("git")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
             info.ArgumentList.Add("-C"); info.ArgumentList.Add(path);
             foreach (var argument in arguments) info.ArgumentList.Add(argument);
             using var process = Process.Start(info)!;
@@ -394,7 +415,7 @@ public sealed class AgentTaskGraphRunnerTests
             var error = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
             await output;
-            Assert.True(process.ExitCode == 0, await error);
+            Assert.IsTrue(process.ExitCode == 0, await error);
         }
     }
 }

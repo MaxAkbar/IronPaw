@@ -4,9 +4,10 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class TaskGraphProgressTests
 {
-    [Fact]
+    [TestMethod]
     public void BlockedDescendantsAndIndependentReadyWork_AreReportedInDeclarationOrder()
     {
         var checkpoint = Checkpoint(
@@ -23,19 +24,19 @@ public sealed class TaskGraphProgressTests
 
         var summary = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(TaskGraphRunStatus.Queued, summary.Status);
-        Assert.Equal(new[] { "independent-b", "implement", "independent-a" }, summary.ReadyTaskIds.ToArray());
-        Assert.Equal(new[]
+        Assert.AreEqual(TaskGraphRunStatus.Queued, summary.Status);
+        Assert.AreSequenceEqual(new[] { "independent-b", "implement", "independent-a" }, summary.ReadyTaskIds.ToArray());
+        Assert.AreSequenceEqual(new[]
         {
             new TaskGraphDependencyBlock("deliver", "review", TaskGraphTaskStatus.Pending),
             new TaskGraphDependencyBlock("deliver", "test", TaskGraphTaskStatus.Pending),
             new TaskGraphDependencyBlock("review", "implement", TaskGraphTaskStatus.Pending),
             new TaskGraphDependencyBlock("test", "implement", TaskGraphTaskStatus.Pending)
         }, summary.BlockedTasks.ToArray());
-        Assert.Equal(0, summary.ActiveClaims);
+        Assert.AreEqual(0, summary.ActiveClaims);
     }
 
-    [Fact]
+    [TestMethod]
     public void AcceptedDependency_UnblocksItsDependent()
     {
         var checkpoint = Checkpoint([Definition("deliver", "build"), Definition("build")],
@@ -43,12 +44,12 @@ public sealed class TaskGraphProgressTests
 
         var summary = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(TaskGraphRunStatus.Queued, summary.Status);
-        Assert.Equal(new[] { "deliver" }, summary.ReadyTaskIds.ToArray());
-        Assert.Empty(summary.BlockedTasks);
+        Assert.AreEqual(TaskGraphRunStatus.Queued, summary.Status);
+        Assert.AreSequenceEqual(new[] { "deliver" }, summary.ReadyTaskIds.ToArray());
+        Assert.IsEmpty(summary.BlockedTasks);
     }
 
-    [Fact]
+    [TestMethod]
     public void SuccessfulRawResult_StillRequiresAcceptanceBeforeUnblockingDescendants()
     {
         var result = new WorkflowTaskResult("graph", "graph-fingerprint", "build",
@@ -58,16 +59,15 @@ public sealed class TaskGraphProgressTests
 
         var summary = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(TaskGraphRunStatus.AwaitingAcceptance, summary.Status);
-        Assert.Empty(summary.ReadyTaskIds);
-        Assert.Equal(new TaskGraphDependencyBlock("deliver", "build", TaskGraphTaskStatus.AwaitingAcceptance),
-            Assert.Single(summary.BlockedTasks));
+        Assert.AreEqual(TaskGraphRunStatus.AwaitingAcceptance, summary.Status);
+        Assert.IsEmpty(summary.ReadyTaskIds);
+        Assert.AreEqual(new TaskGraphDependencyBlock("deliver", "build", TaskGraphTaskStatus.AwaitingAcceptance), Assert.ContainsSingle(summary.BlockedTasks));
     }
 
-    [Theory]
-    [InlineData(TaskAcceptanceOutcome.Inconclusive)]
-    [InlineData(TaskAcceptanceOutcome.Rejected)]
-    [InlineData(null)]
+    [TestMethod]
+    [DataRow(TaskAcceptanceOutcome.Inconclusive)]
+    [DataRow(TaskAcceptanceOutcome.Rejected)]
+    [DataRow(null)]
     public void SucceededStateWithoutAcceptedReceipt_DoesNotCompleteGraphOrUnblockDependents(TaskAcceptanceOutcome? outcome)
     {
         var state = new TaskGraphTaskState("build", TaskGraphTaskStatus.Succeeded,
@@ -76,16 +76,15 @@ public sealed class TaskGraphProgressTests
 
         var summary = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(TaskGraphRunStatus.Queued, summary.Status);
-        Assert.Empty(summary.ReadyTaskIds);
-        Assert.Equal(new TaskGraphDependencyBlock("deliver", "build", TaskGraphTaskStatus.Succeeded),
-            Assert.Single(summary.BlockedTasks));
+        Assert.AreEqual(TaskGraphRunStatus.Queued, summary.Status);
+        Assert.IsEmpty(summary.ReadyTaskIds);
+        Assert.AreEqual(new TaskGraphDependencyBlock("deliver", "build", TaskGraphTaskStatus.Succeeded), Assert.ContainsSingle(summary.BlockedTasks));
     }
 
-    [Theory]
-    [InlineData(TaskGraphTaskStatus.Failed, TaskGraphRunStatus.Failed)]
-    [InlineData(TaskGraphTaskStatus.BudgetExhausted, TaskGraphRunStatus.BudgetExhausted)]
-    [InlineData(TaskGraphTaskStatus.Cancelled, TaskGraphRunStatus.Cancelled)]
+    [TestMethod]
+    [DataRow(TaskGraphTaskStatus.Failed, TaskGraphRunStatus.Failed)]
+    [DataRow(TaskGraphTaskStatus.BudgetExhausted, TaskGraphRunStatus.BudgetExhausted)]
+    [DataRow(TaskGraphTaskStatus.Cancelled, TaskGraphRunStatus.Cancelled)]
     public void EstablishedTerminalOutcome_BlocksDependentAndExplainsGraphStatus(
         TaskGraphTaskStatus taskStatus, TaskGraphRunStatus graphStatus)
     {
@@ -94,12 +93,12 @@ public sealed class TaskGraphProgressTests
 
         var summary = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(graphStatus, summary.Status);
-        Assert.Empty(summary.ReadyTaskIds);
-        Assert.Equal(new TaskGraphDependencyBlock("deliver", "build", taskStatus), Assert.Single(summary.BlockedTasks));
+        Assert.AreEqual(graphStatus, summary.Status);
+        Assert.IsEmpty(summary.ReadyTaskIds);
+        Assert.AreEqual(new TaskGraphDependencyBlock("deliver", "build", taskStatus), Assert.ContainsSingle(summary.BlockedTasks));
     }
 
-    [Fact]
+    [TestMethod]
     public void IndependentReadyTask_RemainsVisibleAfterAnotherBranchFails()
     {
         var checkpoint = Checkpoint([Definition("failed"), Definition("blocked", "failed"), Definition("independent")],
@@ -107,44 +106,45 @@ public sealed class TaskGraphProgressTests
 
         var summary = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(TaskGraphRunStatus.Queued, summary.Status);
-        Assert.Equal(new[] { "independent" }, summary.ReadyTaskIds.ToArray());
-        Assert.Equal(new TaskGraphDependencyBlock("blocked", "failed", TaskGraphTaskStatus.Failed),
-            Assert.Single(summary.BlockedTasks));
+        Assert.AreEqual(TaskGraphRunStatus.Queued, summary.Status);
+        Assert.AreSequenceEqual(new[] { "independent" }, summary.ReadyTaskIds.ToArray());
+        Assert.AreEqual(new TaskGraphDependencyBlock("blocked", "failed", TaskGraphTaskStatus.Failed), Assert.ContainsSingle(summary.BlockedTasks));
     }
 
-    [Theory]
-    [InlineData(WorkflowControl.Cancel, TaskGraphRunStatus.Cancelled)]
-    [InlineData(WorkflowControl.Pause, TaskGraphRunStatus.Paused)]
+    [TestMethod]
+    [DataRow(WorkflowControl.Cancel, TaskGraphRunStatus.Cancelled)]
+    [DataRow(WorkflowControl.Pause, TaskGraphRunStatus.Paused)]
     public void RootControl_SuppressesReadyWorkAndTakesPrecedenceOverActiveClaims(
         WorkflowControl control, TaskGraphRunStatus status)
     {
         var checkpoint = Checkpoint([Definition("active"), Definition("ready")],
-            [new("active", TaskGraphTaskStatus.Running, LeaseToken: "lease-1"), new("ready")]) with { Control = control };
+            [new("active", TaskGraphTaskStatus.Running, LeaseToken: "lease-1"), new("ready")]) with
+        { Control = control };
 
         var summary = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(status, summary.Status);
-        Assert.Empty(summary.ReadyTaskIds);
-        Assert.Equal(1, summary.ActiveClaims);
+        Assert.AreEqual(status, summary.Status);
+        Assert.IsEmpty(summary.ReadyTaskIds);
+        Assert.AreEqual(1, summary.ActiveClaims);
     }
 
-    [Theory]
-    [InlineData(WorkflowControl.None)]
-    [InlineData(WorkflowControl.Cancel)]
-    [InlineData(WorkflowControl.Pause)]
+    [TestMethod]
+    [DataRow(WorkflowControl.None)]
+    [DataRow(WorkflowControl.Cancel)]
+    [DataRow(WorkflowControl.Pause)]
     public void UncertainTaskRemainsVisible_EvenWhenGraphWasPausedOrCancelled(WorkflowControl control)
     {
         var checkpoint = Checkpoint([Definition("uncertain"), Definition("ready")],
-            [new("uncertain", TaskGraphTaskStatus.NeedsReconciliation), new("ready")]) with { Control = control };
+            [new("uncertain", TaskGraphTaskStatus.NeedsReconciliation), new("ready")]) with
+        { Control = control };
 
         var summary = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(TaskGraphRunStatus.NeedsReconciliation, summary.Status);
-        Assert.Equal(control == WorkflowControl.None ? new[] { "ready" } : Array.Empty<string>(), summary.ReadyTaskIds.ToArray());
+        Assert.AreEqual(TaskGraphRunStatus.NeedsReconciliation, summary.Status);
+        Assert.AreSequenceEqual(control == WorkflowControl.None ? new[] { "ready" } : Array.Empty<string>(), summary.ReadyTaskIds.ToArray());
     }
 
-    [Fact]
+    [TestMethod]
     public void AnyLiveLease_CountsAsActiveIncludingVerificationClaim()
     {
         var checkpoint = Checkpoint([Definition("executing"), Definition("verifying"), Definition("ready")],
@@ -156,12 +156,12 @@ public sealed class TaskGraphProgressTests
 
         var summary = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(TaskGraphRunStatus.Running, summary.Status);
-        Assert.Equal(2, summary.ActiveClaims);
-        Assert.Equal(new[] { "ready" }, summary.ReadyTaskIds.ToArray());
+        Assert.AreEqual(TaskGraphRunStatus.Running, summary.Status);
+        Assert.AreEqual(2, summary.ActiveClaims);
+        Assert.AreSequenceEqual(new[] { "ready" }, summary.ReadyTaskIds.ToArray());
     }
 
-    [Fact]
+    [TestMethod]
     public void EveryTaskWithAcceptedReceipt_CompletesGraph()
     {
         var checkpoint = Checkpoint([Definition("first"), Definition("second", "first")],
@@ -169,13 +169,13 @@ public sealed class TaskGraphProgressTests
 
         var summary = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(TaskGraphRunStatus.Succeeded, summary.Status);
-        Assert.Empty(summary.ReadyTaskIds);
-        Assert.Empty(summary.BlockedTasks);
-        Assert.Equal(0, summary.ActiveClaims);
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, summary.Status);
+        Assert.IsEmpty(summary.ReadyTaskIds);
+        Assert.IsEmpty(summary.BlockedTasks);
+        Assert.AreEqual(0, summary.ActiveClaims);
     }
 
-    [Fact]
+    [TestMethod]
     public void AcceptanceWait_TakesPrecedenceOverFailureAndBudgetExhaustion()
     {
         var checkpoint = Checkpoint([Definition("failed"), Definition("budget"), Definition("waiting")],
@@ -184,10 +184,10 @@ public sealed class TaskGraphProgressTests
             new("waiting", TaskGraphTaskStatus.AwaitingAcceptance)
         ]);
 
-        Assert.Equal(TaskGraphRunStatus.AwaitingAcceptance, TaskGraphProgress.Inspect(checkpoint).Status);
+        Assert.AreEqual(TaskGraphRunStatus.AwaitingAcceptance, TaskGraphProgress.Inspect(checkpoint).Status);
     }
 
-    [Fact]
+    [TestMethod]
     public void Failure_TakesPrecedenceOverBudgetExhaustionAndCancellation()
     {
         var checkpoint = Checkpoint([Definition("failed"), Definition("budget"), Definition("cancelled")],
@@ -196,10 +196,10 @@ public sealed class TaskGraphProgressTests
             new("cancelled", TaskGraphTaskStatus.Cancelled)
         ]);
 
-        Assert.Equal(TaskGraphRunStatus.Failed, TaskGraphProgress.Inspect(checkpoint).Status);
+        Assert.AreEqual(TaskGraphRunStatus.Failed, TaskGraphProgress.Inspect(checkpoint).Status);
     }
 
-    [Fact]
+    [TestMethod]
     public void Inspection_IsDeterministicAndLeavesCheckpointUnchanged()
     {
         var checkpoint = Checkpoint([Definition("deliver", "review", "test"), Definition("review"), Definition("test")],
@@ -209,13 +209,12 @@ public sealed class TaskGraphProgressTests
         var first = TaskGraphProgress.Inspect(checkpoint);
         var second = TaskGraphProgress.Inspect(checkpoint);
 
-        Assert.Equal(first.Status, second.Status);
-        Assert.Equal(first.ReadyTaskIds.ToArray(), second.ReadyTaskIds.ToArray());
-        Assert.Equal(first.BlockedTasks.ToArray(), second.BlockedTasks.ToArray());
-        Assert.Equal(first.ActiveClaims, second.ActiveClaims);
-        Assert.Equal(before, JsonSerializer.Serialize(checkpoint));
-        Assert.Equal(new TaskGraphDependencyBlock("deliver", "test", TaskGraphTaskStatus.AwaitingAcceptance),
-            Assert.Single(first.BlockedTasks));
+        Assert.AreEqual(first.Status, second.Status);
+        Assert.AreSequenceEqual(first.ReadyTaskIds.ToArray(), second.ReadyTaskIds.ToArray());
+        Assert.AreSequenceEqual(first.BlockedTasks.ToArray(), second.BlockedTasks.ToArray());
+        Assert.AreEqual(first.ActiveClaims, second.ActiveClaims);
+        Assert.AreEqual(before, JsonSerializer.Serialize(checkpoint));
+        Assert.AreEqual(new TaskGraphDependencyBlock("deliver", "test", TaskGraphTaskStatus.AwaitingAcceptance), Assert.ContainsSingle(first.BlockedTasks));
     }
 
     private static WorkflowTaskDefinition Definition(string taskId, params string[] dependencies) =>

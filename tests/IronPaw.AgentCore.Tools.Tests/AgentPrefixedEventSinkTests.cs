@@ -3,9 +3,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class AgentPrefixedEventSinkTests
 {
-    [Fact]
+    [TestMethod]
     public async Task PublishAsync_TagsEventWithAgentId()
     {
         var captured = new List<AgentEvent>();
@@ -22,11 +23,11 @@ public sealed class AgentPrefixedEventSinkTests
 
         await sink.PublishAsync(evt, CancellationToken.None);
 
-        Assert.Single(captured);
-        Assert.Equal("coder", captured[0].AgentId);
+        Assert.ContainsSingle(captured);
+        Assert.AreEqual("coder", captured[0].AgentId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task PublishAsync_OverwritesExistingAgentId()
     {
         var captured = new List<AgentEvent>();
@@ -44,7 +45,7 @@ public sealed class AgentPrefixedEventSinkTests
 
         await sink.PublishAsync(evt, CancellationToken.None);
 
-        Assert.Equal("reviewer", captured[0].AgentId);
+        Assert.AreEqual("reviewer", captured[0].AgentId);
     }
 
     private sealed class CapturingSink : IAgentEventSink

@@ -3,9 +3,10 @@ using IronPaw.AgentCore.Persistence;
 
 namespace IronPaw.AgentCore.Persistence.Tests;
 
+[TestClass]
 public sealed class FileMemoryStoreTests
 {
-    [Fact]
+    [TestMethod]
     public async Task AddAndLoadGlobal_RoundTrips()
     {
         var root = CreateTempDirectory();
@@ -22,9 +23,9 @@ public sealed class FileMemoryStoreTests
             await store.AddAsync(entry, CancellationToken.None);
 
             var loaded = await store.LoadGlobalAsync(CancellationToken.None);
-            Assert.Single(loaded);
-            Assert.Equal("User prefers tabs", loaded[0].Content);
-            Assert.Equal(MemoryScope.Global, loaded[0].Scope);
+            Assert.ContainsSingle(loaded);
+            Assert.AreEqual("User prefers tabs", loaded[0].Content);
+            Assert.AreEqual(MemoryScope.Global, loaded[0].Scope);
         }
         finally
         {
@@ -32,7 +33,7 @@ public sealed class FileMemoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AddAndLoadSession_RoundTrips()
     {
         var root = CreateTempDirectory();
@@ -51,11 +52,11 @@ public sealed class FileMemoryStoreTests
             await store.AddAsync(entry, CancellationToken.None);
 
             var sessionMemories = await store.LoadSessionAsync(sessionKey, CancellationToken.None);
-            Assert.Single(sessionMemories);
-            Assert.Equal("Working on auth refactor", sessionMemories[0].Content);
+            Assert.ContainsSingle(sessionMemories);
+            Assert.AreEqual("Working on auth refactor", sessionMemories[0].Content);
 
             var globalMemories = await store.LoadGlobalAsync(CancellationToken.None);
-            Assert.Empty(globalMemories);
+            Assert.IsEmpty(globalMemories);
         }
         finally
         {
@@ -63,7 +64,7 @@ public sealed class FileMemoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Remove_DeletesEntry()
     {
         var root = CreateTempDirectory();
@@ -77,11 +78,11 @@ public sealed class FileMemoryStoreTests
                 CreatedAt: DateTimeOffset.UtcNow);
 
             await store.AddAsync(entry, CancellationToken.None);
-            Assert.Single(await store.LoadGlobalAsync(CancellationToken.None));
+            Assert.ContainsSingle(await store.LoadGlobalAsync(CancellationToken.None));
 
             var removed = await store.RemoveAsync("to-remove", CancellationToken.None);
-            Assert.True(removed);
-            Assert.Empty(await store.LoadGlobalAsync(CancellationToken.None));
+            Assert.IsTrue(removed);
+            Assert.IsEmpty(await store.LoadGlobalAsync(CancellationToken.None));
         }
         finally
         {
@@ -89,7 +90,7 @@ public sealed class FileMemoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Remove_ReturnsFalseForMissingId()
     {
         var root = CreateTempDirectory();
@@ -97,7 +98,7 @@ public sealed class FileMemoryStoreTests
         {
             var store = CreateStore(root);
             var removed = await store.RemoveAsync("nonexistent", CancellationToken.None);
-            Assert.False(removed);
+            Assert.IsFalse(removed);
         }
         finally
         {
@@ -105,7 +106,7 @@ public sealed class FileMemoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Search_FindsBySubstring()
     {
         var root = CreateTempDirectory();
@@ -117,7 +118,7 @@ public sealed class FileMemoryStoreTests
             await store.AddAsync(new MemoryEntry("m3", "User likes dark mode", MemoryScope.Global, DateTimeOffset.UtcNow), CancellationToken.None);
 
             var results = await store.SearchAsync("user", null, null, CancellationToken.None);
-            Assert.Equal(2, results.Count);
+            Assert.AreEqual(2, results.Count);
         }
         finally
         {
@@ -125,7 +126,7 @@ public sealed class FileMemoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Add_TruncatesLongContent()
     {
         var root = CreateTempDirectory();
@@ -135,8 +136,8 @@ public sealed class FileMemoryStoreTests
             var entry = new MemoryEntry("long", "This is a very long memory entry that should be truncated", MemoryScope.Global, DateTimeOffset.UtcNow);
             var saved = await store.AddAsync(entry, CancellationToken.None);
 
-            Assert.Equal(10, saved.Content.Length);
-            Assert.Equal("This is a ", saved.Content);
+            Assert.AreEqual(10, saved.Content.Length);
+            Assert.AreEqual("This is a ", saved.Content);
         }
         finally
         {
@@ -144,7 +145,7 @@ public sealed class FileMemoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Add_EvictsOldestWhenAtCapacity()
     {
         var root = CreateTempDirectory();
@@ -156,9 +157,9 @@ public sealed class FileMemoryStoreTests
             await store.AddAsync(new MemoryEntry("third", "Third entry", MemoryScope.Global, DateTimeOffset.UtcNow), CancellationToken.None);
 
             var loaded = await store.LoadGlobalAsync(CancellationToken.None);
-            Assert.Equal(2, loaded.Count);
-            Assert.Equal("Second entry", loaded[0].Content);
-            Assert.Equal("Third entry", loaded[1].Content);
+            Assert.AreEqual(2, loaded.Count);
+            Assert.AreEqual("Second entry", loaded[0].Content);
+            Assert.AreEqual("Third entry", loaded[1].Content);
         }
         finally
         {
@@ -166,7 +167,7 @@ public sealed class FileMemoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LoadGlobal_ReturnsEmptyForNewStore()
     {
         var root = CreateTempDirectory();
@@ -174,7 +175,7 @@ public sealed class FileMemoryStoreTests
         {
             var store = CreateStore(root);
             var loaded = await store.LoadGlobalAsync(CancellationToken.None);
-            Assert.Empty(loaded);
+            Assert.IsEmpty(loaded);
         }
         finally
         {
@@ -182,9 +183,9 @@ public sealed class FileMemoryStoreTests
         }
     }
 
-    [Theory]
-    [InlineData("a:b", "ab")]
-    [InlineData("Default", "default")]
+    [TestMethod]
+    [DataRow("a:b", "ab")]
+    [DataRow("Default", "default")]
     public async Task SessionMemories_DistinctKeysRemainIsolated(string first, string second)
     {
         var root = CreateTempDirectory();
@@ -195,8 +196,8 @@ public sealed class FileMemoryStoreTests
                 DateTimeOffset.UtcNow, SessionId: first), CancellationToken.None);
             await store.AddAsync(new MemoryEntry("second", "second memory", MemoryScope.Session,
                 DateTimeOffset.UtcNow, SessionId: second), CancellationToken.None);
-            Assert.Equal("first", Assert.Single(await store.LoadSessionAsync(new SessionKey(first), CancellationToken.None)).Id);
-            Assert.Equal("second", Assert.Single(await store.LoadSessionAsync(new SessionKey(second), CancellationToken.None)).Id);
+            Assert.AreEqual("first", Assert.ContainsSingle(await store.LoadSessionAsync(new SessionKey(first), CancellationToken.None)).Id);
+            Assert.AreEqual("second", Assert.ContainsSingle(await store.LoadSessionAsync(new SessionKey(second), CancellationToken.None)).Id);
         }
         finally { Directory.Delete(root, recursive: true); }
     }

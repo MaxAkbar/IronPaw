@@ -3,11 +3,12 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
-public sealed class ScopedTaskToolRegistryTests : IDisposable
+[TestClass]
+public sealed class ScopedTaskToolRegistryTests
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "IronPawScopedTaskTests", Guid.NewGuid().ToString("n"));
 
-    [Fact]
+    [TestMethod]
     public async Task ReadWriteScopesAndListingCannotExposeUndeclaredFiles()
     {
         var registry = Registry(new() { ReadPaths = ["allowed.txt", "visible"], WritePaths = ["output"] });
@@ -16,59 +17,59 @@ public sealed class ScopedTaskToolRegistryTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(root, ".git"), "metadata");
         var listing = await InvokeAsync(registry, "list_files", new { path = "." });
         var files = JsonDocument.Parse(listing.Content).RootElement.GetProperty("files").EnumerateArray().Select(item => item.GetString()!).ToArray();
-        Assert.Equal(["allowed.txt"], files);
-        Assert.Equal("allowed", (await InvokeAsync(registry, "read_file", new { path = "allowed.txt" })).Content);
-        Assert.True((await InvokeAsync(registry, "read_file", new { path = "secret.txt" })).IsError);
-        Assert.True((await InvokeAsync(registry, "write_file", new { path = "allowed.txt", content = "change" })).IsError);
+        Assert.AreSequenceEqual(["allowed.txt"], files);
+        Assert.AreEqual("allowed", (await InvokeAsync(registry, "read_file", new { path = "allowed.txt" })).Content);
+        Assert.IsTrue((await InvokeAsync(registry, "read_file", new { path = "secret.txt" })).IsError);
+        Assert.IsTrue((await InvokeAsync(registry, "write_file", new { path = "allowed.txt", content = "change" })).IsError);
         await InvokeAsync(registry, "write_file", new { path = "output/new.txt", content = "output" });
-        Assert.Equal("output", await File.ReadAllTextAsync(Path.Combine(root, "output/new.txt")));
+        Assert.AreEqual("output", await File.ReadAllTextAsync(Path.Combine(root, "output/new.txt")));
         await InvokeAsync(registry, "write_file", new { path = "output\\portable.txt", content = "portable" });
-        Assert.Equal("portable", await File.ReadAllTextAsync(Path.Combine(root, "output", "portable.txt")));
-        Assert.True((await InvokeAsync(registry, "read_file", new { path = "output/new.txt" })).IsError);
-        Assert.Equal(["list_files", "read_file", "write_file"], registry.ResolveTools(new(ToolProfile.Full, SenderIsOwner: true)).Select(item => item.Descriptor.Name).Order());
+        Assert.AreEqual("portable", await File.ReadAllTextAsync(Path.Combine(root, "output", "portable.txt")));
+        Assert.IsTrue((await InvokeAsync(registry, "read_file", new { path = "output/new.txt" })).IsError);
+        Assert.AreSequenceEqual(["list_files", "read_file", "write_file"], registry.ResolveTools(new(ToolProfile.Full, SenderIsOwner: true)).Select(item => item.Descriptor.Name).Order());
     }
 
-    [Theory]
-    [InlineData("../escape.txt")]
-    [InlineData("dir/../../escape.txt")]
-    [InlineData("/outside.txt")]
-    [InlineData("C:\\outside.txt")]
-    [InlineData("output:stream")]
-    [InlineData(".git/config")]
-    [InlineData("nested/.GIT/config")]
-    [InlineData("dir//file.txt")]
-    [InlineData("NUL.txt")]
-    [InlineData("dir./file.txt")]
+    [TestMethod]
+    [DataRow("../escape.txt")]
+    [DataRow("dir/../../escape.txt")]
+    [DataRow("/outside.txt")]
+    [DataRow("C:\\outside.txt")]
+    [DataRow("output:stream")]
+    [DataRow(".git/config")]
+    [DataRow("nested/.GIT/config")]
+    [DataRow("dir//file.txt")]
+    [DataRow("NUL.txt")]
+    [DataRow("dir./file.txt")]
     public async Task WildcardScopeStillRejectsUnsafePaths(string path)
     {
         var registry = Registry(new() { ReadPaths = ["."], WritePaths = ["."] });
         var denial = await InvokeAsync(registry, "write_file", new { path, content = "must not write" });
-        Assert.True(denial.IsError);
-        Assert.False(denial.Details?.ContainsKey("error") == true);
+        Assert.IsTrue(denial.IsError);
+        Assert.IsFalse(denial.Details?.ContainsKey("error") == true);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task EmptyScopeDeniesAllFileAccessAndPolicyStillRestrictsTools()
     {
         var registry = Registry(new());
-        Assert.True((await InvokeAsync(registry, "read_file", new { path = "file.txt" })).IsError);
-        Assert.True((await InvokeAsync(registry, "list_files", new { path = "." })).IsError);
-        Assert.Empty(registry.ResolveTools(new(ToolProfile.Minimal, SenderIsOwner: true)));
+        Assert.IsTrue((await InvokeAsync(registry, "read_file", new { path = "file.txt" })).IsError);
+        Assert.IsTrue((await InvokeAsync(registry, "list_files", new { path = "." })).IsError);
+        Assert.IsEmpty(registry.ResolveTools(new(ToolProfile.Minimal, SenderIsOwner: true)));
         var readOnly = registry.ResolveTools(new(ToolProfile.Coding, SenderIsOwner: false));
-        Assert.DoesNotContain(readOnly, item => item.Descriptor.Name == "write_file");
+        Assert.DoesNotContain(item => item.Descriptor.Name == "write_file", readOnly);
     }
 
-    [Fact]
+    [TestMethod]
     public void UnsupportedCapabilitiesAndUnsafeScopeDeclarationsAreRejectedBeforeToolsExist()
     {
-        Assert.Throws<NotSupportedException>(() => Registry(new() { NetworkHosts = ["example.com"] }));
-        Assert.Throws<NotSupportedException>(() => Registry(new() { AllowProcessExecution = true }));
-        Assert.Throws<NotSupportedException>(() => Registry(new() { AllowCredentialAccess = true }));
-        Assert.Throws<NotSupportedException>(() => Registry(new() { AllowExternalMutations = true }));
-        Assert.Throws<InvalidOperationException>(() => Registry(new() { ReadPaths = ["../outside"] }));
+        Assert.ThrowsExactly<NotSupportedException>(() => Registry(new() { NetworkHosts = ["example.com"] }));
+        Assert.ThrowsExactly<NotSupportedException>(() => Registry(new() { AllowProcessExecution = true }));
+        Assert.ThrowsExactly<NotSupportedException>(() => Registry(new() { AllowCredentialAccess = true }));
+        Assert.ThrowsExactly<NotSupportedException>(() => Registry(new() { AllowExternalMutations = true }));
+        Assert.ThrowsExactly<InvalidOperationException>(() => Registry(new() { ReadPaths = ["../outside"] }));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task JunctionAddedAfterRegistryCreationIsRejectedAndNotListed()
     {
         var registry = Registry(new() { ReadPaths = ["."], WritePaths = ["."] });
@@ -79,12 +80,12 @@ public sealed class ScopedTaskToolRegistryTests : IDisposable
         await GitTaskWorkspaceManagerTests.CreateLinkAsync(link, outside);
         try
         {
-            Assert.True((await InvokeAsync(registry, "read_file", new { path = "link/secret.txt" })).IsError);
-            Assert.True((await InvokeAsync(registry, "write_file", new { path = "link/new.txt", content = "outside" })).IsError);
-            Assert.False(File.Exists(Path.Combine(outside, "new.txt")));
+            Assert.IsTrue((await InvokeAsync(registry, "read_file", new { path = "link/secret.txt" })).IsError);
+            Assert.IsTrue((await InvokeAsync(registry, "write_file", new { path = "link/new.txt", content = "outside" })).IsError);
+            Assert.IsFalse(File.Exists(Path.Combine(outside, "new.txt")));
             var aliasRoot = root + "-alias";
             await GitTaskWorkspaceManagerTests.CreateLinkAsync(aliasRoot, root);
-            try { Assert.Throws<InvalidOperationException>(() => ScopedTaskToolRegistry.Create(Workspace(aliasRoot), new() { ReadPaths = ["."] })); }
+            try { Assert.ThrowsExactly<InvalidOperationException>(() => ScopedTaskToolRegistry.Create(Workspace(aliasRoot), new() { ReadPaths = ["."] })); }
             finally { Directory.Delete(aliasRoot); }
         }
         finally { Directory.Delete(link); Directory.Delete(outside, recursive: true); }
@@ -104,5 +105,6 @@ public sealed class ScopedTaskToolRegistryTests : IDisposable
             new(RunId.New(), SessionKey.New(), "test", "test", CallerIdentity.LocalOwner()), CancellationToken.None);
     }
 
-    public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    [TestCleanup]
+    public void Cleanup() { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
 }

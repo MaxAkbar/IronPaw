@@ -5,9 +5,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class ReviewToolsTests
 {
-    [Fact]
+    [TestMethod]
     public async Task ReviewRunsTool_ListsRecentRuns()
     {
         var (store, root) = CreateStore();
@@ -21,9 +22,9 @@ public sealed class ReviewToolsTests
 
             var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-            Assert.False(result.IsError);
+            Assert.IsFalse(result.IsError);
             var parsed = JsonDocument.Parse(result.Content);
-            Assert.Equal(2, parsed.RootElement.EnumerateArray().Count());
+            Assert.AreEqual(2, parsed.RootElement.EnumerateArray().Count());
         }
         finally
         {
@@ -31,7 +32,7 @@ public sealed class ReviewToolsTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReviewRunsTool_FiltersBySession()
     {
         var (store, root) = CreateStore();
@@ -45,9 +46,9 @@ public sealed class ReviewToolsTests
 
             var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-            Assert.False(result.IsError);
+            Assert.IsFalse(result.IsError);
             var parsed = JsonDocument.Parse(result.Content);
-            Assert.Single(parsed.RootElement.EnumerateArray());
+            Assert.ContainsSingle(parsed.RootElement.EnumerateArray());
         }
         finally
         {
@@ -55,7 +56,7 @@ public sealed class ReviewToolsTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReviewRunDetailTool_ReturnsFullDetail()
     {
         var (store, root) = CreateStore();
@@ -68,10 +69,10 @@ public sealed class ReviewToolsTests
 
             var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-            Assert.False(result.IsError);
+            Assert.IsFalse(result.IsError);
             var parsed = JsonDocument.Parse(result.Content);
-            Assert.Equal("Detailed prompt", parsed.RootElement.GetProperty("user_prompt").GetString());
-            Assert.Equal("run-detail-test", parsed.RootElement.GetProperty("run_id").GetString());
+            Assert.AreEqual("Detailed prompt", parsed.RootElement.GetProperty("user_prompt").GetString());
+            Assert.AreEqual("run-detail-test", parsed.RootElement.GetProperty("run_id").GetString());
         }
         finally
         {
@@ -79,7 +80,7 @@ public sealed class ReviewToolsTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReviewRunDetailTool_ReturnsErrorForMissingRun()
     {
         var (store, root) = CreateStore();
@@ -89,7 +90,7 @@ public sealed class ReviewToolsTests
             var call = CreateToolCall("review_run_detail", new { run_id = "nonexistent" });
 
             var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
-            Assert.True(result.IsError);
+            Assert.IsTrue(result.IsError);
         }
         finally
         {

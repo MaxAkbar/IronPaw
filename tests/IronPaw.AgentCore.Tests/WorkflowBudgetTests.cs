@@ -7,106 +7,109 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class WorkflowBudgetTests
 {
-    [Fact]
+    [TestMethod]
     public async Task InputThatCannotFit_StopsBeforeProviderAndReturnsDurablePartialResult()
     {
         await using var scope = await Scope.OpenAsync();
         var client = new ScriptedClient(Final(10));
         var result = await scope.Runtime(client).RunAsync(scope.Request with { Budget = new(MaxTotalTokens: 1) },
             NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.BudgetExhausted, result.Status);
-        Assert.Empty(client.Requests);
+        Assert.AreEqual(AgentRunStatus.BudgetExhausted, result.Status);
+        Assert.IsEmpty(client.Requests);
         var checkpoint = (await scope.Store.GetAsync(result.RunId, CancellationToken.None))!;
-        Assert.Equal(WorkflowStatus.BudgetExhausted, checkpoint.Status);
-        Assert.Equal(result.Status, checkpoint.Result!.Status);
-        Assert.Equal(result.FinalAssistantMessage, checkpoint.Result.FinalAssistantMessage);
-        Assert.Null(checkpoint.LeaseOwner);
+        Assert.AreEqual(WorkflowStatus.BudgetExhausted, checkpoint.Status);
+        Assert.AreEqual(result.Status, checkpoint.Result!.Status);
+        Assert.AreEqual(result.FinalAssistantMessage, checkpoint.Result.FinalAssistantMessage);
+        Assert.IsNull(checkpoint.LeaseOwner);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task BoundedOutputAndReportedUsage_SettleReservation_CompletedReplayCostsNothing()
     {
         await using var scope = await Scope.OpenAsync();
         var client = new ScriptedClient(Final(10));
         var result = await scope.Runtime(client).RunAsync(scope.Request with { Budget = new(MaxTotalTokens: 2048) },
             NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        var request = Assert.Single(client.Requests);
-        Assert.InRange(request.MaxOutputTokens, 1, 2047);
-        Assert.Equal(0, request.MaxAutoContinuationPasses);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        var request = Assert.ContainsSingle(client.Requests);
+        Assert.IsInRange(1, 2047, request.MaxOutputTokens);
+        Assert.AreEqual(0, request.MaxAutoContinuationPasses);
         var before = await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None);
-        Assert.Equal(10, before.ChargedTokens);
-        Assert.Equal(0, before.ReservedTokens);
+        Assert.AreEqual(10, before.ChargedTokens);
+        Assert.AreEqual(0, before.ReservedTokens);
         await scope.ReopenAsync();
         var unused = new ScriptedClient();
-        Assert.Equal(AgentRunStatus.Succeeded, (await scope.Runtime(unused).ResumeAsync(result.RunId, scope.Request.Caller,
+        Assert.AreEqual(AgentRunStatus.Succeeded, (await scope.Runtime(unused).ResumeAsync(result.RunId, scope.Request.Caller,
             NullAgentEventSink.Instance, CancellationToken.None)).Status);
-        Assert.Empty(unused.Requests);
-        Assert.Equal(before.ChargedTokens, (await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None)).ChargedTokens);
+        Assert.IsEmpty(unused.Requests);
+        Assert.AreEqual(before.ChargedTokens, (await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None)).ChargedTokens);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task InterruptedAttemptWithoutReceipt_RemainsChargedAcrossReopenAndCannotBeRetriedForFree()
     {
         await using var scope = await Scope.OpenAsync();
         var request = scope.Request with { Budget = new(MaxTotalTokens: 2048) };
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Runtime(new ScriptedClient(
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => scope.Runtime(new ScriptedClient(
             [new AssistantTextDelta("partial"), new LlmErrorDelta("connection lost")])).RunAsync(request,
             NullAgentEventSink.Instance, CancellationToken.None));
-        var checkpoint = Assert.Single(await scope.Store.ListAsync(CancellationToken.None));
-        var attempt = Assert.Single(Assert.Single(checkpoint.ModelCalls!).Attempts!);
-        Assert.Equal(WorkflowReservationState.Unknown, attempt.State);
-        Assert.Equal(2048, attempt.ReservedTokens);
+        var checkpoint = Assert.ContainsSingle(await scope.Store.ListAsync(CancellationToken.None));
+        var attempt = Assert.ContainsSingle(Assert.ContainsSingle(checkpoint.ModelCalls!).Attempts!);
+        Assert.AreEqual(WorkflowReservationState.Unknown, attempt.State);
+        Assert.AreEqual(2048, attempt.ReservedTokens);
         await scope.ReopenAsync();
         var unused = new ScriptedClient(Final(10));
         var result = await scope.Runtime(unused).ResumeAsync(new RunId(checkpoint.RunId), request.Caller,
             NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.BudgetExhausted, result.Status);
-        Assert.Empty(unused.Requests);
-        Assert.Equal(2048, (await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None)).ChargedTokens);
+        Assert.AreEqual(AgentRunStatus.BudgetExhausted, result.Status);
+        Assert.IsEmpty(unused.Requests);
+        Assert.AreEqual(2048, (await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None)).ChargedTokens);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task MissingUsageOnCompletedResponse_KeepsReservationCharged()
     {
         await using var scope = await Scope.OpenAsync();
         var result = await scope.Runtime(new ScriptedClient([new AssistantTextDelta("finished"), new CompletedDelta()]))
             .RunAsync(scope.Request with { Budget = new(MaxTotalTokens: 2048) }, NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
         var budget = await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None);
-        Assert.Equal(2048, budget.ChargedTokens);
-        Assert.Equal(0, budget.ReservedTokens);
+        Assert.AreEqual(2048, budget.ChargedTokens);
+        Assert.AreEqual(0, budget.ReservedTokens);
     }
 
-    [Theory]
-    [InlineData(null, null)]
-    [InlineData(10L, null)]
-    [InlineData(null, 10L)]
+    [TestMethod]
+    [DataRow(null, null)]
+    [DataRow(10L, null)]
+    [DataRow(null, 10L)]
     public async Task EmptyOrPartialUsageReceipt_CannotRefundUnreportedTokens(long? input, long? output)
     {
         await using var scope = await Scope.OpenAsync();
         var result = await scope.Runtime(new ScriptedClient([new UsageDelta(input, output, null, null),
-            new AssistantTextDelta("finished"), new CompletedDelta()])).RunAsync(scope.Request with {
-                Budget = new(MaxTotalTokens: 2048) }, NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Equal(2048, (await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None)).ChargedTokens);
+            new AssistantTextDelta("finished"), new CompletedDelta()])).RunAsync(scope.Request with
+            {
+                Budget = new(MaxTotalTokens: 2048)
+            }, NullAgentEventSink.Instance, CancellationToken.None);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        Assert.AreEqual(2048, (await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None)).ChargedTokens);
         var checkpoint = (await scope.Store.GetAsync(result.RunId, CancellationToken.None))!;
-        Assert.False(Assert.Single(Assert.Single(checkpoint.ModelCalls!).Attempts!).UsageComplete);
+        Assert.IsFalse(Assert.ContainsSingle(Assert.ContainsSingle(checkpoint.ModelCalls!).Attempts!).UsageComplete);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SplitInputAndOutputReceipts_CanSettleCompleteUsage()
     {
         await using var scope = await Scope.OpenAsync();
         var result = await scope.Runtime(new ScriptedClient([new UsageDelta(10, null, null, null),
             new UsageDelta(null, 5, null, null), new AssistantTextDelta("finished"), new CompletedDelta()]))
             .RunAsync(scope.Request with { Budget = new(MaxTotalTokens: 2048) }, NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(15, (await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None)).ChargedTokens);
+        Assert.AreEqual(15, (await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None)).ChargedTokens);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ProviderReceiptBeyondReservation_IsPreservedAndStopsBeforeToolEffect()
     {
         await using var scope = await Scope.OpenAsync();
@@ -115,44 +118,46 @@ public sealed class WorkflowBudgetTests
             new ToolCallDelta("effect", "effect", JsonSerializer.SerializeToElement(new { })), new CompletedDelta()]);
         var result = await scope.Runtime(client, effect).RunAsync(scope.Request with { Budget = new(MaxTotalTokens: 2048) },
             NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.BudgetExhausted, result.Status);
-        Assert.Equal(0, effect.Calls);
+        Assert.AreEqual(AgentRunStatus.BudgetExhausted, result.Status);
+        Assert.AreEqual(0, effect.Calls);
         var checkpoint = (await scope.Store.GetAsync(result.RunId, CancellationToken.None))!;
-        Assert.Equal(3000, checkpoint.Usage!.InputTokens);
-        Assert.NotNull(Assert.Single(checkpoint.ModelCalls!).Response);
-        Assert.Equal(3010, (await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None)).ChargedTokens);
+        Assert.AreEqual(3000, checkpoint.Usage!.InputTokens);
+        Assert.IsNotNull(Assert.ContainsSingle(checkpoint.ModelCalls!).Response);
+        Assert.AreEqual(3010, (await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None)).ChargedTokens);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task NegativeProviderUsage_CannotReduceSharedLedger()
     {
         await using var scope = await Scope.OpenAsync();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Runtime(new ScriptedClient(
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => scope.Runtime(new ScriptedClient(
             [new UsageDelta(-1, 0, 0, 0), new CompletedDelta()])).RunAsync(scope.Request,
             NullAgentEventSink.Instance, CancellationToken.None));
-        var checkpoint = Assert.Single(await scope.Store.ListAsync(CancellationToken.None));
-        Assert.Equal(0, checkpoint.Usage!.InputTokens);
-        Assert.Equal(WorkflowReservationState.Unknown, Assert.Single(Assert.Single(checkpoint.ModelCalls!).Attempts!).State);
+        var checkpoint = Assert.ContainsSingle(await scope.Store.ListAsync(CancellationToken.None));
+        Assert.AreEqual(0, checkpoint.Usage!.InputTokens);
+        Assert.AreEqual(WorkflowReservationState.Unknown, Assert.ContainsSingle(Assert.ContainsSingle(checkpoint.ModelCalls!).Attempts!).State);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecutionDeadline_CancelsProviderAndPreservesPartialOutput()
     {
         await using var scope = await Scope.OpenAsync();
         var client = new BlockingClient();
-        var result = await scope.Runtime(client).RunAsync(scope.Request with {
-            Budget = new(MaxExecutionTime: TimeSpan.FromMilliseconds(300)) }, NullAgentEventSink.Instance, CancellationToken.None)
+        var result = await scope.Runtime(client).RunAsync(scope.Request with
+        {
+            Budget = new(MaxExecutionTime: TimeSpan.FromMilliseconds(300))
+        }, NullAgentEventSink.Instance, CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal(AgentRunStatus.BudgetExhausted, result.Status);
-        Assert.True(client.Cancelled);
-        Assert.Contains(result.Transcript, message => message.Content.Contains("partial", StringComparison.Ordinal));
-        Assert.InRange(client.Request!.Timeout.TotalMilliseconds, 1, 300);
+        Assert.AreEqual(AgentRunStatus.BudgetExhausted, result.Status);
+        Assert.IsTrue(client.Cancelled);
+        Assert.Contains(message => message.Content.Contains("partial", StringComparison.Ordinal), result.Transcript);
+        Assert.IsInRange(1, 300, client.Request!.Timeout.TotalMilliseconds);
         var checkpoint = (await scope.Store.GetAsync(result.RunId, CancellationToken.None))!;
-        Assert.Equal(WorkflowStatus.BudgetExhausted, checkpoint.Status);
-        Assert.Null(checkpoint.LeaseOwner);
+        Assert.AreEqual(WorkflowStatus.BudgetExhausted, checkpoint.Status);
+        Assert.IsNull(checkpoint.LeaseOwner);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task TimeExhaustionDuringTool_RequiresReconciliationAndNeverRepeatsEffect()
     {
         await using var scope = await Scope.OpenAsync();
@@ -161,17 +166,17 @@ public sealed class WorkflowBudgetTests
             JsonSerializer.SerializeToElement(new { })), new CompletedDelta()]), effect);
         var result = await runtime.RunAsync(scope.Request with { Budget = new(MaxExecutionTime: TimeSpan.FromMilliseconds(300)) },
             NullAgentEventSink.Instance, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal(AgentRunStatus.BudgetExhausted, result.Status);
+        Assert.AreEqual(AgentRunStatus.BudgetExhausted, result.Status);
         var checkpoint = (await scope.Store.GetAsync(result.RunId, CancellationToken.None))!;
-        Assert.Equal(WorkflowStatus.NeedsReconciliation, checkpoint.Status);
-        Assert.True(WorkflowIdentity.HasUnknownEffects(checkpoint));
-        Assert.Equal(1, effect.Calls);
-        Assert.Equal(AgentRunStatus.BudgetExhausted, (await runtime.ResumeAsync(result.RunId, scope.Request.Caller,
+        Assert.AreEqual(WorkflowStatus.NeedsReconciliation, checkpoint.Status);
+        Assert.IsTrue(WorkflowIdentity.HasUnknownEffects(checkpoint));
+        Assert.AreEqual(1, effect.Calls);
+        Assert.AreEqual(AgentRunStatus.BudgetExhausted, (await runtime.ResumeAsync(result.RunId, scope.Request.Caller,
             NullAgentEventSink.Instance, CancellationToken.None)).Status);
-        Assert.Equal(1, effect.Calls);
+        Assert.AreEqual(1, effect.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task HumanWaitAndRestart_DoNotConsumeCleanlySettledExecutionTime()
     {
         var clock = new ManualClock();
@@ -180,20 +185,20 @@ public sealed class WorkflowBudgetTests
         var client = new AdvancingClient(clock, humanWait: true);
         var request = scope.Request with { Budget = new(MaxExecutionTime: TimeSpan.FromSeconds(3)) };
         var waiting = await scope.Runtime(client, human).RunAsync(request, NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.AwaitingInput, waiting.Status);
+        Assert.AreEqual(AgentRunStatus.AwaitingInput, waiting.Status);
         var checkpoint = (await scope.Store.GetAsync(waiting.RunId, CancellationToken.None))!;
-        Assert.Equal(TimeSpan.FromSeconds(1), (await ((IWorkflowStore)scope.Store).GetBudgetAsync(waiting.RunId, CancellationToken.None)).ExecutionTime);
+        Assert.AreEqual(TimeSpan.FromSeconds(1), (await ((IWorkflowStore)scope.Store).GetBudgetAsync(waiting.RunId, CancellationToken.None)).ExecutionTime);
         clock.Advance(TimeSpan.FromDays(2));
         await scope.ReopenAsync();
         var runtime = scope.Runtime(new AdvancingClient(clock, humanWait: false), human);
-        await runtime.AnswerAsync(waiting.RunId, Assert.Single(checkpoint.HumanRequests!).RequestId, "verified target",
+        await runtime.AnswerAsync(waiting.RunId, Assert.ContainsSingle(checkpoint.HumanRequests!).RequestId, "verified target",
             request.Caller, CancellationToken.None);
         var result = await runtime.ResumeAsync(waiting.RunId, request.Caller, NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Equal(TimeSpan.FromSeconds(2), (await ((IWorkflowStore)scope.Store).GetBudgetAsync(waiting.RunId, CancellationToken.None)).ExecutionTime);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        Assert.AreEqual(TimeSpan.FromSeconds(2), (await ((IWorkflowStore)scope.Store).GetBudgetAsync(waiting.RunId, CancellationToken.None)).ExecutionTime);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ChildOvershoot_ChargesRootAndStopsParentBeforeAnotherProviderCall()
     {
         await using var scope = await Scope.OpenAsync();
@@ -209,16 +214,18 @@ public sealed class WorkflowBudgetTests
         registry.RegisterTools([new InvokeAgentTool(agents, runtime)]);
         var result = await runtime.RunAsync(scope.Request with { Budget = new(MaxTotalTokens: 8192) },
             NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.BudgetExhausted, result.Status);
-        Assert.Equal(2, client.Requests.Count);
+        Assert.AreEqual(AgentRunStatus.BudgetExhausted, result.Status);
+        Assert.AreEqual(2, client.Requests.Count);
         var checkpoints = await scope.Store.ListAsync(CancellationToken.None);
-        Assert.Equal(2, checkpoints.Count);
-        Assert.All(checkpoints, checkpoint => Assert.Equal(result.RunId.Value, checkpoint.RootRunId));
+        Assert.AreEqual(2, checkpoints.Count);
+        foreach (var checkpoint in checkpoints)
+        {
+            Assert.AreEqual(result.RunId.Value, checkpoint.RootRunId);
+        }
         var budget = await ((IWorkflowStore)scope.Store).GetBudgetAsync(result.RunId, CancellationToken.None);
-        Assert.Equal(9120, budget.ChargedTokens);
-        Assert.Equal(0, budget.ReservedTokens);
-        Assert.Equal(WorkflowToolState.Completed, Assert.Single(Assert.Single(checkpoints,
-            checkpoint => checkpoint.ParentRunId is null).ToolExecutions!).State);
+        Assert.AreEqual(9120, budget.ChargedTokens);
+        Assert.AreEqual(0, budget.ReservedTokens);
+        Assert.AreEqual(WorkflowToolState.Completed, Assert.ContainsSingle(Assert.ContainsSingle(checkpoint => checkpoint.ParentRunId is null, checkpoints).ToolExecutions!).State);
     }
 
     private static LlmDelta[] Final(long tokens) => [new UsageDelta(tokens, 0, 0, 0), new AssistantTextDelta("finished"), new CompletedDelta()];

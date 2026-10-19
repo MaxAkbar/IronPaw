@@ -2,21 +2,22 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class AbstractionsGuardTests
 {
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("   ")]
     public void SessionKey_RejectsWhitespace(string value)
     {
-        Assert.Throws<ArgumentException>(() => new SessionKey(value));
+        Assert.ThrowsExactly<ArgumentException>(() => new SessionKey(value));
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("   ")]
     public void RunId_RejectsWhitespace(string value)
     {
-        Assert.Throws<ArgumentException>(() => new RunId(value));
+        Assert.ThrowsExactly<ArgumentException>(() => new RunId(value));
     }
 }

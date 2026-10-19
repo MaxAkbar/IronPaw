@@ -4,9 +4,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class WebBrowserServiceTests
 {
-    [Fact]
+    [TestMethod]
     public async Task NavigateAsync_OpenThenFollowLink_UsesSessionState()
     {
         var handler = new SequencedHandler(
@@ -44,15 +45,15 @@ public sealed class WebBrowserServiceTests
                 LinkIndex: 0),
             CancellationToken.None);
 
-        Assert.Equal("Start", open.Title);
-        Assert.Single(open.Links);
-        Assert.Equal("https://example.com/next", follow.Url);
-        Assert.Equal(2, handler.Requests.Count);
-        Assert.Equal("https://example.com/start", handler.Requests[0].Url);
-        Assert.Equal("https://example.com/next", handler.Requests[1].Url);
+        Assert.AreEqual("Start", open.Title);
+        Assert.ContainsSingle(open.Links);
+        Assert.AreEqual("https://example.com/next", follow.Url);
+        Assert.AreEqual(2, handler.Requests.Count);
+        Assert.AreEqual("https://example.com/start", handler.Requests[0].Url);
+        Assert.AreEqual("https://example.com/next", handler.Requests[1].Url);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task NavigateAsync_SubmitForm_PostsMergedFields()
     {
         var handler = new SequencedHandler(
@@ -89,15 +90,16 @@ public sealed class WebBrowserServiceTests
                 Fields: new Dictionary<string, string> { ["q"] = "ironpaw" }),
             CancellationToken.None);
 
-        Assert.Equal("https://example.com/search", handler.Requests[1].Url);
-        Assert.Equal(HttpMethod.Post, handler.Requests[1].Method);
-        Assert.NotNull(handler.Requests[1].Body);
-        Assert.Contains("q=ironpaw", handler.Requests[1].Body, StringComparison.Ordinal);
-        Assert.Contains("category=all", handler.Requests[1].Body, StringComparison.Ordinal);
-        Assert.Equal(200, submit.StatusCode);
+        Assert.AreEqual("https://example.com/search", handler.Requests[1].Url);
+        Assert.AreEqual(HttpMethod.Post, handler.Requests[1].Method);
+        var submittedBody = handler.Requests[1].Body;
+        Assert.IsNotNull(submittedBody);
+        Assert.Contains("q=ironpaw", submittedBody, StringComparison.Ordinal);
+        Assert.Contains("category=all", submittedBody, StringComparison.Ordinal);
+        Assert.AreEqual(200, submit.StatusCode);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task NavigateAsync_FollowLink_UsesCssSelector()
     {
         var handler = new SequencedHandler(
@@ -131,10 +133,10 @@ public sealed class WebBrowserServiceTests
                 LinkSelector: "a.primary-link"),
             CancellationToken.None);
 
-        Assert.Equal("https://example.com/target", follow.Url);
+        Assert.AreEqual("https://example.com/target", follow.Url);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExtractStructuredDataAsync_ReturnsMetadataTablesAndLists()
     {
         var handler = new SequencedHandler(
@@ -179,15 +181,15 @@ public sealed class WebBrowserServiceTests
                 MaxItems: 5),
             CancellationToken.None);
 
-        Assert.Equal("Catalog", extracted.Title);
-        Assert.Equal("Sample catalog page", extracted.Metadata["description"]);
-        Assert.Single(extracted.Tables);
-        Assert.Single(extracted.Lists);
-        Assert.Equal("Widget", extracted.Tables[0].Rows[0][0]);
-        Assert.Equal("One", extracted.Lists[0].Items[0]);
+        Assert.AreEqual("Catalog", extracted.Title);
+        Assert.AreEqual("Sample catalog page", extracted.Metadata["description"]);
+        Assert.ContainsSingle(extracted.Tables);
+        Assert.ContainsSingle(extracted.Lists);
+        Assert.AreEqual("Widget", extracted.Tables[0].Rows[0][0]);
+        Assert.AreEqual("One", extracted.Lists[0].Items[0]);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExtractStructuredDataAsync_UsesRootAndCssSelectors()
     {
         var handler = new SequencedHandler(
@@ -235,13 +237,13 @@ public sealed class WebBrowserServiceTests
                 ListSelector: "ul.features"),
             CancellationToken.None);
 
-        Assert.Single(extracted.Tables);
-        Assert.Single(extracted.Lists);
-        Assert.Equal("Pro", extracted.Tables[0].Rows[0][0]);
-        Assert.Equal("Support", extracted.Lists[0].Items[0]);
+        Assert.ContainsSingle(extracted.Tables);
+        Assert.ContainsSingle(extracted.Lists);
+        Assert.AreEqual("Pro", extracted.Tables[0].Rows[0][0]);
+        Assert.AreEqual("Support", extracted.Lists[0].Items[0]);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task NavigateAsync_RetriesOn429AndThenSucceeds()
     {
         var handler = new SequencedHandler(
@@ -267,12 +269,12 @@ public sealed class WebBrowserServiceTests
                 Url: "https://example.com/retry"),
             CancellationToken.None);
 
-        Assert.Equal(200, result.StatusCode);
-        Assert.Equal(2, handler.Requests.Count);
-        Assert.NotEmpty(delays);
+        Assert.AreEqual(200, result.StatusCode);
+        Assert.AreEqual(2, handler.Requests.Count);
+        Assert.IsNotEmpty(delays);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task NavigateAsync_AppliesHostRateLimitBetweenRequests()
     {
         var handler = new SequencedHandler(
@@ -312,10 +314,10 @@ public sealed class WebBrowserServiceTests
                 LinkIndex: 0),
             CancellationToken.None);
 
-        Assert.Contains(delays, delay => delay == TimeSpan.FromSeconds(2));
+        Assert.Contains(delay => delay == TimeSpan.FromSeconds(2), delays);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task GetSessionSnapshots_ReturnsLoadedSessionSummary()
     {
         var handler = new SequencedHandler(
@@ -344,11 +346,11 @@ public sealed class WebBrowserServiceTests
         var all = service.GetSessionSnapshots();
         var single = service.GetSessionSnapshot("snapshot-session");
 
-        Assert.Contains(all, session => session.SessionId == "snapshot-session");
-        Assert.NotNull(single);
-        Assert.Equal("Snapshot", single!.Title);
-        Assert.Equal(1, single.LinkCount);
-        Assert.Equal(1, single.FormCount);
+        Assert.Contains(session => session.SessionId == "snapshot-session", all);
+        Assert.IsNotNull(single);
+        Assert.AreEqual("Snapshot", single!.Title);
+        Assert.AreEqual(1, single.LinkCount);
+        Assert.AreEqual(1, single.FormCount);
     }
 
     private static HttpResponseMessage HtmlResponse(HttpStatusCode statusCode, string body)

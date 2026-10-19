@@ -4,9 +4,10 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class TaskGraphValidatorTests
 {
-    [Fact]
+    [TestMethod]
     public void DiamondWithForwardReferences_ProducesStableDependencyOrder()
     {
         var graph = Graph(Task("deliver", "review", "test"), Task("review", "build"),
@@ -14,22 +15,22 @@ public sealed class TaskGraphValidatorTests
 
         var result = TaskGraphValidator.Validate(graph);
 
-        Assert.True(result.IsValid);
-        Assert.Empty(result.Errors);
-        Assert.Equal(["build", "review", "test", "deliver", "independent"], result.TopologicalTaskIds.ToArray());
-        Assert.NotSame(graph, result.Graph);
+        Assert.IsTrue(result.IsValid);
+        Assert.IsEmpty(result.Errors);
+        Assert.AreSequenceEqual(["build", "review", "test", "deliver", "independent"], result.TopologicalTaskIds.ToArray());
+        Assert.AreNotSame<object>(graph, result.Graph);
     }
 
-    [Fact]
+    [TestMethod]
     public void DisconnectedTasksAndCaseDistinctIds_AreValidAndKeepDeclarationOrder()
     {
         var result = TaskGraphValidator.Validate(Graph(Task("task"), Task("Task"), Task("other")));
 
-        Assert.True(result.IsValid);
-        Assert.Equal(["task", "Task", "other"], result.TopologicalTaskIds.ToArray());
+        Assert.IsTrue(result.IsValid);
+        Assert.AreSequenceEqual(["task", "Task", "other"], result.TopologicalTaskIds.ToArray());
     }
 
-    [Fact]
+    [TestMethod]
     public void SnapshotDefensivelyCopiesCollectionsThroughoutInheritedPolicy()
     {
         var allow = new List<string> { "read_file" };
@@ -42,22 +43,22 @@ public sealed class TaskGraphValidatorTests
         var task = Task("inspect") with { ToolPolicy = child };
 
         var result = TaskGraphValidator.Validate(Graph(task));
-        Assert.True(result.IsValid);
-        var snapshot = Assert.Single(result.Graph!.Tasks).ToolPolicy;
+        Assert.IsTrue(result.IsValid);
+        var snapshot = Assert.ContainsSingle(result.Graph!.Tasks).ToolPolicy;
         allow.Clear();
         deny.Add("read_file");
         groups.Clear();
         childAllow.Add("write_file");
 
-        Assert.NotSame(child, snapshot);
-        Assert.NotSame(parent, snapshot.InheritedPolicy);
-        Assert.Equal(["read_file"], snapshot.AllowList);
-        Assert.Equal(["read_file"], snapshot.InheritedPolicy!.AllowList);
-        Assert.Equal(["write_file"], snapshot.InheritedPolicy.DenyList);
-        Assert.Equal(["group:fs"], snapshot.InheritedPolicy.AllowedGroups);
+        Assert.AreNotSame<object>(child, snapshot);
+        Assert.AreNotSame<object>(parent, snapshot.InheritedPolicy);
+        Assert.AreSequenceEqual(["read_file"], snapshot.AllowList);
+        Assert.AreSequenceEqual(["read_file"], snapshot.InheritedPolicy!.AllowList);
+        Assert.AreSequenceEqual(["write_file"], snapshot.InheritedPolicy.DenyList);
+        Assert.AreSequenceEqual(["group:fs"], snapshot.InheritedPolicy.AllowedGroups);
     }
 
-    [Fact]
+    [TestMethod]
     public void SnapshotValidatesTheFrozenEnumeration_WithoutReadingCallerCollectionAgain()
     {
         var changing = new ChangingNames();
@@ -66,14 +67,14 @@ public sealed class TaskGraphValidatorTests
             ToolPolicy = new(ToolProfile.Minimal, AllowList: changing)
         }));
 
-        Assert.True(result.IsValid);
-        Assert.Equal(["read_file"], result.Graph!.Tasks[0].ToolPolicy.AllowList);
-        Assert.Equal(1, changing.Enumerations);
+        Assert.IsTrue(result.IsValid);
+        Assert.AreSequenceEqual(["read_file"], result.Graph!.Tasks[0].ToolPolicy.AllowList);
+        Assert.AreEqual(1, changing.Enumerations);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public void PolicyCollectionSnapshotFailure_ReturnsStructuredValidationError(bool argumentException)
     {
         Invalid(Graph(Task("a") with
@@ -82,7 +83,7 @@ public sealed class TaskGraphValidatorTests
         }), "InvalidToolPolicy");
     }
 
-    [Fact]
+    [TestMethod]
     public void RichGraph_SurvivesJsonRoundTripAndRetainsRestrictions()
     {
         var original = Graph(Task("change") with
@@ -99,18 +100,18 @@ public sealed class TaskGraphValidatorTests
         var restored = JsonSerializer.Deserialize<WorkflowTaskGraph>(JsonSerializer.Serialize(original));
         var result = TaskGraphValidator.Validate(restored);
 
-        Assert.True(result.IsValid);
-        var task = Assert.Single(result.Graph!.Tasks);
-        Assert.Equal(original.Tasks[0].Budget, task.Budget);
-        Assert.Equal("coder", task.AgentId);
-        Assert.Equal(["src"], task.Resources.ReadPaths.ToArray());
-        Assert.False(task.Resources.AllowExternalMutations);
-        Assert.Equal("changes/fix.patch", Assert.Single(task.ExpectedArtifacts).RelativePath);
-        Assert.Equal(["patch"], Assert.Single(task.AcceptanceCriteria).ArtifactIds.ToArray());
-        Assert.Equal(ToolProfile.Minimal, task.ToolPolicy.InheritedPolicy!.Profile);
+        Assert.IsTrue(result.IsValid);
+        var task = Assert.ContainsSingle(result.Graph!.Tasks);
+        Assert.AreEqual(original.Tasks[0].Budget, task.Budget);
+        Assert.AreEqual("coder", task.AgentId);
+        Assert.AreSequenceEqual(["src"], task.Resources.ReadPaths.ToArray());
+        Assert.IsFalse(task.Resources.AllowExternalMutations);
+        Assert.AreEqual("changes/fix.patch", Assert.ContainsSingle(task.ExpectedArtifacts).RelativePath);
+        Assert.AreSequenceEqual(["patch"], Assert.ContainsSingle(task.AcceptanceCriteria).ArtifactIds.ToArray());
+        Assert.AreEqual(ToolProfile.Minimal, task.ToolPolicy.InheritedPolicy!.Profile);
     }
 
-    [Fact]
+    [TestMethod]
     public void DeepGraph_IsValidatedWithoutRecursiveTraversal()
     {
         const int count = 12_000;
@@ -119,63 +120,66 @@ public sealed class TaskGraphValidatorTests
 
         var result = TaskGraphValidator.Validate(new("deep", "Deep chain", tasks));
 
-        Assert.True(result.IsValid);
-        Assert.Equal(count, result.TopologicalTaskIds.Length);
-        Assert.Equal("t11999", result.TopologicalTaskIds[^1]);
+        Assert.IsTrue(result.IsValid);
+        Assert.AreEqual(count, result.TopologicalTaskIds.Length);
+        Assert.AreEqual("t11999", result.TopologicalTaskIds[^1]);
     }
 
-    [Fact]
+    [TestMethod]
     public void CyclesInDisconnectedComponent_InvalidateEntireExecutionPlan()
     {
         var graph = Graph(Task("independent"), Task("a", "b"), Task("b", "a"), Task("blocked", "b"));
 
         var result = Invalid(graph, "DependencyCycle");
 
-        Assert.Equal(["a", "b", "blocked"], result.Errors.Where(error => error.Code == "DependencyCycle").Select(error => error.TaskId));
-        Assert.DoesNotContain(result.Errors, error => error.TaskId == "independent");
+        Assert.AreSequenceEqual(["a", "b", "blocked"], result.Errors.Where(error => error.Code == "DependencyCycle").Select(error => error.TaskId));
+        Assert.DoesNotContain(error => error.TaskId == "independent", result.Errors);
     }
 
-    [Fact]
+    [TestMethod]
     public void DependencyErrorsRetainTaskAndRelatedIdentity()
     {
         var result = Invalid(Graph(Task("a", "a", "absent", "absent", " padded")), "SelfDependency");
 
-        Assert.Contains(result.Errors, error => error.Code == "UnknownDependency" && error.TaskId == "a" && error.RelatedTaskId == "absent");
-        Assert.Contains(result.Errors, error => error.Code == "DuplicateDependency" && error.RelatedTaskId == "absent");
-        Assert.Contains(result.Errors, error => error.Code == "InvalidDependencyId" && error.RelatedTaskId == " padded");
+        Assert.Contains(error => error.Code == "UnknownDependency" && error.TaskId == "a" && error.RelatedTaskId == "absent", result.Errors);
+        Assert.Contains(error => error.Code == "DuplicateDependency" && error.RelatedTaskId == "absent", result.Errors);
+        Assert.Contains(error => error.Code == "InvalidDependencyId" && error.RelatedTaskId == " padded", result.Errors);
     }
 
-    [Theory]
-    [InlineData(0, 0, null, null)]
-    [InlineData(1, -1, null, null)]
-    [InlineData(1, 0, 0L, null)]
-    [InlineData(1, 0, -1L, null)]
-    [InlineData(1, 0, null, 0)]
-    [InlineData(1, 0, null, -1)]
+    [TestMethod]
+    [DataRow(0, 0, null, null)]
+    [DataRow(1, -1, null, null)]
+    [DataRow(1, 0, 0L, null)]
+    [DataRow(1, 0, -1L, null)]
+    [DataRow(1, 0, null, 0)]
+    [DataRow(1, 0, null, -1)]
     public void InvalidBudgets_AreRejected(int models, int tools, long? tokens, int? seconds)
     {
-        Invalid(Graph(Task("a") with { Budget = new(models, tools, tokens,
-            seconds is { } value ? TimeSpan.FromSeconds(value) : null) }), "InvalidBudget");
+        Invalid(Graph(Task("a") with
+        {
+            Budget = new(models, tools, tokens,
+            seconds is { } value ? TimeSpan.FromSeconds(value) : null)
+        }), "InvalidBudget");
     }
 
-    [Fact]
+    [TestMethod]
     public void ZeroToolBudgetAndAbsentAcceptanceCriteria_AreStructurallyValid()
     {
-        Assert.True(TaskGraphValidator.Validate(Graph(Task("a") with { Budget = new(1, 0) })).IsValid);
+        Assert.IsTrue(TaskGraphValidator.Validate(Graph(Task("a") with { Budget = new(1, 0) })).IsValid);
     }
 
-    [Theory]
-    [InlineData("/absolute")]
-    [InlineData("\\rooted")]
-    [InlineData("C:\\absolute")]
-    [InlineData("C:relative")]
-    [InlineData("../escape")]
-    [InlineData("safe/../escape")]
-    [InlineData("safe\\..\\escape")]
-    [InlineData("safe//file")]
-    [InlineData("./file")]
-    [InlineData("safe/.")]
-    [InlineData("file\nname")]
+    [TestMethod]
+    [DataRow("/absolute")]
+    [DataRow("\\rooted")]
+    [DataRow("C:\\absolute")]
+    [DataRow("C:relative")]
+    [DataRow("../escape")]
+    [DataRow("safe/../escape")]
+    [DataRow("safe\\..\\escape")]
+    [DataRow("safe//file")]
+    [DataRow("./file")]
+    [DataRow("safe/.")]
+    [DataRow("file\nname")]
     public void ArtifactPathSyntax_IsCheckedIndependentlyOfHostOs(string path)
     {
         Invalid(Graph(Task("a") with
@@ -184,7 +188,7 @@ public sealed class TaskGraphValidatorTests
         }), "InvalidArtifact");
     }
 
-    [Fact]
+    [TestMethod]
     public void ArtifactIdsAreTaskScoped_AndCriteriaMustReferenceOwnOutputs()
     {
         var artifact = new TaskArtifactRequirement("output", "Output", TaskArtifactKind.Report);
@@ -194,7 +198,7 @@ public sealed class TaskGraphValidatorTests
             ExpectedArtifacts = [artifact],
             AcceptanceCriteria = [new("review", "Review output") { ArtifactIds = ["output"] }]
         };
-        Assert.True(TaskGraphValidator.Validate(Graph(first, second)).IsValid);
+        Assert.IsTrue(TaskGraphValidator.Validate(Graph(first, second)).IsValid);
         Invalid(Graph(first, second with
         {
             ExpectedArtifacts = [],
@@ -202,20 +206,21 @@ public sealed class TaskGraphValidatorTests
         }), "UnknownArtifactReference");
     }
 
-    [Fact]
+    [TestMethod]
     public void DuplicateArtifactsCriteriaAndCriterionReferences_AreRejected()
     {
         var artifact = new TaskArtifactRequirement("out", "Output", TaskArtifactKind.File);
         var criterion = new TaskAcceptanceCriterion("check", "Review output") { ArtifactIds = ["out", "out"] };
         var result = Invalid(Graph(Task("a") with
         {
-            ExpectedArtifacts = [artifact, artifact], AcceptanceCriteria = [criterion, criterion]
+            ExpectedArtifacts = [artifact, artifact],
+            AcceptanceCriteria = [criterion, criterion]
         }), "DuplicateArtifactId");
-        Assert.Contains(result.Errors, error => error.Code == "DuplicateCriterionId");
-        Assert.Contains(result.Errors, error => error.Code == "DuplicateArtifactReference");
+        Assert.Contains(error => error.Code == "DuplicateCriterionId", result.Errors);
+        Assert.Contains(error => error.Code == "DuplicateArtifactReference", result.Errors);
     }
 
-    [Fact]
+    [TestMethod]
     public void MalformedGraphAndTaskMetadata_ProduceErrorsWithoutExceptions()
     {
         Invalid(null, "GraphRequired");
@@ -227,7 +232,7 @@ public sealed class TaskGraphValidatorTests
         Invalid(Graph((WorkflowTaskDefinition)null!), "TaskRequired");
     }
 
-    [Fact]
+    [TestMethod]
     public void DefaultArraysAndNullNestedRecords_ProduceErrorsWithoutExceptions()
     {
         Invalid(Graph(Task("a") with { Dependencies = default }), "InvalidCollection");
@@ -244,7 +249,7 @@ public sealed class TaskGraphValidatorTests
         Invalid(Graph(Task("a") with { ToolPolicy = new(ToolProfile.Minimal, AllowList: default(ImmutableArray<string>)) }), "InvalidCollection");
     }
 
-    [Fact]
+    [TestMethod]
     public void MalformedResourcesAndUnknownEnums_AreRejected()
     {
         var result = Invalid(Graph(Task("a") with
@@ -253,12 +258,12 @@ public sealed class TaskGraphValidatorTests
             Resources = new() { ReadPaths = ["src", "src"], WritePaths = [" "], NetworkHosts = [null!] },
             ExpectedArtifacts = [new("artifact", "Output", (TaskArtifactKind)999)]
         }), "InvalidToolPolicy");
-        Assert.Contains(result.Errors, error => error.Code == "DuplicateResource");
-        Assert.Contains(result.Errors, error => error.Code == "InvalidResource");
-        Assert.Contains(result.Errors, error => error.Code == "InvalidArtifact");
+        Assert.Contains(error => error.Code == "DuplicateResource", result.Errors);
+        Assert.Contains(error => error.Code == "InvalidResource", result.Errors);
+        Assert.Contains(error => error.Code == "InvalidArtifact", result.Errors);
     }
 
-    [Fact]
+    [TestMethod]
     public void CyclicAndExcessivelyDeepInheritedPolicy_AreRejectedWithoutRecursion()
     {
         var cyclic = new ToolSelectionPolicy(ToolProfile.Minimal);
@@ -269,14 +274,14 @@ public sealed class TaskGraphValidatorTests
         Invalid(Graph(Task("a") with { ToolPolicy = deep }), "PolicyDepthExceeded");
     }
 
-    [Fact]
+    [TestMethod]
     public void RepeatedValidation_ProducesDeterministicDiagnostics()
     {
         var graph = Graph(Task("a", "missing", "missing"), Task("b", "b"));
-        Assert.Equal(TaskGraphValidator.Validate(graph).Errors.ToArray(), TaskGraphValidator.Validate(graph).Errors.ToArray());
+        Assert.AreSequenceEqual(TaskGraphValidator.Validate(graph).Errors.ToArray(), TaskGraphValidator.Validate(graph).Errors.ToArray());
     }
 
-    [Fact]
+    [TestMethod]
     public void DefinitionFingerprint_IsStableAcrossValidationAndJsonRoundTrip()
     {
         var graph = Graph(Task("a") with
@@ -293,24 +298,24 @@ public sealed class TaskGraphValidatorTests
         var restored = JsonSerializer.Deserialize<WorkflowTaskGraph>(JsonSerializer.Serialize(first.Graph));
         var roundTrip = TaskGraphValidator.Validate(restored);
 
-        Assert.True(first.IsValid);
-        Assert.True(roundTrip.IsValid);
-        Assert.Matches("^sha256:[a-f0-9]{64}$", first.DefinitionFingerprint!);
-        Assert.Equal(first.DefinitionFingerprint, second.DefinitionFingerprint);
-        Assert.Equal(first.DefinitionFingerprint, roundTrip.DefinitionFingerprint);
+        Assert.IsTrue(first.IsValid);
+        Assert.IsTrue(roundTrip.IsValid);
+        Assert.MatchesRegex("^sha256:[a-f0-9]{64}$", first.DefinitionFingerprint!);
+        Assert.AreEqual(first.DefinitionFingerprint, second.DefinitionFingerprint);
+        Assert.AreEqual(first.DefinitionFingerprint, roundTrip.DefinitionFingerprint);
     }
 
-    [Theory]
-    [InlineData("graphId")]
-    [InlineData("graphObjective")]
-    [InlineData("taskObjective")]
-    [InlineData("budget")]
-    [InlineData("dependencies")]
-    [InlineData("policy")]
-    [InlineData("resources")]
-    [InlineData("artifact")]
-    [InlineData("criterion")]
-    [InlineData("agent")]
+    [TestMethod]
+    [DataRow("graphId")]
+    [DataRow("graphObjective")]
+    [DataRow("taskObjective")]
+    [DataRow("budget")]
+    [DataRow("dependencies")]
+    [DataRow("policy")]
+    [DataRow("resources")]
+    [DataRow("artifact")]
+    [DataRow("criterion")]
+    [DataRow("agent")]
     public void DefinitionFingerprint_ChangesWhenDeclaredMetadataChanges(string field)
     {
         var firstTask = Task("a") with
@@ -336,12 +341,12 @@ public sealed class TaskGraphValidatorTests
 
         var originalResult = TaskGraphValidator.Validate(graph);
         var changedResult = TaskGraphValidator.Validate(changed);
-        Assert.True(originalResult.IsValid);
-        Assert.True(changedResult.IsValid);
-        Assert.NotEqual(originalResult.DefinitionFingerprint, changedResult.DefinitionFingerprint);
+        Assert.IsTrue(originalResult.IsValid);
+        Assert.IsTrue(changedResult.IsValid);
+        Assert.AreNotEqual(originalResult.DefinitionFingerprint, changedResult.DefinitionFingerprint);
     }
 
-    [Fact]
+    [TestMethod]
     public void MaximumAcceptedPolicyDepth_HasAFingerprint()
     {
         var policy = new ToolSelectionPolicy(ToolProfile.Minimal);
@@ -349,18 +354,18 @@ public sealed class TaskGraphValidatorTests
 
         var result = TaskGraphValidator.Validate(Graph(Task("a") with { ToolPolicy = policy }));
 
-        Assert.True(result.IsValid);
-        Assert.NotNull(result.DefinitionFingerprint);
+        Assert.IsTrue(result.IsValid);
+        Assert.IsNotNull(result.DefinitionFingerprint);
     }
 
-    [Theory]
-    [InlineData("graph", "InvalidGraphId")]
-    [InlineData("task", "InvalidTaskId")]
-    [InlineData("dependency", "InvalidDependencyId")]
-    [InlineData("artifact", "InvalidArtifact")]
-    [InlineData("criterion", "InvalidCriterion")]
-    [InlineData("resource", "InvalidResource")]
-    [InlineData("policy", "InvalidToolPolicy")]
+    [TestMethod]
+    [DataRow("graph", "InvalidGraphId")]
+    [DataRow("task", "InvalidTaskId")]
+    [DataRow("dependency", "InvalidDependencyId")]
+    [DataRow("artifact", "InvalidArtifact")]
+    [DataRow("criterion", "InvalidCriterion")]
+    [DataRow("resource", "InvalidResource")]
+    [DataRow("policy", "InvalidToolPolicy")]
     public void EmbeddedControlCharacters_AreRejectedInIdentitiesAndDeclarations(string field, string code)
     {
         const string invalid = "before\u0000after";
@@ -387,11 +392,11 @@ public sealed class TaskGraphValidatorTests
     private static TaskGraphValidationResult Invalid(WorkflowTaskGraph? graph, string expectedCode)
     {
         var result = TaskGraphValidator.Validate(graph);
-        Assert.False(result.IsValid);
-        Assert.Null(result.Graph);
-        Assert.Null(result.DefinitionFingerprint);
-        Assert.Empty(result.TopologicalTaskIds);
-        Assert.Contains(result.Errors, error => error.Code == expectedCode);
+        Assert.IsFalse(result.IsValid);
+        Assert.IsNull(result.Graph);
+        Assert.IsNull(result.DefinitionFingerprint);
+        Assert.IsEmpty(result.TopologicalTaskIds);
+        Assert.Contains(error => error.Code == expectedCode, result.Errors);
         return result;
     }
 

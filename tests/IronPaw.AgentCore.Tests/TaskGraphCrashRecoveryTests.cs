@@ -6,9 +6,10 @@ using IronPaw.Workflow.CrashHarness;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class TaskGraphCrashRecoveryTests
 {
-    [Fact]
+    [TestMethod]
     public async Task KilledHostAfterEffect_RequiresReconciliationThenVerifiesWithoutRepeatingEffect()
     {
         using var scope = new GraphCrashScope();
@@ -16,40 +17,40 @@ public sealed class TaskGraphCrashRecoveryTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), timeout.Token);
         var recovered = (await store.GetTaskGraphAsync(graphId, timeout.Token))!;
-        var unknown = Assert.Single(recovered.Tasks);
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, unknown.Status);
-        Assert.NotNull(unknown.AttemptId);
-        Assert.Null(unknown.LeaseToken);
-        Assert.Null(unknown.Result);
-        Assert.Null(unknown.Acceptance);
-        Assert.Equal($"{graphId}:{unknown.AttemptId}", Assert.Single(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root), timeout.Token)));
-        Assert.Contains(await store.ReadTaskGraphJournalAsync(graphId, timeout.Token), entry => entry.EventType == "recovered");
+        var unknown = Assert.ContainsSingle(recovered.Tasks);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, unknown.Status);
+        Assert.IsNotNull(unknown.AttemptId);
+        Assert.IsNull(unknown.LeaseToken);
+        Assert.IsNull(unknown.Result);
+        Assert.IsNull(unknown.Acceptance);
+        Assert.AreEqual($"{graphId}:{unknown.AttemptId}", Assert.ContainsSingle(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root), timeout.Token)));
+        Assert.Contains(entry => entry.EventType == "recovered", await store.ReadTaskGraphJournalAsync(graphId, timeout.Token));
         var executor = new NeverRepeatExecutor();
         var verifier = new RecoveryVerifier(scope.Root);
         var scheduler = new TaskGraphScheduler(store, executor, verifier);
 
         var blocked = await scheduler.ResumeAsync(graphId, TaskGraphCrashFixture.Caller, timeout.Token);
 
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, Assert.Single(blocked.Tasks).Status);
-        Assert.Equal(0, executor.CallCount);
-        Assert.Equal(0, verifier.CallCount);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, Assert.ContainsSingle(blocked.Tasks).Status);
+        Assert.AreEqual(0, executor.CallCount);
+        Assert.AreEqual(0, verifier.CallCount);
         var established = TaskGraphCrashFixture.EstablishedResult(scope.Root, graphId, recovered.DefinitionFingerprint, unknown.AttemptId!);
         var reconciled = await scheduler.ReconcileAsync(graphId, TaskGraphCrashFixture.TaskId, established,
             "Inspected the durable file and confirmed the matching attempt was recorded once", TaskGraphCrashFixture.Caller, timeout.Token);
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, Assert.Single(reconciled.Tasks).Status);
-        Assert.Equal(unknown.AttemptId, Assert.Single(reconciled.Tasks).AttemptId);
-        Assert.Equal(0, verifier.CallCount);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, Assert.ContainsSingle(reconciled.Tasks).Status);
+        Assert.AreEqual(unknown.AttemptId, Assert.ContainsSingle(reconciled.Tasks).AttemptId);
+        Assert.AreEqual(0, verifier.CallCount);
 
         var resumed = await scheduler.ResumeAsync(graphId, TaskGraphCrashFixture.Caller, timeout.Token);
 
         AssertAccepted(resumed, unknown.AttemptId!);
-        Assert.NotNull(Assert.Single(resumed.Tasks).ReconciliationNote);
-        Assert.Equal(0, executor.CallCount);
-        Assert.Equal(1, verifier.CallCount);
-        Assert.Single(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root), timeout.Token));
+        Assert.IsNotNull(Assert.ContainsSingle(resumed.Tasks).ReconciliationNote);
+        Assert.AreEqual(0, executor.CallCount);
+        Assert.AreEqual(1, verifier.CallCount);
+        Assert.ContainsSingle(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root), timeout.Token));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task KilledHostAfterProposal_ResumesVerificationWithoutRepeatingExecutor()
     {
         using var scope = new GraphCrashScope();
@@ -57,13 +58,13 @@ public sealed class TaskGraphCrashRecoveryTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), timeout.Token);
         var recovered = (await store.GetTaskGraphAsync(graphId, timeout.Token))!;
-        var proposed = Assert.Single(recovered.Tasks);
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, proposed.Status);
-        Assert.Null(proposed.LeaseToken);
-        Assert.NotNull(proposed.AttemptId);
-        Assert.Equal(WorkflowTaskStatus.Succeeded, proposed.Result!.Status);
-        Assert.Null(proposed.Acceptance);
-        Assert.Contains(await store.ReadTaskGraphJournalAsync(graphId, timeout.Token), entry => entry.EventType == "task_result");
+        var proposed = Assert.ContainsSingle(recovered.Tasks);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, proposed.Status);
+        Assert.IsNull(proposed.LeaseToken);
+        Assert.IsNotNull(proposed.AttemptId);
+        Assert.AreEqual(WorkflowTaskStatus.Succeeded, proposed.Result!.Status);
+        Assert.IsNull(proposed.Acceptance);
+        Assert.Contains(entry => entry.EventType == "task_result", await store.ReadTaskGraphJournalAsync(graphId, timeout.Token));
         var executor = new NeverRepeatExecutor();
         var verifier = new RecoveryVerifier(scope.Root);
 
@@ -71,13 +72,13 @@ public sealed class TaskGraphCrashRecoveryTests
             .ResumeAsync(graphId, TaskGraphCrashFixture.Caller, timeout.Token);
 
         AssertAccepted(resumed, proposed.AttemptId!);
-        Assert.Equal(JsonSerializer.Serialize(proposed.Result), JsonSerializer.Serialize(Assert.Single(resumed.Tasks).Result));
-        Assert.Equal(0, executor.CallCount);
-        Assert.Equal(1, verifier.CallCount);
-        Assert.Single(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root), timeout.Token));
+        Assert.AreEqual(JsonSerializer.Serialize(proposed.Result), JsonSerializer.Serialize(Assert.ContainsSingle(resumed.Tasks).Result));
+        Assert.AreEqual(0, executor.CallCount);
+        Assert.AreEqual(1, verifier.CallCount);
+        Assert.ContainsSingle(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root), timeout.Token));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task KilledHostAfterAcceptance_ReusesEstablishedSuccessWithoutExecutorOrVerifier()
     {
         using var scope = new GraphCrashScope();
@@ -85,10 +86,10 @@ public sealed class TaskGraphCrashRecoveryTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), timeout.Token);
         var recovered = (await store.GetTaskGraphAsync(graphId, timeout.Token))!;
-        var accepted = Assert.Single(recovered.Tasks);
+        var accepted = Assert.ContainsSingle(recovered.Tasks);
         AssertAccepted(recovered, accepted.AttemptId!);
         var journalBefore = await store.ReadTaskGraphJournalAsync(graphId, timeout.Token);
-        Assert.Contains(journalBefore, entry => entry.EventType == "task_acceptance");
+        Assert.Contains(entry => entry.EventType == "task_acceptance", journalBefore);
         var executor = new NeverRepeatExecutor();
         var verifier = new RecoveryVerifier(scope.Root);
 
@@ -96,28 +97,28 @@ public sealed class TaskGraphCrashRecoveryTests
             .ResumeAsync(graphId, TaskGraphCrashFixture.Caller, timeout.Token);
 
         AssertAccepted(resumed, accepted.AttemptId!);
-        Assert.Equal(recovered.Revision, resumed.Revision);
-        Assert.Equal(accepted.Acceptance, Assert.Single(resumed.Tasks).Acceptance);
-        Assert.Equal(journalBefore.ToArray(), (await store.ReadTaskGraphJournalAsync(graphId, timeout.Token)).ToArray());
-        Assert.Equal(0, executor.CallCount);
-        Assert.Equal(0, verifier.CallCount);
-        Assert.Single(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root), timeout.Token));
+        Assert.AreEqual(recovered.Revision, resumed.Revision);
+        Assert.AreEqual(accepted.Acceptance, Assert.ContainsSingle(resumed.Tasks).Acceptance);
+        Assert.AreSequenceEqual(journalBefore.ToArray(), (await store.ReadTaskGraphJournalAsync(graphId, timeout.Token)).ToArray());
+        Assert.AreEqual(0, executor.CallCount);
+        Assert.AreEqual(0, verifier.CallCount);
+        Assert.ContainsSingle(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root), timeout.Token));
     }
 
     private static void AssertAccepted(TaskGraphCheckpoint graph, string attemptId)
     {
-        var state = Assert.Single(graph.Tasks);
-        Assert.Equal(TaskGraphTaskStatus.Succeeded, state.Status);
-        Assert.Equal(attemptId, state.AttemptId);
-        Assert.Null(state.LeaseToken);
-        Assert.Equal(WorkflowTaskStatus.Succeeded, state.Result!.Status);
-        var receipt = Assert.IsType<TaskAcceptanceReceipt>(state.Acceptance);
-        Assert.Equal(TaskAcceptanceOutcome.Accepted, receipt.Outcome);
-        Assert.Equal(graph.DefinitionFingerprint, receipt.GraphFingerprint);
-        Assert.Equal(TaskGraphCrashFixture.TaskId, receipt.TaskId);
-        Assert.Equal(attemptId, receipt.AttemptId);
-        Assert.Equal(state.Result.Revision, receipt.Revision);
-        Assert.False(string.IsNullOrWhiteSpace(receipt.ResultDigest));
+        var state = Assert.ContainsSingle(graph.Tasks);
+        Assert.AreEqual(TaskGraphTaskStatus.Succeeded, state.Status);
+        Assert.AreEqual(attemptId, state.AttemptId);
+        Assert.IsNull(state.LeaseToken);
+        Assert.AreEqual(WorkflowTaskStatus.Succeeded, state.Result!.Status);
+        var receipt = Assert.IsExactInstanceOfType<TaskAcceptanceReceipt>(state.Acceptance);
+        Assert.AreEqual(TaskAcceptanceOutcome.Accepted, receipt.Outcome);
+        Assert.AreEqual(graph.DefinitionFingerprint, receipt.GraphFingerprint);
+        Assert.AreEqual(TaskGraphCrashFixture.TaskId, receipt.TaskId);
+        Assert.AreEqual(attemptId, receipt.AttemptId);
+        Assert.AreEqual(state.Result.Revision, receipt.Revision);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(receipt.ResultDigest));
     }
 
     private sealed class NeverRepeatExecutor : IWorkflowTaskExecutor
@@ -152,8 +153,10 @@ public sealed class TaskGraphCrashRecoveryTests
             var testAssembly = typeof(TaskGraphCrashRecoveryTests).Assembly.Location;
             var start = new ProcessStartInfo("dotnet")
             {
-                CreateNoWindow = true, UseShellExecute = false,
-                RedirectStandardError = true, RedirectStandardOutput = true
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
             };
             foreach (var argument in new[] { "exec", "--runtimeconfig", Path.ChangeExtension(testAssembly, ".runtimeconfig.json"),
                 "--depsfile", Path.ChangeExtension(testAssembly, ".deps.json"), typeof(CrashFixture).Assembly.Location, Root, point.ToString() })
@@ -178,10 +181,10 @@ public sealed class TaskGraphCrashRecoveryTests
                     if (graphId is not null) break;
                     await Task.Delay(25, timeout.Token);
                 }
-                Assert.False(string.IsNullOrWhiteSpace(graphId));
+                Assert.IsFalse(string.IsNullOrWhiteSpace(graphId));
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(timeout.Token);
-                Assert.True(process.HasExited);
+                Assert.IsTrue(process.HasExited);
                 return graphId;
             }
             finally

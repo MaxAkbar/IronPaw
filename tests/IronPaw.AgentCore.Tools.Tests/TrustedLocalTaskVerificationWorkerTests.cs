@@ -8,13 +8,14 @@ using Microsoft.CodeAnalysis.CSharp;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
-public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
+[TestClass]
+public sealed class TrustedLocalTaskVerificationWorkerTests
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "IronPawVerificationWorkerTests", Guid.NewGuid().ToString("N"));
     private readonly GitTaskWorkspaceManager _manager = new();
     private static readonly Lazy<byte[]> FixtureBytes = new(CompileFixture);
 
-    [Fact]
+    [TestMethod]
     public async Task CommitSnapshotPreservesMultilineBlobWhenCheckoutConversionIsEnabled()
     {
         var source = Directory.CreateDirectory(Path.Combine(_root, "source")).FullName;
@@ -33,59 +34,59 @@ public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
         var binding = new TaskGraphAgentBinding("root", source, commit, Path.Combine(_root, "store"), "test", "test", new(ToolProfile.Coding), new());
         var claim = new TaskGraphClaim("graph", "sha256:graph", new("task", "objective"), "attempt", "lease");
         var workspace = await _manager.OpenOrCreateAsync(binding, claim, CancellationToken.None);
-        Assert.Equal(committed, await File.ReadAllBytesAsync(Path.Combine(workspace.WorkspacePath, "source.txt")));
-        Assert.Equal(dirty, await File.ReadAllBytesAsync(sourceFile));
+        Assert.AreSequenceEqual(committed, await File.ReadAllBytesAsync(Path.Combine(workspace.WorkspacePath, "source.txt")));
+        Assert.AreSequenceEqual(dirty, await File.ReadAllBytesAsync(sourceFile));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AuthorityAndExactApprovedProfileAreRequired()
     {
         var fixture = await FixtureAsync("pass");
-        Assert.Throws<UnauthorizedAccessException>(() => new TrustedLocalTaskVerificationWorker([fixture.Job.Profile], TaskVerificationAuthority.None));
+        Assert.ThrowsExactly<UnauthorizedAccessException>(() => new TrustedLocalTaskVerificationWorker([fixture.Job.Profile], TaskVerificationAuthority.None));
         var worker = Worker(fixture.Job.Profile);
         worker.ValidateProfile(fixture.Job.Profile, new("owner", "Owner", true));
-        Assert.Throws<UnauthorizedAccessException>(() => worker.ValidateProfile(fixture.Job.Profile, new("other", "Other", false)));
-        Assert.Throws<UnauthorizedAccessException>(() => worker.ValidateProfile(fixture.Job.Profile with { Arguments = ["different"] }, new("owner", "Owner", true)));
-        Assert.Throws<ArgumentException>(() => Worker(fixture.Job.Profile with { Timeout = TimeSpan.FromDays(2) }));
-        Assert.Throws<ArgumentException>(() => Worker(fixture.Job.Profile with { MaxOutputBytes = 1_048_577 }));
+        Assert.ThrowsExactly<UnauthorizedAccessException>(() => worker.ValidateProfile(fixture.Job.Profile, new("other", "Other", false)));
+        Assert.ThrowsExactly<UnauthorizedAccessException>(() => worker.ValidateProfile(fixture.Job.Profile with { Arguments = ["different"] }, new("owner", "Owner", true)));
+        Assert.ThrowsExactly<ArgumentException>(() => Worker(fixture.Job.Profile with { Timeout = TimeSpan.FromDays(2) }));
+        Assert.ThrowsExactly<ArgumentException>(() => Worker(fixture.Job.Profile with { MaxOutputBytes = 1_048_577 }));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SuccessfulCommandUsesFreshCopyAndPreservesOriginalSealedRevision()
     {
         var fixture = await FixtureAsync("pass");
         var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.Passed, completion.Outcome);
-        Assert.Equal(0, completion.ExitCode);
+        Assert.AreEqual(TaskCommandOutcome.Passed, completion.Outcome);
+        Assert.AreEqual(0, completion.ExitCode);
         Assert.Contains("build passed", completion.StandardOutput.Text);
-        Assert.True(await _manager.VerifyAsync(fixture.Workspace, fixture.Job.Result, CancellationToken.None));
-        Assert.True(File.Exists(Path.Combine(fixture.Job.Copy.EvidencePath, "completion.json")));
-        Assert.True(File.Exists(Path.Combine(fixture.Job.Copy.EvidencePath, "stdout.txt")));
-        Assert.True(File.Exists(Path.Combine(fixture.Job.Copy.WorkspacePath, "started.txt")));
-        Assert.False(File.Exists(Path.Combine(fixture.Workspace.WorkspacePath, "started.txt")));
+        Assert.IsTrue(await _manager.VerifyAsync(fixture.Workspace, fixture.Job.Result, CancellationToken.None));
+        Assert.IsTrue(File.Exists(Path.Combine(fixture.Job.Copy.EvidencePath, "completion.json")));
+        Assert.IsTrue(File.Exists(Path.Combine(fixture.Job.Copy.EvidencePath, "stdout.txt")));
+        Assert.IsTrue(File.Exists(Path.Combine(fixture.Job.Copy.WorkspacePath, "started.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Workspace.WorkspacePath, "started.txt")));
         var repeated = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.NeedsReconciliation, repeated.Outcome);
+        Assert.AreEqual(TaskCommandOutcome.NeedsReconciliation, repeated.Outcome);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SameInvocationGetsNewDisposableCopyWithoutOverwritingPriorEvidence()
     {
         var fixture = await FixtureAsync("pass");
         await File.WriteAllTextAsync(Path.Combine(fixture.Job.Copy.EvidencePath, "preserve.txt"), "preserve");
         var second = await _manager.CreateVerificationCopyAsync(fixture.Workspace, fixture.Job.Result,
             fixture.Job.Copy.InvocationId, CancellationToken.None);
-        Assert.Equal(fixture.Job.Copy.InvocationId, second.InvocationId);
-        Assert.Equal(fixture.Job.Copy.InputDigest, second.InputDigest);
-        Assert.NotEqual(fixture.Job.Copy.EvidencePath, second.EvidencePath);
-        Assert.Equal("preserve", await File.ReadAllTextAsync(Path.Combine(fixture.Job.Copy.EvidencePath, "preserve.txt")));
-        Assert.Equal("committed", await File.ReadAllTextAsync(Path.Combine(second.WorkspacePath, "source.txt")));
+        Assert.AreEqual(fixture.Job.Copy.InvocationId, second.InvocationId);
+        Assert.AreEqual(fixture.Job.Copy.InputDigest, second.InputDigest);
+        Assert.AreNotEqual(fixture.Job.Copy.EvidencePath, second.EvidencePath);
+        Assert.AreEqual("preserve", await File.ReadAllTextAsync(Path.Combine(fixture.Job.Copy.EvidencePath, "preserve.txt")));
+        Assert.AreEqual("committed", await File.ReadAllTextAsync(Path.Combine(second.WorkspacePath, "source.txt")));
     }
 
-    [Theory]
-    [InlineData("changed")]
-    [InlineData("extra")]
-    [InlineData("deleted")]
-    [InlineData("manifest")]
+    [TestMethod]
+    [DataRow("changed")]
+    [DataRow("extra")]
+    [DataRow("deleted")]
+    [DataRow("manifest")]
     public async Task CopyTamperingIsRejectedBeforeProcessLaunch(string kind)
     {
         var fixture = await FixtureAsync("pass");
@@ -94,110 +95,113 @@ public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
         if (kind == "deleted") File.Delete(Path.Combine(fixture.Job.Copy.WorkspacePath, "source.txt"));
         if (kind == "manifest") await File.AppendAllTextAsync(Path.Combine(fixture.Job.Copy.EvidencePath, "input-manifest.json"), " ");
         var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.Failed, completion.Outcome);
-        Assert.Null(completion.ExitCode);
-        Assert.False(File.Exists(Path.Combine(fixture.Job.Copy.WorkspacePath, "started.txt")));
+        Assert.AreEqual(TaskCommandOutcome.Failed, completion.Outcome);
+        Assert.IsNull(completion.ExitCode);
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Job.Copy.WorkspacePath, "started.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SealedSourceTamperingPreventsCopyCreationAndCommandAdmission()
     {
         var fixture = await FixtureAsync("pass");
         await File.WriteAllTextAsync(fixture.Job.Result.Artifacts.Single().Location, "tampered");
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => _manager.CreateVerificationCopyAsync(fixture.Workspace,
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => _manager.CreateVerificationCopyAsync(fixture.Workspace,
             fixture.Job.Result, fixture.Job.Copy.InvocationId, CancellationToken.None));
         var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.Failed, completion.Outcome);
-        Assert.Null(completion.ExitCode);
+        Assert.AreEqual(TaskCommandOutcome.Failed, completion.Outcome);
+        Assert.IsNull(completion.ExitCode);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task InvalidCopyPathCannotWriteEvidenceIntoUnrelatedDirectory()
     {
         var fixture = await FixtureAsync("pass");
         var unrelated = Directory.CreateDirectory(Path.Combine(_root, "unrelated")).FullName;
-        var malformed = fixture.Job with { Copy = fixture.Job.Copy with
-        { EvidencePath = unrelated, WorkspacePath = Path.Combine(unrelated, "workspace") } };
+        var malformed = fixture.Job with
+        {
+            Copy = fixture.Job.Copy with
+            { EvidencePath = unrelated, WorkspacePath = Path.Combine(unrelated, "workspace") }
+        };
         var completion = await Worker(fixture.Job.Profile).ExecuteAsync(malformed, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.Failed, completion.Outcome);
-        Assert.Null(completion.ExitCode);
-        Assert.Empty(Directory.EnumerateFileSystemEntries(unrelated));
+        Assert.AreEqual(TaskCommandOutcome.Failed, completion.Outcome);
+        Assert.IsNull(completion.ExitCode);
+        Assert.IsEmpty(Directory.EnumerateFileSystemEntries(unrelated));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task NonzeroExitIsKnownFailureWithCompleteLogs()
     {
         var fixture = await FixtureAsync("fail");
         var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.Failed, completion.Outcome);
-        Assert.Equal(7, completion.ExitCode);
+        Assert.AreEqual(TaskCommandOutcome.Failed, completion.Outcome);
+        Assert.AreEqual(7, completion.ExitCode);
         Assert.Contains("intentional", completion.StandardError.Text);
-        Assert.Equal(Digest(Encoding.UTF8.GetBytes(completion.StandardError.Text)), completion.StandardError.Digest);
-        Assert.False(completion.StandardError.Truncated);
+        Assert.AreEqual(Digest(Encoding.UTF8.GetBytes(completion.StandardError.Text)), completion.StandardError.Digest);
+        Assert.IsFalse(completion.StandardError.Truncated);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task BothLargeOutputStreamsAreDrainedAndHashedWithBoundedPrefixes()
     {
         var fixture = await FixtureAsync("output", maxOutput: 1_024);
         var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.Passed, completion.Outcome);
-        Assert.Equal(200_000, completion.StandardOutput.ByteCount);
-        Assert.Equal(200_000, completion.StandardError.ByteCount);
-        Assert.Equal(1_024, Encoding.UTF8.GetByteCount(completion.StandardOutput.Text));
-        Assert.Equal(1_024, Encoding.UTF8.GetByteCount(completion.StandardError.Text));
-        Assert.True(completion.StandardOutput.Truncated);
-        Assert.True(completion.StandardError.Truncated);
-        Assert.Equal(Digest(Enumerable.Repeat((byte)'x', 200_000).ToArray()), completion.StandardOutput.Digest);
-        Assert.Equal(Digest(Enumerable.Repeat((byte)'y', 200_000).ToArray()), completion.StandardError.Digest);
+        Assert.AreEqual(TaskCommandOutcome.Passed, completion.Outcome);
+        Assert.AreEqual(200_000, completion.StandardOutput.ByteCount);
+        Assert.AreEqual(200_000, completion.StandardError.ByteCount);
+        Assert.AreEqual(1_024, Encoding.UTF8.GetByteCount(completion.StandardOutput.Text));
+        Assert.AreEqual(1_024, Encoding.UTF8.GetByteCount(completion.StandardError.Text));
+        Assert.IsTrue(completion.StandardOutput.Truncated);
+        Assert.IsTrue(completion.StandardError.Truncated);
+        Assert.AreEqual(Digest(Enumerable.Repeat((byte)'x', 200_000).ToArray()), completion.StandardOutput.Digest);
+        Assert.AreEqual(Digest(Enumerable.Repeat((byte)'y', 200_000).ToArray()), completion.StandardError.Digest);
     }
 
-    [Theory]
-    [InlineData("unicode", 5, "😀", 6)]
-    [InlineData("invalid", 10, "", 2)]
+    [TestMethod]
+    [DataRow("unicode", 5, "😀", 6)]
+    [DataRow("invalid", 10, "", 2)]
     public async Task OutputPreservesValidUtf8PrefixAndFullRawDigest(string mode, int maxBytes, string expected, int length)
     {
         var fixture = await FixtureAsync(mode, maxOutput: maxBytes);
         var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.Passed, completion.Outcome);
-        Assert.Equal(expected, completion.StandardOutput.Text);
-        Assert.Equal(length, completion.StandardOutput.ByteCount);
-        Assert.True(completion.StandardOutput.Truncated);
-        Assert.Equal(Digest(mode == "unicode" ? Encoding.UTF8.GetBytes("😀é") : [0xff, 0x01]), completion.StandardOutput.Digest);
+        Assert.AreEqual(TaskCommandOutcome.Passed, completion.Outcome);
+        Assert.AreEqual(expected, completion.StandardOutput.Text);
+        Assert.AreEqual(length, completion.StandardOutput.ByteCount);
+        Assert.IsTrue(completion.StandardOutput.Truncated);
+        Assert.AreEqual(Digest(mode == "unicode" ? Encoding.UTF8.GetBytes("😀é") : [0xff, 0x01]), completion.StandardOutput.Digest);
     }
 
-    [Theory]
-    [InlineData("trx-pass", TaskCommandOutcome.Passed)]
-    [InlineData("trx-skipped", TaskCommandOutcome.Passed)]
-    [InlineData("trx-zero", TaskCommandOutcome.Failed)]
-    [InlineData("trx-fail", TaskCommandOutcome.Failed)]
-    [InlineData("trx-inconsistent", TaskCommandOutcome.Failed)]
-    [InlineData("trx-missing", TaskCommandOutcome.Failed)]
-    [InlineData("trx-dtd", TaskCommandOutcome.Failed)]
-    [InlineData("trx-malformed", TaskCommandOutcome.Failed)]
-    [InlineData("trx-missing-outcome", TaskCommandOutcome.Failed)]
-    [InlineData("trx-too-large", TaskCommandOutcome.Failed)]
+    [TestMethod]
+    [DataRow("trx-pass", TaskCommandOutcome.Passed)]
+    [DataRow("trx-skipped", TaskCommandOutcome.Passed)]
+    [DataRow("trx-zero", TaskCommandOutcome.Failed)]
+    [DataRow("trx-fail", TaskCommandOutcome.Failed)]
+    [DataRow("trx-inconsistent", TaskCommandOutcome.Failed)]
+    [DataRow("trx-missing", TaskCommandOutcome.Failed)]
+    [DataRow("trx-dtd", TaskCommandOutcome.Failed)]
+    [DataRow("trx-malformed", TaskCommandOutcome.Failed)]
+    [DataRow("trx-missing-outcome", TaskCommandOutcome.Failed)]
+    [DataRow("trx-too-large", TaskCommandOutcome.Failed)]
     public async Task SuccessfulTestExitStillRequiresFreshNonemptyConsistentTrx(string mode, TaskCommandOutcome expected)
     {
         var fixture = await FixtureAsync(mode, tests: true);
         var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-        Assert.Equal(expected, completion.Outcome);
-        Assert.Equal(0, completion.ExitCode);
-        if (expected == TaskCommandOutcome.Passed) Assert.Equal(1, completion.Tests!.Passed);
-        else Assert.Null(completion.Tests);
+        Assert.AreEqual(expected, completion.Outcome);
+        Assert.AreEqual(0, completion.ExitCode);
+        if (expected == TaskCommandOutcome.Passed) Assert.AreEqual(1, completion.Tests!.Passed);
+        else Assert.IsNull(completion.Tests);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CandidateSuppliedTestReportCannotPretendToBeFreshExecutionEvidence()
     {
         var fixture = await FixtureAsync("trx-pass", tests: true, preexistingReport: true);
         var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.Failed, completion.Outcome);
-        Assert.Null(completion.ExitCode);
-        Assert.False(File.Exists(Path.Combine(fixture.Job.Copy.WorkspacePath, "started.txt")));
+        Assert.AreEqual(TaskCommandOutcome.Failed, completion.Outcome);
+        Assert.IsNull(completion.ExitCode);
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Job.Copy.WorkspacePath, "started.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ParentCredentialsAndProfileDirectoriesAreNotInherited()
     {
         var old = Environment.GetEnvironmentVariable("IRONPAW_VERIFICATION_SECRET");
@@ -206,7 +210,7 @@ public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
         {
             var fixture = await FixtureAsync("environment");
             var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-            Assert.Equal(TaskCommandOutcome.Passed, completion.Outcome);
+            Assert.AreEqual(TaskCommandOutcome.Passed, completion.Outcome);
             Assert.StartsWith("absent\n", completion.StandardOutput.Text.Replace("\r\n", "\n"));
             Assert.Contains(Path.Combine(fixture.Job.Copy.EvidencePath, "environment", "home"), completion.StandardOutput.Text);
             Assert.Contains(Path.Combine(fixture.Job.Copy.EvidencePath, "environment", "temp"), completion.StandardOutput.Text);
@@ -215,18 +219,18 @@ public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
         finally { Environment.SetEnvironmentVariable("IRONPAW_VERIFICATION_SECRET", old); }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ArgumentsAreLiteralAndNeverPassedThroughShellInterpretation()
     {
         const string literal = "hello & echo injected > shell-created.txt ; $(echo unsafe)";
         var fixture = await FixtureAsync("argument", argument: literal);
         var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.Passed, completion.Outcome);
-        Assert.Equal(literal, completion.StandardOutput.Text);
-        Assert.False(File.Exists(Path.Combine(fixture.Job.Copy.WorkspacePath, "shell-created.txt")));
+        Assert.AreEqual(TaskCommandOutcome.Passed, completion.Outcome);
+        Assert.AreEqual(literal, completion.StandardOutput.Text);
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Job.Copy.WorkspacePath, "shell-created.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExecutableDigestDriftIsRejectedBeforeLaunch()
     {
         var fixture = await FixtureAsync("pass");
@@ -235,14 +239,14 @@ public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
             TaskVerificationIdentity.InvocationId(fixture.Job.Claim, fixture.Job.Result, profile), CancellationToken.None);
         var job = fixture.Job with { Profile = profile, ProfileFingerprint = TaskVerificationIdentity.ProfileFingerprint(profile), Copy = copy };
         var completion = await Worker(profile).ExecuteAsync(job, CancellationToken.None);
-        Assert.Equal(TaskCommandOutcome.Failed, completion.Outcome);
-        Assert.Null(completion.ExitCode);
-        Assert.False(File.Exists(Path.Combine(copy.WorkspacePath, "started.txt")));
+        Assert.AreEqual(TaskCommandOutcome.Failed, completion.Outcome);
+        Assert.IsNull(completion.ExitCode);
+        Assert.IsFalse(File.Exists(Path.Combine(copy.WorkspacePath, "started.txt")));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task InterruptedStartedProcessRequiresReconciliation(bool callerCancellation)
     {
         var fixture = await FixtureAsync("sleep", timeout: TimeSpan.FromMilliseconds(callerCancellation ? 10_000 : 300));
@@ -256,12 +260,12 @@ public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
             cancellation.Cancel();
         }
         var completion = await execution.WaitAsync(TimeSpan.FromSeconds(15));
-        Assert.Equal(TaskCommandOutcome.NeedsReconciliation, completion.Outcome);
+        Assert.AreEqual(TaskCommandOutcome.NeedsReconciliation, completion.Outcome);
         Assert.Contains("detached", completion.Explanation);
-        Assert.True(File.Exists(Path.Combine(fixture.Job.Copy.EvidencePath, "completion.json")));
+        Assert.IsTrue(File.Exists(Path.Combine(fixture.Job.Copy.EvidencePath, "completion.json")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CopyRootJunctionIsRejectedBeforeLaunch()
     {
         var fixture = await FixtureAsync("pass");
@@ -271,8 +275,8 @@ public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
         try
         {
             var completion = await Worker(fixture.Job.Profile).ExecuteAsync(fixture.Job, CancellationToken.None);
-            Assert.Equal(TaskCommandOutcome.Failed, completion.Outcome);
-            Assert.Null(completion.ExitCode);
+            Assert.AreEqual(TaskCommandOutcome.Failed, completion.Outcome);
+            Assert.IsNull(completion.ExitCode);
         }
         finally { Directory.Delete(fixture.Job.Copy.WorkspacePath); }
     }
@@ -297,7 +301,8 @@ public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
         var workspace = await _manager.OpenOrCreateAsync(binding, claim, CancellationToken.None);
         var capture = await _manager.CaptureAsync(workspace, [new("source", "source output", TaskArtifactKind.File, "source.txt")], CancellationToken.None);
         var result = new WorkflowTaskResult(claim.GraphId, claim.GraphFingerprint, claim.Task.TaskId,
-            WorkflowTaskStatus.AwaitingVerification, capture.Revision, "candidate") { Artifacts = capture.Artifacts };
+            WorkflowTaskStatus.AwaitingVerification, capture.Revision, "candidate")
+        { Artifacts = capture.Artifacts };
         var dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
         if (string.IsNullOrWhiteSpace(dotnet) || !Path.IsPathFullyQualified(dotnet))
             dotnet = OperatingSystem.IsWindows() ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet", "dotnet.exe") : "/usr/share/dotnet/dotnet";
@@ -357,14 +362,19 @@ public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
             new CSharpCompilationOptions(OutputKind.ConsoleApplication));
         using var output = new MemoryStream();
         var result = compilation.Emit(output);
-        Assert.True(result.Success, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.IsTrue(result.Success, string.Join(Environment.NewLine, result.Diagnostics));
         return output.ToArray();
     }
 
     private static async Task GitAsync(string root, string[] arguments)
     {
-        var info = new ProcessStartInfo("git") { UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true };
+        var info = new ProcessStartInfo("git")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
         info.ArgumentList.Add("-C"); info.ArgumentList.Add(root);
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         using var process = Process.Start(info)!;
@@ -372,10 +382,11 @@ public sealed class TrustedLocalTaskVerificationWorkerTests : IDisposable
         var error = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
         await output;
-        Assert.True(process.ExitCode == 0, await error);
+        Assert.IsTrue(process.ExitCode == 0, await error);
     }
 
-    public void Dispose()
+    [TestCleanup]
+    public void Cleanup()
     {
         var expectedParent = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "IronPawVerificationWorkerTests"));
         if (!Path.GetFullPath(_root).StartsWith(expectedParent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))

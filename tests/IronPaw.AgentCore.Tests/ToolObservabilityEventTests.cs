@@ -6,9 +6,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class ToolObservabilityEventTests
 {
-    [Fact]
+    [TestMethod]
     public async Task RunAsync_ToolDetailsEmitMessageObservabilityEvents()
     {
         var root = CreateTempDirectory();
@@ -53,16 +54,16 @@ public sealed class ToolObservabilityEventTests
 
             var result = await orchestrator.RunAsync(request, sink, CancellationToken.None);
 
-            Assert.Equal("All done.", result.FinalAssistantMessage);
-            Assert.Contains(sink.Events, evt => evt.Type == "message.sent");
-            Assert.Contains(sink.Events, evt => evt.Type == "message.received");
+            Assert.AreEqual("All done.", result.FinalAssistantMessage);
+            Assert.Contains(evt => evt.Type == "message.sent", sink.Events);
+            Assert.Contains(evt => evt.Type == "message.received", sink.Events);
 
             var sent = sink.Events.First(evt => evt.Type == "message.sent");
-            Assert.Equal("codegen", sent.AgentId);
-            Assert.Equal("reviewer", sent.Data["recipient_agent_id"]?.ToString());
+            Assert.AreEqual("codegen", sent.AgentId);
+            Assert.AreEqual("reviewer", sent.Data["recipient_agent_id"]?.ToString());
 
             var received = sink.Events.First(evt => evt.Type == "message.received");
-            Assert.Equal("2", received.Data["message_count"]?.ToString());
+            Assert.AreEqual("2", received.Data["message_count"]?.ToString());
         }
         finally
         {

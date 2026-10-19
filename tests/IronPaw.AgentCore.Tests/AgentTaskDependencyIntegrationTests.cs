@@ -9,12 +9,13 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class AgentTaskDependencyIntegrationTests
 {
     private static readonly CallerIdentity Owner = new("dependency-owner", "Dependency owner", true);
     private static readonly CancellationToken Ct = CancellationToken.None;
 
-    [Fact]
+    [TestMethod]
     public async Task Chain_ConsumerReadsAcceptedProducer_AndPersistsPinnedInputsInChildRequest()
     {
         await using var scope = await Scope.OpenAsync();
@@ -31,24 +32,24 @@ public sealed class AgentTaskDependencyIntegrationTests
         var completed = await scope.Runner(client).StartAsync(graph, Owner, 2, scope.Options(graph), Ct);
 
         AssertSucceeded(completed);
-        Assert.Equal("alpha -> beta", await ArtifactTextAsync(completed, "b"));
-        Assert.Equal(TaskDependencyMode.AcceptedChanges, completed.AgentBinding!.DependencyMode);
-        Assert.Equal(3, completed.SchemaVersion);
+        Assert.AreEqual("alpha -> beta", await ArtifactTextAsync(completed, "b"));
+        Assert.AreEqual(TaskDependencyMode.AcceptedChanges, completed.AgentBinding!.DependencyMode);
+        Assert.AreEqual(3, completed.SchemaVersion);
         var consumer = State(completed, "b");
-        var dependency = Assert.Single(consumer.Inputs!.Dependencies);
-        Assert.Equal("a", dependency.TaskId);
-        Assert.Equal(State(completed, "a").Result!.Revision, dependency.Revision);
-        Assert.Equal(State(completed, "a").Acceptance, dependency.Acceptance);
-        var child = Assert.Single(await scope.Store.ListAsync(Ct), run =>
-            run.RunId == AgentTaskIdentity.ChildRunId(completed.DefinitionFingerprint, "b", consumer.AttemptId!).Value);
+        var dependency = Assert.ContainsSingle(consumer.Inputs!.Dependencies);
+        Assert.AreEqual("a", dependency.TaskId);
+        Assert.AreEqual(State(completed, "a").Result!.Revision, dependency.Revision);
+        Assert.AreEqual(State(completed, "a").Acceptance, dependency.Acceptance);
+        var child = Assert.ContainsSingle(run =>
+            run.RunId == AgentTaskIdentity.ChildRunId(completed.DefinitionFingerprint, "b", consumer.AttemptId!).Value, await scope.Store.ListAsync(Ct));
         Assert.StartsWith("b", child.Request.UserInput);
         Assert.Contains(consumer.Inputs.Digest, child.Request.UserInput, StringComparison.Ordinal);
-        Assert.Equal("uncommitted local work", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "a.txt")));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "b.txt")));
+        Assert.AreEqual("uncommitted local work", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "a.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "b.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Diamond_ComposesEachAcceptedDeltaOnce_AndRetainsDisjointBranchChanges()
     {
         await using var scope = await Scope.OpenAsync();
@@ -71,13 +72,13 @@ public sealed class AgentTaskDependencyIntegrationTests
         var completed = await scope.Runner(client).StartAsync(graph, Owner, 3, scope.Options(graph), Ct);
 
         AssertSucceeded(completed);
-        Assert.Equal("alpha/alpha-beta/alpha-gamma", await ArtifactTextAsync(completed, "d"));
-        Assert.Equal(["a", "b", "c"], State(completed, "d").Inputs!.Dependencies.Select(input => input.TaskId).Order().ToArray());
-        Assert.Equal(3, State(completed, "d").Inputs!.Dependencies.Select(input => input.TaskId).Distinct().Count());
-        Assert.False(File.Exists(Path.Combine(scope.Source, "d.txt")));
+        Assert.AreEqual("alpha/alpha-beta/alpha-gamma", await ArtifactTextAsync(completed, "d"));
+        Assert.AreSequenceEqual(["a", "b", "c"], State(completed, "d").Inputs!.Dependencies.Select(input => input.TaskId).Order().ToArray());
+        Assert.AreEqual(3, State(completed, "d").Inputs!.Dependencies.Select(input => input.TaskId).Distinct().Count());
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "d.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DivergentBranchWrites_FailConsumerBeforeProviderAdmission_AndPreserveSource()
     {
         await using var scope = await Scope.OpenAsync();
@@ -88,19 +89,19 @@ public sealed class AgentTaskDependencyIntegrationTests
 
         var stopped = await scope.Runner(client).StartAsync(graph, Owner, 2, scope.Options(graph), Ct);
 
-        Assert.Equal(TaskGraphTaskStatus.Succeeded, State(stopped, "left").Status);
-        Assert.Equal(TaskGraphTaskStatus.Succeeded, State(stopped, "right").Status);
-        Assert.Equal(TaskGraphTaskStatus.Failed, State(stopped, "join").Status);
-        Assert.Equal(WorkflowTaskStatus.Failed, State(stopped, "join").Result!.Status);
-        Assert.DoesNotContain(client.Requests, request => TaskId(request) == "join");
-        Assert.DoesNotContain(await scope.Store.ListAsync(Ct), run =>
-            run.Request.RequestedRunId == AgentTaskIdentity.ChildRunId(stopped.DefinitionFingerprint, "join", State(stopped, "join").AttemptId!));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "shared.txt")));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "join.txt")));
-        Assert.Equal("committed source", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
+        Assert.AreEqual(TaskGraphTaskStatus.Succeeded, State(stopped, "left").Status);
+        Assert.AreEqual(TaskGraphTaskStatus.Succeeded, State(stopped, "right").Status);
+        Assert.AreEqual(TaskGraphTaskStatus.Failed, State(stopped, "join").Status);
+        Assert.AreEqual(WorkflowTaskStatus.Failed, State(stopped, "join").Result!.Status);
+        Assert.DoesNotContain(request => TaskId(request) == "join", client.Requests);
+        Assert.DoesNotContain(run =>
+            run.Request.RequestedRunId == AgentTaskIdentity.ChildRunId(stopped.DefinitionFingerprint, "join", State(stopped, "join").AttemptId!), await scope.Store.ListAsync(Ct));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "shared.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "join.txt")));
+        Assert.AreEqual("committed source", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task TamperedAcceptedRevision_FailsConsumerBeforeProviderAdmission()
     {
         await using var scope = await Scope.OpenAsync();
@@ -111,7 +112,7 @@ public sealed class AgentTaskDependencyIntegrationTests
             BeforePrepare = async (claim, dependencies) =>
             {
                 if (claim.Task.TaskId != "b") return;
-                var artifact = Assert.Single(Assert.Single(dependencies).Result.Artifacts);
+                var artifact = Assert.ContainsSingle(Assert.ContainsSingle(dependencies).Result.Artifacts);
                 File.SetAttributes(artifact.Location, FileAttributes.Normal);
                 await File.WriteAllTextAsync(artifact.Location, "tampered after acceptance");
             }
@@ -119,13 +120,13 @@ public sealed class AgentTaskDependencyIntegrationTests
 
         var stopped = await scope.Runner(client, manager).StartAsync(graph, Owner, 1, scope.Options(graph), Ct);
 
-        Assert.Equal(TaskGraphTaskStatus.Succeeded, State(stopped, "a").Status);
-        Assert.Equal(TaskGraphTaskStatus.Failed, State(stopped, "b").Status);
-        Assert.DoesNotContain(client.Requests, request => TaskId(request) == "b");
-        Assert.False(File.Exists(Path.Combine(scope.Source, "a.txt")));
+        Assert.AreEqual(TaskGraphTaskStatus.Succeeded, State(stopped, "a").Status);
+        Assert.AreEqual(TaskGraphTaskStatus.Failed, State(stopped, "b").Status);
+        Assert.DoesNotContain(request => TaskId(request) == "b", client.Requests);
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "a.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task RecoveryAfterCompletedChild_ReusesInputDigestAttemptAndChildWithoutProviderReplay()
     {
         await using var scope = await Scope.OpenAsync();
@@ -140,10 +141,10 @@ public sealed class AgentTaskDependencyIntegrationTests
         });
         var interrupted = await scope.Runner(writer, manager).StartAsync(graph, Owner, 1, scope.Options(graph), Ct);
         var before = State(interrupted, "b");
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, before.Status);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, before.Status);
         var childId = AgentTaskIdentity.ChildRunId(interrupted.DefinitionFingerprint, "b", before.AttemptId!);
         var child = (await scope.Store.GetAsync(childId, Ct))!;
-        Assert.Equal(AgentRunStatus.Succeeded, child.Result!.Status);
+        Assert.AreEqual(AgentRunStatus.Succeeded, child.Result!.Status);
         var inputDigest = before.Inputs!.Digest;
         await scope.ReopenAsync();
         var unused = new ScriptedClient((_, _) => throw new InvalidOperationException("A completed child must not replay the provider."));
@@ -151,17 +152,17 @@ public sealed class AgentTaskDependencyIntegrationTests
         var completed = await scope.Runner(unused).RecoverTaskAsync(graph.GraphId, "b", Owner, Ct);
 
         AssertSucceeded(completed);
-        Assert.Empty(unused.Requests);
-        Assert.Equal(before.AttemptId, State(completed, "b").AttemptId);
-        Assert.Equal(inputDigest, State(completed, "b").Inputs!.Digest);
+        Assert.IsEmpty(unused.Requests);
+        Assert.AreEqual(before.AttemptId, State(completed, "b").AttemptId);
+        Assert.AreEqual(inputDigest, State(completed, "b").Inputs!.Digest);
         var recovered = (await scope.Store.GetAsync(childId, Ct))!;
-        Assert.Equal(child.RunId, recovered.RunId);
-        Assert.Equal(child.Request.UserInput, recovered.Request.UserInput);
-        Assert.Equal(child.ToolExecutions!.Select(tool => tool.ExecutionId), recovered.ToolExecutions!.Select(tool => tool.ExecutionId));
-        Assert.Equal("alpha-beta", await ArtifactTextAsync(completed, "b"));
+        Assert.AreEqual(child.RunId, recovered.RunId);
+        Assert.AreEqual(child.Request.UserInput, recovered.Request.UserInput);
+        Assert.AreSequenceEqual(child.ToolExecutions!.Select(tool => tool.ExecutionId), recovered.ToolExecutions!.Select(tool => tool.ExecutionId));
+        Assert.AreEqual("alpha-beta", await ArtifactTextAsync(completed, "b"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task BaseCommitOnly_ExplicitLegacyModePreservesIndependentCommittedInputs()
     {
         await using var scope = await Scope.OpenAsync();
@@ -178,13 +179,16 @@ public sealed class AgentTaskDependencyIntegrationTests
             scope.Options(graph) with { DependencyMode = TaskDependencyMode.BaseCommitOnly }, Ct);
 
         AssertSucceeded(completed);
-        Assert.Equal("committed source", await ArtifactTextAsync(completed, "b"));
-        Assert.Equal(TaskDependencyMode.BaseCommitOnly, completed.AgentBinding!.DependencyMode);
-        Assert.All(completed.Tasks, state => Assert.Null(state.Inputs));
-        Assert.Equal("committed source", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
+        Assert.AreEqual("committed source", await ArtifactTextAsync(completed, "b"));
+        Assert.AreEqual(TaskDependencyMode.BaseCommitOnly, completed.AgentBinding!.DependencyMode);
+        foreach (var state in completed.Tasks)
+        {
+            Assert.IsNull(state.Inputs);
+        }
+        Assert.AreEqual("committed source", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ImportedFiles_DoNotBroadenConsumerReadPermissions()
     {
         await using var scope = await Scope.OpenAsync();
@@ -208,7 +212,7 @@ public sealed class AgentTaskDependencyIntegrationTests
         var marker = Directory.EnumerateFiles(scope.Managed, "workspace.json", SearchOption.AllDirectories)
             .Select(path => JsonSerializer.Deserialize<TaskWorkspace>(File.ReadAllText(path))!)
             .Single(workspace => workspace.TaskId == "b");
-        Assert.Equal("restricted predecessor content", await File.ReadAllTextAsync(Path.Combine(marker.WorkspacePath, "a.txt")));
+        Assert.AreEqual("restricted predecessor content", await File.ReadAllTextAsync(Path.Combine(marker.WorkspacePath, "a.txt")));
     }
 
     private static WorkflowTaskDefinition MakeTask(string id, string output, params string[] dependencies) => new(id, id)
@@ -222,12 +226,11 @@ public sealed class AgentTaskDependencyIntegrationTests
     private static WorkflowTaskGraph Graph(params WorkflowTaskDefinition[] tasks) =>
         new("dependencies-" + Guid.NewGuid().ToString("n"), "Compose accepted predecessor changes", tasks.ToImmutableArray());
     private static TaskGraphTaskState State(TaskGraphCheckpoint checkpoint, string id) => checkpoint.Tasks.Single(state => state.TaskId == id);
-    private static void AssertSucceeded(TaskGraphCheckpoint checkpoint) => Assert.True(
-        TaskGraphProgress.Inspect(checkpoint).Status == TaskGraphRunStatus.Succeeded,
-        string.Join(Environment.NewLine, checkpoint.Tasks.Select(state =>
+    private static void AssertSucceeded(TaskGraphCheckpoint checkpoint) => Assert.IsTrue(
+        TaskGraphProgress.Inspect(checkpoint).Status == TaskGraphRunStatus.Succeeded, string.Join(Environment.NewLine, checkpoint.Tasks.Select(state =>
             $"{state.TaskId}: {state.Status}; error={state.Error}; reconciliation={state.ReconciliationNote}; result={state.Result?.Explanation}")));
     private static async Task<string> ArtifactTextAsync(TaskGraphCheckpoint checkpoint, string id) =>
-        await File.ReadAllTextAsync(Assert.Single(State(checkpoint, id).Result!.Artifacts).Location);
+        await File.ReadAllTextAsync(Assert.ContainsSingle(State(checkpoint, id).Result!.Artifacts).Location);
     private static string TaskId(LlmRequest request) => request.Messages.First(message => message.Role == ChatRole.User).Content.Split('\n')[0].TrimEnd('\r');
     private static string ReadResult(LlmRequest request, string path) => request.Messages.Last(message => message.Role == ChatRole.Tool && message.ToolCallId == path).Content;
     private static ToolCallDelta Call(string id, string name, object arguments) => new(id, name, JsonSerializer.SerializeToElement(arguments));
@@ -312,8 +315,13 @@ public sealed class AgentTaskDependencyIntegrationTests
         }
         private static async Task GitAsync(string path, params string[] arguments)
         {
-            var start = new ProcessStartInfo("git") { UseShellExecute = false, CreateNoWindow = true,
-                RedirectStandardOutput = true, RedirectStandardError = true };
+            var start = new ProcessStartInfo("git")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
             start.ArgumentList.Add("-C"); start.ArgumentList.Add(path);
             foreach (var argument in arguments) start.ArgumentList.Add(argument);
             using var process = Process.Start(start)!;
@@ -321,7 +329,7 @@ public sealed class AgentTaskDependencyIntegrationTests
             var error = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
             await output;
-            Assert.True(process.ExitCode == 0, await error);
+            Assert.IsTrue(process.ExitCode == 0, await error);
         }
     }
 }

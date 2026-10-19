@@ -9,12 +9,13 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class TaskGraphHostControllerTests
 {
     private static readonly CallerIdentity Owner = CallerIdentity.LocalOwner();
     private static readonly CancellationToken Ct = CancellationToken.None;
 
-    [Fact]
+    [TestMethod]
     public async Task StrictLaunchRoundTrip_StartInspectResume_PreservesOneExecutionAndItsEvidence()
     {
         await using var scope = await Scope.OpenAsync();
@@ -26,24 +27,27 @@ public sealed class TaskGraphHostControllerTests
         var detail = await host.InspectAsync(saved.Graph.GraphId, Owner, Ct);
         var resumed = await host.ResumeAsync(saved.Graph.GraphId, Owner, false, Ct);
 
-        Assert.Equal(TaskGraphRunStatus.Succeeded, detail.Progress.Status);
-        Assert.Equal(saved.DefinitionFingerprint, resumed.DefinitionFingerprint);
-        Assert.Equal(2, scope.Client.Calls);
-        Assert.Equal(2, detail.Usage.ModelCalls);
-        Assert.Equal(1, detail.Usage.ToolCalls);
-        Assert.Equal(20, detail.Budget.ChargedTokens);
-        Assert.Equal(2, detail.Invocations.Count);
-        Assert.NotEmpty(detail.InvocationJournal);
-        Assert.All(detail.InvocationJournal, entry => Assert.Contains(detail.Invocations, run => run.RunId == entry.RunId));
-        Assert.Single(detail.Journal, entry => entry.EventType == "task_acceptance");
-        Assert.Single(await host.ListAsync(Owner, Ct));
-        Assert.Null(await host.GetRequiredProviderAsync(saved.Graph.GraphId, Owner, Ct));
-        Assert.Equal("candidate", await File.ReadAllTextAsync(Assert.Single(saved.Tasks[0].Result!.Artifacts).Location));
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, detail.Progress.Status);
+        Assert.AreEqual(saved.DefinitionFingerprint, resumed.DefinitionFingerprint);
+        Assert.AreEqual(2, scope.Client.Calls);
+        Assert.AreEqual(2, detail.Usage.ModelCalls);
+        Assert.AreEqual(1, detail.Usage.ToolCalls);
+        Assert.AreEqual(20, detail.Budget.ChargedTokens);
+        Assert.AreEqual(2, detail.Invocations.Count);
+        Assert.IsNotEmpty(detail.InvocationJournal);
+        foreach (var entry in detail.InvocationJournal)
+        {
+            Assert.Contains(run => run.RunId == entry.RunId, detail.Invocations);
+        }
+        Assert.ContainsSingle(entry => entry.EventType == "task_acceptance", detail.Journal);
+        Assert.ContainsSingle(await host.ListAsync(Owner, Ct));
+        Assert.IsNull(await host.GetRequiredProviderAsync(saved.Graph.GraphId, Owner, Ct));
+        Assert.AreEqual("candidate", await File.ReadAllTextAsync(Assert.ContainsSingle(saved.Tasks[0].Result!.Artifacts).Location));
     }
 
-    [Theory]
-    [InlineData("source")]
-    [InlineData("store")]
+    [TestMethod]
+    [DataRow("source")]
+    [DataRow("store")]
     public async Task LaunchCannotSwitchConfiguredWorkspaceOrManagedStore(string changed)
     {
         await using var scope = await Scope.OpenAsync();
@@ -52,38 +56,44 @@ public sealed class TaskGraphHostControllerTests
         var options = changed == "source" ? document.Options with { SourceWorkspaceRoot = alternate }
             : document.Options with { WorkspaceStoreRoot = alternate };
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => scope.Host().StartAsync(document with { Options = options }, Owner, false, Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => scope.Host().StartAsync(document with { Options = options }, Owner, false, Ct));
 
-        Assert.Empty(await scope.Store.ListTaskGraphsAsync(Ct));
-        Assert.Empty(await scope.Store.ListAsync(Ct));
-        Assert.Equal(0, scope.Client.Calls);
-        Assert.False(Directory.Exists(scope.Managed));
+        Assert.IsEmpty(await scope.Store.ListTaskGraphsAsync(Ct));
+        Assert.IsEmpty(await scope.Store.ListAsync(Ct));
+        Assert.AreEqual(0, scope.Client.Calls);
+        Assert.IsFalse(Directory.Exists(scope.Managed));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ProcessAuthorityInsideManifestCannotGrantHostPermission()
     {
         await using var scope = await Scope.OpenAsync();
         var document = scope.Document();
         var task = document.Graph.Tasks[0];
-        var options = document.Options with {
+        var options = document.Options with
+        {
             VerificationAuthority = TaskVerificationAuthority.TrustedLocalProcess,
             VerificationProfiles = [new("build", Environment.ProcessPath!, "sha256:" + new string('0', 64), ["--version"], TimeSpan.FromSeconds(5))],
             CommandVerificationRules = [new(task.TaskId, "build", "build")]
         };
-        document = document with { Options = options, Graph = document.Graph with {
-            Tasks = [task with { AcceptanceCriteria = task.AcceptanceCriteria.Add(new("build", "Build succeeds")) }]
-        } };
+        document = document with
+        {
+            Options = options,
+            Graph = document.Graph with
+            {
+                Tasks = [task with { AcceptanceCriteria = task.AcceptanceCriteria.Add(new("build", "Build succeeds")) }]
+            }
+        };
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => scope.Host().StartAsync(document, Owner, false, Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => scope.Host().StartAsync(document, Owner, false, Ct));
 
-        Assert.Empty(await scope.Store.ListTaskGraphsAsync(Ct));
-        Assert.Empty(await scope.Store.ListAsync(Ct));
-        Assert.Equal(0, scope.Client.Calls);
-        Assert.False(Directory.Exists(scope.Managed));
+        Assert.IsEmpty(await scope.Store.ListTaskGraphsAsync(Ct));
+        Assert.IsEmpty(await scope.Store.ListAsync(Ct));
+        Assert.AreEqual(0, scope.Client.Calls);
+        Assert.IsFalse(Directory.Exists(scope.Managed));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OtherWorkspaceHostCannotInspectOrControlAnAcceptedGraph()
     {
         await using var scope = await Scope.OpenAsync();
@@ -91,15 +101,15 @@ public sealed class TaskGraphHostControllerTests
         var foreign = new TaskGraphHostController(scope.Store, scope.Store, scope.Client,
             Path.Combine(scope.Root, "other-source"), Path.Combine(scope.Root, "other-managed"));
 
-        Assert.Empty(await foreign.ListAsync(Owner, Ct));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => foreign.InspectAsync(graph.Graph.GraphId, Owner, Ct));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => foreign.PauseAsync(graph.Graph.GraphId, Owner, Ct));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => foreign.ResumeAsync(graph.Graph.GraphId, Owner, false, Ct));
-        Assert.Equal(WorkflowControl.None, (await scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, Ct))!.Control);
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.IsEmpty(await foreign.ListAsync(Owner, Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => foreign.InspectAsync(graph.Graph.GraphId, Owner, Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => foreign.PauseAsync(graph.Graph.GraphId, Owner, Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => foreign.ResumeAsync(graph.Graph.GraphId, Owner, false, Ct));
+        Assert.AreEqual(WorkflowControl.None, (await scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, Ct))!.Control);
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OriginalCallerIsRequiredForInspectionAndControl()
     {
         await using var scope = await Scope.OpenAsync();
@@ -107,32 +117,32 @@ public sealed class TaskGraphHostControllerTests
         var other = Owner with { Id = "other-owner" };
         var host = scope.Host();
 
-        Assert.Empty(await host.ListAsync(other, Ct));
-        Assert.Empty(await host.ListAsync(Owner with { IsOwner = false }, Ct));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => host.InspectAsync(graph.Graph.GraphId, other, Ct));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => host.CancelAsync(graph.Graph.GraphId, other, Ct));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => host.ResumeAsync(graph.Graph.GraphId, other, false, Ct));
-        Assert.Equal(WorkflowControl.None, (await scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, Ct))!.Control);
+        Assert.IsEmpty(await host.ListAsync(other, Ct));
+        Assert.IsEmpty(await host.ListAsync(Owner with { IsOwner = false }, Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => host.InspectAsync(graph.Graph.GraphId, other, Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => host.CancelAsync(graph.Graph.GraphId, other, Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => host.ResumeAsync(graph.Graph.GraphId, other, false, Ct));
+        Assert.AreEqual(WorkflowControl.None, (await scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, Ct))!.Control);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task QueuedPauseAndPermanentCancelNeedNoProvider()
     {
         await using var scope = await Scope.OpenAsync();
         var graph = await scope.AcceptAsync();
         var host = scope.Host();
 
-        Assert.Equal("mock", await host.GetRequiredProviderAsync(graph.Graph.GraphId, Owner, Ct));
+        Assert.AreEqual("mock", await host.GetRequiredProviderAsync(graph.Graph.GraphId, Owner, Ct));
         await host.PauseAsync(graph.Graph.GraphId, Owner, Ct);
-        Assert.Equal(TaskGraphRunStatus.Paused, (await host.InspectAsync(graph.Graph.GraphId, Owner, Ct)).Progress.Status);
+        Assert.AreEqual(TaskGraphRunStatus.Paused, (await host.InspectAsync(graph.Graph.GraphId, Owner, Ct)).Progress.Status);
         await host.CancelAsync(graph.Graph.GraphId, Owner, Ct);
 
-        Assert.Null(await host.GetRequiredProviderAsync(graph.Graph.GraphId, Owner, Ct));
-        await Assert.ThrowsAsync<WorkflowCancelledException>(() => host.ResumeAsync(graph.Graph.GraphId, Owner, false, Ct));
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.IsNull(await host.GetRequiredProviderAsync(graph.Graph.GraphId, Owner, Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowCancelledException>(() => host.ResumeAsync(graph.Graph.GraphId, Owner, false, Ct));
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task PendingArtifactAcceptanceDoesNotRequireProviderConfiguration()
     {
         await using var scope = await Scope.OpenAsync();
@@ -140,17 +150,17 @@ public sealed class TaskGraphHostControllerTests
         var incomplete = document with { Options = document.Options with { ArtifactVerificationRules = [] } };
         var candidate = await scope.Host().StartAsync(incomplete, Owner, false, Ct);
 
-        Assert.Equal(TaskGraphRunStatus.AwaitingAcceptance, TaskGraphProgress.Inspect(candidate).Status);
-        Assert.Null(await scope.Host().GetRequiredProviderAsync(candidate.Graph.GraphId, Owner, Ct));
+        Assert.AreEqual(TaskGraphRunStatus.AwaitingAcceptance, TaskGraphProgress.Inspect(candidate).Status);
+        Assert.IsNull(await scope.Host().GetRequiredProviderAsync(candidate.Graph.GraphId, Owner, Ct));
         await scope.Host().ResumeAsync(candidate.Graph.GraphId, Owner, false, Ct);
-        Assert.Equal(2, scope.Client.Calls);
+        Assert.AreEqual(2, scope.Client.Calls);
     }
 
-    [Theory]
-    [InlineData("failed", false, false)]
-    [InlineData("passed", false, true)]
-    [InlineData("missing", false, false)]
-    [InlineData("missing", true, true)]
+    [TestMethod]
+    [DataRow("failed", false, false)]
+    [DataRow("passed", false, true)]
+    [DataRow("missing", false, false)]
+    [DataRow("missing", true, true)]
     public async Task ProviderHintHonorsKnownCommandFailureAndMissingRuntimePermission(string receipt, bool allow, bool needsProvider)
     {
         await using var scope = await Scope.OpenAsync();
@@ -161,10 +171,13 @@ public sealed class TaskGraphHostControllerTests
         var profile = new TaskVerificationProfile("build", Environment.ProcessPath!, "sha256:" + new string('a', 64), [], TimeSpan.FromSeconds(5));
         var commit = await new GitTaskWorkspaceManager().ResolveCommitAsync(scope.Source, "HEAD", Ct);
         await scope.Store.AcceptAgentTaskGraphAsync(graph, Owner, 1, new(AgentTaskIdentity.RootRunId(graph.GraphId).Value,
-            scope.Source, commit, scope.Managed, "mock", "model", new(ToolProfile.Coding), new(10, 10)) {
-                DependencyMode = TaskDependencyMode.AcceptedChanges, VerificationAuthority = TaskVerificationAuthority.TrustedLocalProcess,
-                VerificationProfiles = [profile], CommandVerificationRules = [new("build", "build-ok", "build")]
-            }, Ct);
+            scope.Source, commit, scope.Managed, "mock", "model", new(ToolProfile.Coding), new(10, 10))
+        {
+            DependencyMode = TaskDependencyMode.AcceptedChanges,
+            VerificationAuthority = TaskVerificationAuthority.TrustedLocalProcess,
+            VerificationProfiles = [profile],
+            CommandVerificationRules = [new("build", "build-ok", "build")]
+        }, Ct);
         var claim = (await scope.Store.ClaimTaskAsync(graph.GraphId, Owner, Ct))!;
         await scope.Store.RecordTaskResultAsync(claim, new(graph.GraphId, claim.GraphFingerprint, "build",
             WorkflowTaskStatus.AwaitingVerification, "exact-candidate", "Await command verification"), Ct);
@@ -182,17 +195,17 @@ public sealed class TaskGraphHostControllerTests
 
         var required = await host.GetRequiredProviderAsync(graph.GraphId, Owner, Ct, allowLocalVerification: allow);
 
-        Assert.Equal(needsProvider ? "mock" : null, required);
-        Assert.Equal(0, scope.Client.Calls);
-        Assert.Equal(TaskGraphTaskStatus.Pending, (await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks[1].Status);
+        Assert.AreEqual(needsProvider ? "mock" : null, required);
+        Assert.AreEqual(0, scope.Client.Calls);
+        Assert.AreEqual(TaskGraphTaskStatus.Pending, (await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks[1].Status);
     }
 
-    [Theory]
-    [InlineData(AgentRunStatus.Succeeded, "independent", true)]
-    [InlineData(AgentRunStatus.Succeeded, "dependent", true)]
-    [InlineData(AgentRunStatus.Failed, "independent", true)]
-    [InlineData(AgentRunStatus.Failed, "dependent", false)]
-    [InlineData(AgentRunStatus.Succeeded, "none", false)]
+    [TestMethod]
+    [DataRow(AgentRunStatus.Succeeded, "independent", true)]
+    [DataRow(AgentRunStatus.Succeeded, "dependent", true)]
+    [DataRow(AgentRunStatus.Failed, "independent", true)]
+    [DataRow(AgentRunStatus.Failed, "dependent", false)]
+    [DataRow(AgentRunStatus.Succeeded, "none", false)]
     public async Task RecoveryProviderHintIncludesWorkScheduledAfterReusingKnownChildResult(
         AgentRunStatus savedOutcome, string pending, bool needsProvider)
     {
@@ -202,24 +215,21 @@ public sealed class TaskGraphHostControllerTests
         var host = scope.Host();
         await host.PauseAsync(graph.GraphId, Owner, Ct);
 
-        Assert.Equal(needsProvider ? "mock" : null,
-            await host.GetRequiredProviderAsync(graph.GraphId, Owner, Ct, recoverTaskId: "recovered"));
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(needsProvider ? "mock" : null, await host.GetRequiredProviderAsync(graph.GraphId, Owner, Ct, recoverTaskId: "recovered"));
+        Assert.AreEqual(0, scope.Client.Calls);
 
         var recovered = await host.RecoverTaskAsync(graph.GraphId, "recovered", Owner, false, Ct);
 
-        Assert.Equal(needsProvider ? 2 : 0, scope.Client.Calls);
-        Assert.Equal(savedOutcome == AgentRunStatus.Succeeded ? TaskGraphTaskStatus.Succeeded : TaskGraphTaskStatus.Failed,
-            recovered.Tasks.Single(task => task.TaskId == "recovered").Status);
-        Assert.Equal(child.Result!.Status, (await scope.Store.GetAsync(new(child.RunId), Ct))!.Result!.Status);
+        Assert.AreEqual(needsProvider ? 2 : 0, scope.Client.Calls);
+        Assert.AreEqual(savedOutcome == AgentRunStatus.Succeeded ? TaskGraphTaskStatus.Succeeded : TaskGraphTaskStatus.Failed, recovered.Tasks.Single(task => task.TaskId == "recovered").Status);
+        Assert.AreEqual(child.Result!.Status, (await scope.Store.GetAsync(new(child.RunId), Ct))!.Result!.Status);
         if (pending != "none")
-            Assert.Equal(needsProvider ? TaskGraphTaskStatus.Succeeded : TaskGraphTaskStatus.Pending,
-                recovered.Tasks.Single(task => task.TaskId == "next").Status);
+            Assert.AreEqual(needsProvider ? TaskGraphTaskStatus.Succeeded : TaskGraphTaskStatus.Pending, recovered.Tasks.Single(task => task.TaskId == "next").Status);
     }
 
-    [Theory]
-    [InlineData("unknown-tool")]
-    [InlineData("active-child")]
+    [TestMethod]
+    [DataRow("unknown-tool")]
+    [DataRow("active-child")]
     public async Task RecoveryProviderHintDoesNotPredictOtherWorkWhenReclaimMustFail(string blocker)
     {
         await using var scope = await Scope.OpenAsync();
@@ -227,45 +237,51 @@ public sealed class TaskGraphHostControllerTests
         await scope.InterruptWithChildAsync(graph, options, savedOutcome: null, blocker);
         var host = scope.Host();
 
-        Assert.Null(await host.GetRequiredProviderAsync(graph.GraphId, Owner, Ct, recoverTaskId: "recovered"));
-        await Assert.ThrowsAsync<WorkflowReconciliationRequiredException>(() => host.RecoverTaskAsync(graph.GraphId, "recovered", Owner, false, Ct));
-        Assert.Equal(0, scope.Client.Calls);
-        Assert.Equal(TaskGraphTaskStatus.Pending, (await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks.Single(task => task.TaskId == "next").Status);
+        Assert.IsNull(await host.GetRequiredProviderAsync(graph.GraphId, Owner, Ct, recoverTaskId: "recovered"));
+        await Assert.ThrowsExactlyAsync<WorkflowReconciliationRequiredException>(() => host.RecoverTaskAsync(graph.GraphId, "recovered", Owner, false, Ct));
+        Assert.AreEqual(0, scope.Client.Calls);
+        Assert.AreEqual(TaskGraphTaskStatus.Pending, (await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks.Single(task => task.TaskId == "next").Status);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task SavedSuccessfulChildDoesNotUnblockDependentProviderWithoutRequiredVerificationAuthority(bool allow)
     {
         await using var scope = await Scope.OpenAsync();
         var (graph, options) = scope.RecoveryDocument("dependent");
-        graph = graph with { Tasks = graph.Tasks.SetItem(0, graph.Tasks[0] with {
-            AcceptanceCriteria = graph.Tasks[0].AcceptanceCriteria.Add(new("build-ok", "The recovered candidate builds"))
-        }) };
-        options = options with {
+        graph = graph with
+        {
+            Tasks = graph.Tasks.SetItem(0, graph.Tasks[0] with
+            {
+                AcceptanceCriteria = graph.Tasks[0].AcceptanceCriteria.Add(new("build-ok", "The recovered candidate builds"))
+            })
+        };
+        options = options with
+        {
             VerificationAuthority = TaskVerificationAuthority.TrustedLocalProcess,
             VerificationProfiles = [new("build", Environment.ProcessPath!, "sha256:" + new string('a', 64), [], TimeSpan.FromSeconds(5))],
             CommandVerificationRules = [new("recovered", "build-ok", "build")]
         };
         await scope.InterruptWithChildAsync(graph, options, AgentRunStatus.Succeeded);
 
-        Assert.Equal(allow ? "mock" : null, await scope.Host().GetRequiredProviderAsync(graph.GraphId, Owner, Ct,
+        Assert.AreEqual(allow ? "mock" : null, await scope.Host().GetRequiredProviderAsync(graph.GraphId, Owner, Ct,
             recoverTaskId: "recovered", allowLocalVerification: allow));
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Theory]
-    [InlineData("unknown")]
-    [InlineData("duplicate")]
-    [InlineData("numeric-enum")]
-    [InlineData("null")]
-    [InlineData("trailing-comma")]
+    [TestMethod]
+    [DataRow("unknown")]
+    [DataRow("duplicate")]
+    [DataRow("numeric-enum")]
+    [DataRow("null")]
+    [DataRow("trailing-comma")]
     public async Task JsonRejectsAmbiguousOrUnsupportedDocuments(string defect)
     {
         await using var scope = await Scope.OpenAsync();
         var json = TaskGraphDocumentJson.Serialize(scope.Document());
-        json = defect switch {
+        json = defect switch
+        {
             "unknown" => json.Insert(1, "\"unexpected\": true,"),
             "duplicate" => json.Insert(1, "\"SCHEMAVERSION\": 1,"),
             "numeric-enum" => json.Replace("\"Coding\"", "2", StringComparison.Ordinal),
@@ -273,20 +289,20 @@ public sealed class TaskGraphHostControllerTests
             "trailing-comma" => json.Insert(json.LastIndexOf('}'), ","),
             _ => throw new InvalidOperationException()
         };
-        Assert.ThrowsAny<JsonException>(() => TaskGraphDocumentJson.Parse<TaskGraphLaunchDocument>(json));
+        Assert.Throws<JsonException>(() => TaskGraphDocumentJson.Parse<TaskGraphLaunchDocument>(json));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task JsonFileSupportsUtf8BomAndRejectsInvalidOrOversizedInput()
     {
         await using var scope = await Scope.OpenAsync();
         var path = Path.Combine(scope.Root, "launch.json");
         await File.WriteAllTextAsync(path, TaskGraphDocumentJson.Serialize(scope.Document()), new UTF8Encoding(true));
-        Assert.Equal(1, (await TaskGraphDocumentJson.ReadAsync<TaskGraphLaunchDocument>(path, Ct)).SchemaVersion);
+        Assert.AreEqual(1, (await TaskGraphDocumentJson.ReadAsync<TaskGraphLaunchDocument>(path, Ct)).SchemaVersion);
         await File.WriteAllBytesAsync(path, [0xff, 0xfe, 0xfd]);
-        await Assert.ThrowsAsync<DecoderFallbackException>(() => TaskGraphDocumentJson.ReadAsync<TaskGraphLaunchDocument>(path, Ct));
+        await Assert.ThrowsExactlyAsync<DecoderFallbackException>(() => TaskGraphDocumentJson.ReadAsync<TaskGraphLaunchDocument>(path, Ct));
         await File.WriteAllBytesAsync(path, new byte[TaskGraphDocumentJson.MaxDocumentBytes + 1]);
-        await Assert.ThrowsAsync<ArgumentException>(() => TaskGraphDocumentJson.ReadAsync<TaskGraphLaunchDocument>(path, Ct));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => TaskGraphDocumentJson.ReadAsync<TaskGraphLaunchDocument>(path, Ct));
     }
 
     private sealed class Writer : ILlmClient
@@ -336,7 +352,8 @@ public sealed class TaskGraphHostControllerTests
                     AcceptanceCriteria = [new("integrity", "Exact output exists") { ArtifactIds = ["output"] }]
                 }
             ]);
-            return new(graph, new(Source, Managed, "HEAD", "mock", "model", new(ToolProfile.Coding), new(10, 10, 10_000), MaxRounds: 3, MaxOutputTokens: 64) {
+            return new(graph, new(Source, Managed, "HEAD", "mock", "model", new(ToolProfile.Coding), new(10, 10, 10_000), MaxRounds: 3, MaxOutputTokens: 64)
+            {
                 ArtifactVerificationRules = [new("write", "integrity")]
             }, 1);
         }
@@ -345,20 +362,26 @@ public sealed class TaskGraphHostControllerTests
             var document = Document();
             var commit = await new GitTaskWorkspaceManager().ResolveCommitAsync(Source, "HEAD", Ct);
             return await Store.AcceptAgentTaskGraphAsync(document.Graph, Owner, 1, new(AgentTaskIdentity.RootRunId(document.Graph.GraphId).Value,
-                Source, commit, Managed, "mock", "model", new(ToolProfile.Coding), new(10, 10, 10_000), MaxRounds: 3, MaxOutputTokens: 64) {
-                    DependencyMode = TaskDependencyMode.AcceptedChanges, ArtifactVerificationRules = document.Options.ArtifactVerificationRules
-                }, Ct);
+                Source, commit, Managed, "mock", "model", new(ToolProfile.Coding), new(10, 10, 10_000), MaxRounds: 3, MaxOutputTokens: 64)
+            {
+                DependencyMode = TaskDependencyMode.AcceptedChanges,
+                ArtifactVerificationRules = document.Options.ArtifactVerificationRules
+            }, Ct);
         }
         public (WorkflowTaskGraph Graph, TaskGraphAgentOptions Options) RecoveryDocument(string pending)
         {
             var document = Document();
-            var recovered = document.Graph.Tasks[0] with { TaskId = "recovered", Objective = "Inspect the committed source",
+            var recovered = document.Graph.Tasks[0] with
+            {
+                TaskId = "recovered",
+                Objective = "Inspect the committed source",
                 Resources = new() { ReadPaths = ["."] },
                 ExpectedArtifacts = [new("output", "Committed source", TaskArtifactKind.File, "source.txt")]
             };
             var next = document.Graph.Tasks[0] with { TaskId = "next", Dependencies = pending == "dependent" ? ["recovered"] : [] };
             var graph = document.Graph with { Tasks = pending == "none" ? [recovered] : [recovered, next] };
-            return (graph, document.Options with {
+            return (graph, document.Options with
+            {
                 ArtifactVerificationRules = graph.Tasks.Select(task => new TaskArtifactVerificationRule(task.TaskId, "integrity")).ToImmutableArray()
             });
         }
@@ -367,11 +390,14 @@ public sealed class TaskGraphHostControllerTests
         {
             var binding = new TaskGraphAgentBinding(AgentTaskIdentity.RootRunId(graph.GraphId).Value, Source,
                 await new GitTaskWorkspaceManager().ResolveCommitAsync(Source, "HEAD", Ct), Managed, options.Provider,
-                options.Model, options.RootToolPolicy, options.SharedBudget, MaxRounds: options.MaxRounds, MaxOutputTokens: options.MaxOutputTokens) {
-                    DependencyMode = TaskDependencyMode.AcceptedChanges, ArtifactVerificationRules = options.ArtifactVerificationRules,
-                    VerificationAuthority = options.VerificationAuthority, VerificationProfiles = options.VerificationProfiles,
-                    CommandVerificationRules = options.CommandVerificationRules
-                };
+                options.Model, options.RootToolPolicy, options.SharedBudget, MaxRounds: options.MaxRounds, MaxOutputTokens: options.MaxOutputTokens)
+            {
+                DependencyMode = TaskDependencyMode.AcceptedChanges,
+                ArtifactVerificationRules = options.ArtifactVerificationRules,
+                VerificationAuthority = options.VerificationAuthority,
+                VerificationProfiles = options.VerificationProfiles,
+                CommandVerificationRules = options.CommandVerificationRules
+            };
             var accepted = await Store.AcceptAgentTaskGraphAsync(graph, Owner, 1, binding, Ct);
             var claim = (await Store.ClaimTaskAsync(graph.GraphId, Owner, Ct))!;
             var request = AgentTaskBindingValidator.CreateChildRequest(graph, Owner, accepted.AgentBinding!, claim.Task, claim.AttemptId, claim.Inputs);
@@ -397,7 +423,7 @@ public sealed class TaskGraphHostControllerTests
             var error = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
             await output;
-            Assert.True(process.ExitCode == 0, await error);
+            Assert.IsTrue(process.ExitCode == 0, await error);
         }
         public async ValueTask DisposeAsync()
         {

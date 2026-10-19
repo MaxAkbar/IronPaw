@@ -3,9 +3,10 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class SessionLaneSchedulerTests
 {
-    [Fact]
+    [TestMethod]
     public async Task EnqueueAsync_SameSessionKey_RunsSequentially()
     {
         var scheduler = new SessionLaneScheduler();
@@ -32,10 +33,10 @@ public sealed class SessionLaneSchedulerTests
         var second = ScheduleWork(2, 70);
         await Task.WhenAll(first, second);
 
-        Assert.Equal(1, Volatile.Read(ref maxConcurrent));
+        Assert.AreEqual(1, Volatile.Read(ref maxConcurrent));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task EnqueueAsync_DifferentSessionKeys_CanRunInParallel()
     {
         var scheduler = new SessionLaneScheduler();
@@ -61,10 +62,10 @@ public sealed class SessionLaneSchedulerTests
         var second = ScheduleWork("b", 2, 120);
         await Task.WhenAll(first, second);
 
-        Assert.True(Volatile.Read(ref maxConcurrent) >= 2);
+        Assert.IsTrue(Volatile.Read(ref maxConcurrent) >= 2);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task EnqueueAsync_CancelledWaiterReleasesLaneReference()
     {
         using var scheduler = new SessionLaneScheduler();
@@ -74,15 +75,15 @@ public sealed class SessionLaneSchedulerTests
         using var cancellation = new CancellationTokenSource();
         var waiting = scheduler.EnqueueAsync(key, _ => Task.FromResult(2), cancellation.Token);
         cancellation.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => waiting);
         release.SetResult(1);
         await running;
-        Assert.Equal(0, scheduler.ActiveLaneCount);
-        Assert.Equal(3, await scheduler.EnqueueAsync(key, _ => Task.FromResult(3), CancellationToken.None));
-        Assert.Equal(0, scheduler.ActiveLaneCount);
+        Assert.AreEqual(0, scheduler.ActiveLaneCount);
+        Assert.AreEqual(3, await scheduler.EnqueueAsync(key, _ => Task.FromResult(3), CancellationToken.None));
+        Assert.AreEqual(0, scheduler.ActiveLaneCount);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task EnqueueAsync_ConcurrentReusePreservesSerialization()
     {
         using var scheduler = new SessionLaneScheduler();
@@ -96,11 +97,11 @@ public sealed class SessionLaneSchedulerTests
             Interlocked.Decrement(ref active);
             return 1;
         }, CancellationToken.None)));
-        Assert.Equal(1, maximum);
-        Assert.Equal(0, scheduler.ActiveLaneCount);
+        Assert.AreEqual(1, maximum);
+        Assert.AreEqual(0, scheduler.ActiveLaneCount);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Dispose_AllowsExistingCallersToDrain()
     {
         var scheduler = new SessionLaneScheduler();
@@ -109,12 +110,12 @@ public sealed class SessionLaneSchedulerTests
         var running = scheduler.EnqueueAsync(key, _ => release.Task, CancellationToken.None);
         var queued = scheduler.EnqueueAsync(key, _ => Task.FromResult(2), CancellationToken.None);
         scheduler.Dispose();
-        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() =>
             scheduler.EnqueueAsync(key, _ => Task.FromResult(3), CancellationToken.None));
         release.SetResult(1);
-        Assert.Equal(1, await running);
-        Assert.Equal(2, await queued);
-        Assert.Equal(0, scheduler.ActiveLaneCount);
+        Assert.AreEqual(1, await running);
+        Assert.AreEqual(2, await queued);
+        Assert.AreEqual(0, scheduler.ActiveLaneCount);
     }
 
     private static void UpdateMax(ref int maxConcurrent, int value)

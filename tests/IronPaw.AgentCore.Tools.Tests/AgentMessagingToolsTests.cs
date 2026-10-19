@@ -4,9 +4,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class AgentMessagingToolsTests
 {
-    [Fact]
+    [TestMethod]
     public async Task SendAgentMessage_WithoutAgentContext_ReturnsError()
     {
         var registry = new InMemoryAgentRegistry();
@@ -25,12 +26,12 @@ public sealed class AgentMessagingToolsTests
 
         var result = await tool.ExecuteAsync(call, context, CancellationToken.None);
 
-        Assert.True(result.IsError);
+        Assert.IsTrue(result.IsError);
         Assert.Contains("named agent context", result.Content, StringComparison.OrdinalIgnoreCase);
-        Assert.False(bus.SendCalled);
+        Assert.IsFalse(bus.SendCalled);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SendAgentMessage_UnauthorizedRecipient_ReturnsErrorWithoutDispatch()
     {
         var registry = new InMemoryAgentRegistry();
@@ -49,12 +50,12 @@ public sealed class AgentMessagingToolsTests
 
         var result = await tool.ExecuteAsync(call, context, CancellationToken.None);
 
-        Assert.True(result.IsError);
+        Assert.IsTrue(result.IsError);
         Assert.Contains("not authorized", result.Content, StringComparison.OrdinalIgnoreCase);
-        Assert.False(bus.SendCalled);
+        Assert.IsFalse(bus.SendCalled);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReadAgentMessages_UsesScopedContextAndAgentIdentity()
     {
         var bus = new StubMessageBus
@@ -89,22 +90,22 @@ public sealed class AgentMessagingToolsTests
 
         var result = await tool.ExecuteAsync(call, context, CancellationToken.None);
 
-        Assert.False(result.IsError);
-        Assert.True(bus.ReadCalled);
-        Assert.NotNull(bus.LastReadRequest);
-        Assert.Equal("reviewer", bus.LastReadRequest!.RecipientAgentId);
-        Assert.Equal("root-run", bus.LastReadRequest.ScopeRunId.Value);
-        Assert.Equal("root-session", bus.LastReadRequest.SessionKey.Value);
-        Assert.Equal(5, bus.LastReadRequest.MaxMessages);
-        Assert.False(bus.LastReadRequest.MarkAsRead);
+        Assert.IsFalse(result.IsError);
+        Assert.IsTrue(bus.ReadCalled);
+        Assert.IsNotNull(bus.LastReadRequest);
+        Assert.AreEqual("reviewer", bus.LastReadRequest!.RecipientAgentId);
+        Assert.AreEqual("root-run", bus.LastReadRequest.ScopeRunId.Value);
+        Assert.AreEqual("root-session", bus.LastReadRequest.SessionKey.Value);
+        Assert.AreEqual(5, bus.LastReadRequest.MaxMessages);
+        Assert.IsFalse(bus.LastReadRequest.MarkAsRead);
 
         using var payload = JsonDocument.Parse(result.Content);
-        Assert.Equal(JsonValueKind.Array, payload.RootElement.ValueKind);
-        Assert.Single(payload.RootElement.EnumerateArray());
+        Assert.AreEqual(JsonValueKind.Array, payload.RootElement.ValueKind);
+        Assert.ContainsSingle(payload.RootElement.EnumerateArray());
         var first = payload.RootElement.EnumerateArray().First();
-        Assert.Equal("codegen", first.GetProperty("sender_agent_id").GetString());
-        Assert.Equal("reviewer", first.GetProperty("recipient_agent_id").GetString());
-        Assert.Equal("please validate tests", first.GetProperty("content").GetString());
+        Assert.AreEqual("codegen", first.GetProperty("sender_agent_id").GetString());
+        Assert.AreEqual("reviewer", first.GetProperty("recipient_agent_id").GetString());
+        Assert.AreEqual("please validate tests", first.GetProperty("content").GetString());
     }
 
     private static AgentDefinition CreateAgent(string agentId, IReadOnlyCollection<string>? allowedSenders = null)

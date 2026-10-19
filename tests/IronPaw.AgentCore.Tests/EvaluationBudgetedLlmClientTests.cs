@@ -5,32 +5,33 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class EvaluationBudgetedLlmClientTests
 {
-    [Fact]
+    [TestMethod]
     public async Task ReservesBeforeDispatchAndPersistsFullResponseBeforeDelivery()
     {
         var settings = Settings();
         var store = new Store(settings);
         var inner = new Client([new AssistantTextDelta("answer"), new UsageDelta(20, 4, null, null), new CompletedDelta()]);
-        inner.OnStart = () => Assert.Equal(LiveEvaluationRequestState.Started, Assert.Single(store.Checkpoint.Requests).State);
+        inner.OnStart = () => Assert.AreEqual(LiveEvaluationRequestState.Started, Assert.ContainsSingle(store.Checkpoint.Requests).State);
         var original = Request();
         var wrapper = Wrapper(inner, store, settings);
 
         await foreach (var delta in wrapper.StreamAsync(original, default))
-            Assert.Equal(LiveEvaluationRequestState.Completed, Assert.Single(store.Checkpoint.Requests).State);
+            Assert.AreEqual(LiveEvaluationRequestState.Completed, Assert.ContainsSingle(store.Checkpoint.Requests).State);
 
-        var record = Assert.Single(store.Checkpoint.Requests);
-        Assert.Equal(0.0237m, record.Request.ReservedSpend);
-        Assert.Equal(0.000033m, record.Receipt!.ActualSpend); // Inclusive OpenAI input conservatively uses maximum input rate.
-        Assert.Equal(0, inner.LastRequest!.MaxAutoContinuationPasses);
-        Assert.Equal(3, original.MaxAutoContinuationPasses);
-        Assert.Equal(JsonSerializer.Serialize(original.Messages), JsonSerializer.Serialize(inner.LastRequest.Messages));
-        Assert.Equal(JsonSerializer.Serialize(original.Tools), JsonSerializer.Serialize(inner.LastRequest.Tools));
+        var record = Assert.ContainsSingle(store.Checkpoint.Requests);
+        Assert.AreEqual(0.0237m, record.Request.ReservedSpend);
+        Assert.AreEqual(0.000033m, record.Receipt!.ActualSpend); // Inclusive OpenAI input conservatively uses maximum input rate.
+        Assert.AreEqual(0, inner.LastRequest!.MaxAutoContinuationPasses);
+        Assert.AreEqual(3, original.MaxAutoContinuationPasses);
+        Assert.AreEqual(JsonSerializer.Serialize(original.Messages), JsonSerializer.Serialize(inner.LastRequest.Messages));
+        Assert.AreEqual(JsonSerializer.Serialize(original.Tools), JsonSerializer.Serialize(inner.LastRequest.Tools));
         Assert.Contains("inclusive-input-at-maximum", record.Receipt.EvidenceJson);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CompletedResponseReplaysAfterRestartWithoutPaidRedispatch()
     {
         var settings = Settings(); var store = new Store(settings);
@@ -40,33 +41,34 @@ public sealed class EvaluationBudgetedLlmClientTests
         var first = await Read(Wrapper(inner, store, settings), Request());
         var second = await Read(Wrapper(inner, store, settings), Request());
 
-        Assert.Equal(JsonSerializer.Serialize(first.Select(Describe)), JsonSerializer.Serialize(second.Select(Describe)));
-        Assert.Equal(1, inner.Calls);
-        Assert.Single(store.Checkpoint.Requests);
+        Assert.AreEqual(JsonSerializer.Serialize(first.Select(Describe)), JsonSerializer.Serialize(second.Select(Describe)));
+        Assert.AreEqual(1, inner.Calls);
+        Assert.ContainsSingle(store.Checkpoint.Requests);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AnthropicChargesDisjointInputAndCacheCategories()
     {
         var settings = Settings() with { Provider = "anthropic" }; var store = new Store(settings);
         var inner = new Client([new UsageDelta(10, 4, 20, 30), new CompletedDelta()]);
 
-        Assert.IsType<CompletedDelta>((await Read(Wrapper(inner, store, settings), Request("anthropic")))[^1]);
+        Assert.IsExactInstanceOfType<CompletedDelta>((await Read(Wrapper(inner, store, settings), Request("anthropic")))[^1]);
 
-        Assert.Equal(0.0000575m, Assert.Single(store.Checkpoint.Requests).Receipt!.ActualSpend);
+        Assert.AreEqual(0.0000575m, Assert.ContainsSingle(store.Checkpoint.Requests).Receipt!.ActualSpend);
     }
 
-    [Theory]
-    [InlineData("missing-input")]
-    [InlineData("missing-output")]
-    [InlineData("missing-completed")]
-    [InlineData("negative")]
-    [InlineData("overflow")]
-    [InlineData("provider-error")]
-    [InlineData("after-completed")]
+    [TestMethod]
+    [DataRow("missing-input")]
+    [DataRow("missing-output")]
+    [DataRow("missing-completed")]
+    [DataRow("negative")]
+    [DataRow("overflow")]
+    [DataRow("provider-error")]
+    [DataRow("after-completed")]
     public async Task IncompleteOrInvalidUsageRetainsFullReservationAndNeverReplays(string defect)
     {
-        LlmDelta[] deltas = defect switch {
+        LlmDelta[] deltas = defect switch
+        {
             "missing-input" => [new AssistantTextDelta("partial"), new UsageDelta(null, 4, null, null), new CompletedDelta()],
             "missing-output" => [new UsageDelta(20, null, null, null), new CompletedDelta()],
             "missing-completed" => [new UsageDelta(20, 4, null, null)],
@@ -77,127 +79,146 @@ public sealed class EvaluationBudgetedLlmClientTests
         };
         var settings = Settings(); var store = new Store(settings); var inner = new Client(deltas);
         var result = await Read(Wrapper(inner, store, settings), Request());
-        var record = Assert.Single(store.Checkpoint.Requests);
+        var record = Assert.ContainsSingle(store.Checkpoint.Requests);
 
-        Assert.IsType<LlmErrorDelta>(Assert.Single(result));
-        Assert.Equal(LiveEvaluationRequestState.NeedsReconciliation, record.State);
-        Assert.Equal(Math.Max(record.Request.ReservedSpend, record.Receipt!.ActualSpend), record.ChargedSpend);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Read(Wrapper(inner, store, settings), Request()));
-        Assert.Equal(1, inner.Calls);
+        Assert.IsExactInstanceOfType<LlmErrorDelta>(Assert.ContainsSingle(result));
+        Assert.AreEqual(LiveEvaluationRequestState.NeedsReconciliation, record.State);
+        Assert.AreEqual(Math.Max(record.Request.ReservedSpend, record.Receipt!.ActualSpend), record.ChargedSpend);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => Read(Wrapper(inner, store, settings), Request()));
+        Assert.AreEqual(1, inner.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AnthropicMissingCacheUsageIsUnknown()
     {
         var settings = Settings() with { Provider = "anthropic" }; var store = new Store(settings);
         var inner = new Client([new UsageDelta(20, 4, null, 0), new CompletedDelta()]);
-        Assert.IsType<LlmErrorDelta>(Assert.Single(await Read(Wrapper(inner, store, settings), Request("anthropic"))));
-        Assert.True(store.Checkpoint.NeedsReconciliation);
+        Assert.IsExactInstanceOfType<LlmErrorDelta>(Assert.ContainsSingle(await Read(Wrapper(inner, store, settings), Request("anthropic"))));
+        Assert.IsTrue(store.Checkpoint.NeedsReconciliation);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task ExceptionOrCancellationPersistsUnknownUsingIndependentToken(bool cancel)
     {
         var settings = Settings(); var store = new Store(settings); using var cts = new CancellationTokenSource();
-        var inner = new Client([new AssistantTextDelta("uncommitted")]) { ThrowAfter = cancel
+        var inner = new Client([new AssistantTextDelta("uncommitted")])
+        {
+            ThrowAfter = cancel
             ? () => { cts.Cancel(); return new OperationCanceledException(cts.Token); }
-            : () => new IOException("dropped") };
+            : () => new IOException("dropped")
+        };
         var wrapper = Wrapper(inner, store, settings);
 
-        await Assert.ThrowsAnyAsync<Exception>(() => Read(wrapper, Request(), cts.Token));
+        await Assert.ThrowsAsync<Exception>(() => Read(wrapper, Request(), cts.Token));
 
-        Assert.True(store.Checkpoint.NeedsReconciliation);
-        Assert.False(store.CompletionTokenWasCancelled);
-        Assert.Null(JsonDocument.Parse(Assert.Single(store.Checkpoint.Requests).Receipt!.EvidenceJson).RootElement.GetProperty("response").Deserialize<object>());
+        Assert.IsTrue(store.Checkpoint.NeedsReconciliation);
+        Assert.IsFalse(store.CompletionTokenWasCancelled);
+        Assert.IsNull(JsonDocument.Parse(Assert.ContainsSingle(store.Checkpoint.Requests).Receipt!.EvidenceJson).RootElement.GetProperty("response").Deserialize<object>());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OversizedResponseDoesNotEscapeOrCauseAutomaticRedispatch()
     {
         var settings = Settings(); var store = new Store(settings);
         var inner = new Client([new AssistantTextDelta(new string('x', EvaluationBudgetedLlmClient.MaxResponseBytes + 1)), new CompletedDelta()]);
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => Read(Wrapper(inner, store, settings), Request()));
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => Read(Wrapper(inner, store, settings), Request()));
 
-        Assert.True(store.Checkpoint.NeedsReconciliation);
-        Assert.Equal(1, inner.Calls);
+        Assert.IsTrue(store.Checkpoint.NeedsReconciliation);
+        Assert.AreEqual(1, inner.Calls);
     }
 
-    [Theory]
-    [InlineData("provider")]
-    [InlineData("case")]
-    [InlineData("model")]
-    [InlineData("output")]
-    [InlineData("input")]
+    [TestMethod]
+    [DataRow("provider")]
+    [DataRow("case")]
+    [DataRow("model")]
+    [DataRow("output")]
+    [DataRow("input")]
     public async Task RejectsUnboundRequestsBeforeReservationOrProvider(string defect)
     {
         var settings = Settings(); var store = new Store(settings); var inner = new Client([]);
-        var request = defect switch {
-            "provider" => Request("anthropic"), "case" => Request("OPENAI"),
-            "model" => Request() with { Model = "alias" }, "output" => Request() with { MaxOutputTokens = 1001 },
+        var request = defect switch
+        {
+            "provider" => Request("anthropic"),
+            "case" => Request("OPENAI"),
+            "model" => Request() with { Model = "alias" },
+            "output" => Request() with { MaxOutputTokens = 1001 },
             _ => Request() with { SystemPrompt = new string('x', 10001) }
         };
 
-        await Assert.ThrowsAsync<ArgumentException>(() => Read(Wrapper(inner, store, settings), request));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => Read(Wrapper(inner, store, settings), request));
 
-        Assert.Empty(store.Checkpoint.Requests); Assert.Equal(0, inner.Calls);
+        Assert.IsEmpty(store.Checkpoint.Requests); Assert.AreEqual(0, inner.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public void ChangedPricesCannotReuseFrozenBinding()
     {
-        var settings = Settings(); var store = new Store(settings); var changed = settings with {
+        var settings = Settings(); var store = new Store(settings); var changed = settings with
+        {
             Pricing = settings.Pricing! with { InputPerMillion = 0.5m }
         };
-        Assert.Throws<ArgumentException>(() => new EvaluationBudgetedLlmClient(new Client([]), store, changed,
+        Assert.ThrowsExactly<ArgumentException>(() => new EvaluationBudgetedLlmClient(new Client([]), store, changed,
             "campaign", "trial", "direct", Owner, store.Checkpoint.Definition.BindingJson));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ChangedCampaignBindingFailsBeforePaidAdmission()
     {
         var settings = Settings(); var store = new Store(settings); var inner = new Client([]);
         var wrapper = Wrapper(inner, store, settings);
         store.Checkpoint = store.Checkpoint with { Definition = store.Checkpoint.Definition with { BindingJson = "{}" } };
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Read(wrapper, Request()));
-        Assert.Equal(0, inner.Calls);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => Read(wrapper, Request()));
+        Assert.AreEqual(0, inner.Calls);
     }
 
-    [Theory]
-    [InlineData(10001, 4)]
-    [InlineData(20, 101)]
+    [TestMethod]
+    [DataRow(10001, 4)]
+    [DataRow(20, 101)]
     public async Task CompleteUsageBeyondDeclaredCeilingsIsRecordedAndBlocksLaterAdmissions(long input, long output)
     {
         var settings = Settings(); var store = new Store(settings);
         var inner = new Client([new UsageDelta(input, output, null, null), new CompletedDelta()]);
         await Read(Wrapper(inner, store, settings), Request());
-        var receipt = Assert.Single(store.Checkpoint.Requests).Receipt!;
-        Assert.True(receipt.UsageComplete); Assert.True(receipt.ReservationAssumptionsExceeded);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Read(Wrapper(inner, store, settings), Request() with { RunId = RunId.New() }));
-        Assert.Equal(1, inner.Calls);
+        var receipt = Assert.ContainsSingle(store.Checkpoint.Requests).Receipt!;
+        Assert.IsTrue(receipt.UsageComplete); Assert.IsTrue(receipt.ReservationAssumptionsExceeded);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => Read(Wrapper(inner, store, settings), Request() with { RunId = RunId.New() }));
+        Assert.AreEqual(1, inner.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CorruptCompletedResponseDoesNotCausePaidRetry()
     {
         var settings = Settings(); var store = new Store(settings);
         var inner = new Client([new UsageDelta(20, 4, null, null), new CompletedDelta()]);
         await Read(Wrapper(inner, store, settings), Request());
-        var record = Assert.Single(store.Checkpoint.Requests);
+        var record = Assert.ContainsSingle(store.Checkpoint.Requests);
         store.Checkpoint = store.Checkpoint with { Requests = [record with { Receipt = record.Receipt! with { EvidenceJson = "{}" } }] };
-        await Assert.ThrowsAsync<InvalidDataException>(() => Read(Wrapper(inner, store, settings), Request()));
-        Assert.Equal(1, inner.Calls);
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => Read(Wrapper(inner, store, settings), Request()));
+        Assert.AreEqual(1, inner.Calls);
     }
 
     private static readonly CallerIdentity Owner = new("owner", "Owner", true);
-    private static LiveEvaluationSettings Settings() => new() {
-        Enabled = true, Provider = "openai", Model = "exact", MaxTotalSpend = 1m, MaxInputTokensPerRequest = 10000,
-        MaxOutputTokensPerRequest = 1000, InputFramingTokenAllowance = 1024,
-        Pricing = new() { InputPerMillion = 1m, OutputPerMillion = 2m, CacheReadPerMillion = 0.1m,
-            CacheWritePerMillion = 1.25m, Source = "supplied fixture prices",
-            AsOfUtc = new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero) }
+    private static LiveEvaluationSettings Settings() => new()
+    {
+        Enabled = true,
+        Provider = "openai",
+        Model = "exact",
+        MaxTotalSpend = 1m,
+        MaxInputTokensPerRequest = 10000,
+        MaxOutputTokensPerRequest = 1000,
+        InputFramingTokenAllowance = 1024,
+        Pricing = new()
+        {
+            InputPerMillion = 1m,
+            OutputPerMillion = 2m,
+            CacheReadPerMillion = 0.1m,
+            CacheWritePerMillion = 1.25m,
+            Source = "supplied fixture prices",
+            AsOfUtc = new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero)
+        }
     };
     private static LlmRequest Request(string provider = "openai") => new(new RunId("stable-run"), new SessionKey("test"),
         provider, "exact", "system", [new ChatMessage(ChatRole.User, "input")], [], TimeSpan.FromMinutes(1), 100, 3);
@@ -255,8 +276,12 @@ public sealed class EvaluationBudgetedLlmClientTests
         {
             CompletionTokenWasCancelled = ct.IsCancellationRequested;
             var index = Enumerable.Range(0, Checkpoint.Requests.Length).Single(index => Checkpoint.Requests[index].Request.RequestId == requestId);
-            var record = Checkpoint.Requests[index] with { State = receipt.UsageComplete ? LiveEvaluationRequestState.Completed : LiveEvaluationRequestState.NeedsReconciliation,
-                Receipt = receipt, CompletedAt = receipt.UsageComplete ? DateTimeOffset.UtcNow : null };
+            var record = Checkpoint.Requests[index] with
+            {
+                State = receipt.UsageComplete ? LiveEvaluationRequestState.Completed : LiveEvaluationRequestState.NeedsReconciliation,
+                Receipt = receipt,
+                CompletedAt = receipt.UsageComplete ? DateTimeOffset.UtcNow : null
+            };
             Checkpoint = Checkpoint with { Requests = Checkpoint.Requests.SetItem(index, record) };
             return Task.FromResult(Checkpoint);
         }

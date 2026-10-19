@@ -4,9 +4,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class WebToolsTests
 {
-    [Fact]
+    [TestMethod]
     public async Task WebNavigateTool_InvalidAction_ReturnsError()
     {
         var browser = new StubWebBrowserService();
@@ -22,12 +23,12 @@ public sealed class WebToolsTests
 
         var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-        Assert.True(result.IsError);
+        Assert.IsTrue(result.IsError);
         Assert.Contains("Invalid action", result.Content, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(browser.LastNavigationRequest);
+        Assert.IsNull(browser.LastNavigationRequest);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task WebNavigateTool_Success_UsesGeneratedSessionAndUntrustedTrust()
     {
         var browser = new StubWebBrowserService();
@@ -44,16 +45,16 @@ public sealed class WebToolsTests
         var context = CreateContext();
         var result = await tool.ExecuteAsync(call, context, CancellationToken.None);
 
-        Assert.False(result.IsError);
-        Assert.Equal(ContentTrust.Untrusted, result.Trust);
-        Assert.NotNull(browser.LastNavigationRequest);
-        Assert.Equal(WebNavigationAction.Open, browser.LastNavigationRequest!.Action);
-        Assert.Equal("https://example.com", browser.LastNavigationRequest.Url);
+        Assert.IsFalse(result.IsError);
+        Assert.AreEqual(ContentTrust.Untrusted, result.Trust);
+        Assert.IsNotNull(browser.LastNavigationRequest);
+        Assert.AreEqual(WebNavigationAction.Open, browser.LastNavigationRequest!.Action);
+        Assert.AreEqual("https://example.com", browser.LastNavigationRequest.Url);
         Assert.Contains(context.ScopeRunId.Value, browser.LastNavigationRequest.SessionId, StringComparison.Ordinal);
         Assert.Contains(context.ScopeSessionKey.Value, browser.LastNavigationRequest.SessionId, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task WebNavigateTool_PassesCssSelectors()
     {
         var browser = new StubWebBrowserService();
@@ -75,13 +76,13 @@ public sealed class WebToolsTests
 
         var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-        Assert.False(result.IsError);
-        Assert.NotNull(browser.LastNavigationRequest);
-        Assert.Equal("form.search", browser.LastNavigationRequest!.FormSelector);
-        Assert.Equal("ironpaw", browser.LastNavigationRequest.Fields!["q"]);
+        Assert.IsFalse(result.IsError);
+        Assert.IsNotNull(browser.LastNavigationRequest);
+        Assert.AreEqual("form.search", browser.LastNavigationRequest!.FormSelector);
+        Assert.AreEqual("ironpaw", browser.LastNavigationRequest.Fields!["q"]);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task WebExtractStructuredTool_InvalidMaxItems_ReturnsError()
     {
         var browser = new StubWebBrowserService();
@@ -96,12 +97,12 @@ public sealed class WebToolsTests
 
         var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-        Assert.True(result.IsError);
+        Assert.IsTrue(result.IsError);
         Assert.Contains("max_items", result.Content, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(browser.LastStructuredRequest);
+        Assert.IsNull(browser.LastStructuredRequest);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task WebExtractStructuredTool_Success_ReturnsUntrustedTrust()
     {
         var browser = new StubWebBrowserService();
@@ -119,13 +120,13 @@ public sealed class WebToolsTests
 
         var result = await tool.ExecuteAsync(call, CreateContext(agentId: "web_browser"), CancellationToken.None);
 
-        Assert.False(result.IsError);
-        Assert.Equal(ContentTrust.Untrusted, result.Trust);
-        Assert.NotNull(browser.LastStructuredRequest);
-        Assert.Equal(3, browser.LastStructuredRequest!.MaxItems);
+        Assert.IsFalse(result.IsError);
+        Assert.AreEqual(ContentTrust.Untrusted, result.Trust);
+        Assert.IsNotNull(browser.LastStructuredRequest);
+        Assert.AreEqual(3, browser.LastStructuredRequest!.MaxItems);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task WebExtractStructuredTool_PassesCssSelectors()
     {
         var browser = new StubWebBrowserService();
@@ -143,11 +144,11 @@ public sealed class WebToolsTests
 
         var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-        Assert.False(result.IsError);
-        Assert.NotNull(browser.LastStructuredRequest);
-        Assert.Equal("#main", browser.LastStructuredRequest!.RootSelector);
-        Assert.Equal("table.metrics", browser.LastStructuredRequest.TableSelector);
-        Assert.Equal("ul.items", browser.LastStructuredRequest.ListSelector);
+        Assert.IsFalse(result.IsError);
+        Assert.IsNotNull(browser.LastStructuredRequest);
+        Assert.AreEqual("#main", browser.LastStructuredRequest!.RootSelector);
+        Assert.AreEqual("table.metrics", browser.LastStructuredRequest.TableSelector);
+        Assert.AreEqual("ul.items", browser.LastStructuredRequest.ListSelector);
     }
 
     private static ToolExecutionContext CreateContext(string? agentId = "web_browser")

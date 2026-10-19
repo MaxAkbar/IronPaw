@@ -10,21 +10,24 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class TaskCommandVerificationIntegrationTests
 {
     private static readonly CallerIdentity Owner = new("verification-owner", "Verification owner", true);
     private static readonly CancellationToken Ct = CancellationToken.None;
 
-    [Fact]
+    [TestMethod]
     public async Task MixedIntegrityAndCommandCriteria_AcceptOnlyWithBoundReceipts_AndNeverReplayCompletedWork()
     {
         await using var scope = await Scope.OpenAsync();
         var graph = Graph();
         var verificationSpans = new ConcurrentQueue<Activity>();
-        using var listener = new ActivityListener {
+        using var listener = new ActivityListener
+        {
             ShouldListenTo = source => source.Name == ExecutionDiagnostics.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-            ActivityStopped = span => {
+            ActivityStopped = span =>
+            {
                 if (span.OperationName == "ironpaw.verification" && Equals(span.GetTagItem("ironpaw.graph.id"), graph.GraphId)) verificationSpans.Enqueue(span);
             }
         };
@@ -32,40 +35,40 @@ public sealed class TaskCommandVerificationIntegrationTests
         var client = new WriterClient();
         var worker = new Worker((job, _) =>
         {
-            Assert.NotEqual(Path.GetDirectoryName(job.Result.Artifacts[0].Location), job.Copy.WorkspacePath);
-            Assert.Equal("verified candidate", File.ReadAllText(Path.Combine(job.Copy.WorkspacePath, "result.txt")));
+            Assert.AreNotEqual(Path.GetDirectoryName(job.Result.Artifacts[0].Location), job.Copy.WorkspacePath);
+            Assert.AreEqual("verified candidate", File.ReadAllText(Path.Combine(job.Copy.WorkspacePath, "result.txt")));
             return Task.FromResult(Completion(TaskCommandOutcome.Passed));
         });
         var completed = await scope.Runner(client, worker).StartAsync(graph, Owner, 1, scope.Options(), Ct);
 
-        Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
-        var state = Assert.Single(completed.Tasks);
-        Assert.Equal(TaskAcceptanceOutcome.Accepted, state.Acceptance!.Outcome);
-        var receipt = Assert.Single(state.Verifications);
-        Assert.Equal(TaskVerificationInvocationState.Completed, receipt.State);
-        Assert.Equal(TaskCommandOutcome.Passed, receipt.Completion!.Outcome);
-        Assert.Equal(state.Result!.Revision, receipt.Revision);
-        Assert.Equal(TaskInputIdentity.ResultDigest(state.Result), receipt.ResultDigest);
-        Assert.Equal(TaskVerificationIdentity.ProfileFingerprint(completed.AgentBinding!.VerificationProfiles[0]), receipt.ProfileFingerprint);
-        Assert.Equal(2, client.Calls);
-        Assert.Single(worker.Jobs);
-        var verificationSpan = Assert.Single(verificationSpans);
-        Assert.Equal(receipt.InvocationId, verificationSpan.GetTagItem("ironpaw.verification.invocation_id"));
-        Assert.Equal(receipt.Revision, verificationSpan.GetTagItem("ironpaw.revision"));
-        Assert.Equal("completed", verificationSpan.GetTagItem("ironpaw.outcome"));
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
+        var state = Assert.ContainsSingle(completed.Tasks);
+        Assert.AreEqual(TaskAcceptanceOutcome.Accepted, state.Acceptance!.Outcome);
+        var receipt = Assert.ContainsSingle(state.Verifications);
+        Assert.AreEqual(TaskVerificationInvocationState.Completed, receipt.State);
+        Assert.AreEqual(TaskCommandOutcome.Passed, receipt.Completion!.Outcome);
+        Assert.AreEqual(state.Result!.Revision, receipt.Revision);
+        Assert.AreEqual(TaskInputIdentity.ResultDigest(state.Result), receipt.ResultDigest);
+        Assert.AreEqual(TaskVerificationIdentity.ProfileFingerprint(completed.AgentBinding!.VerificationProfiles[0]), receipt.ProfileFingerprint);
+        Assert.AreEqual(2, client.Calls);
+        Assert.ContainsSingle(worker.Jobs);
+        var verificationSpan = Assert.ContainsSingle(verificationSpans);
+        Assert.AreEqual(receipt.InvocationId, verificationSpan.GetTagItem("ironpaw.verification.invocation_id"));
+        Assert.AreEqual(receipt.Revision, verificationSpan.GetTagItem("ironpaw.revision"));
+        Assert.AreEqual("completed", verificationSpan.GetTagItem("ironpaw.outcome"));
         await scope.ReopenAsync();
 
         var replayClient = new WriterClient();
         var replayWorker = new Worker((_, _) => throw new InvalidOperationException("Durable verification was repeated."));
         var replay = await scope.Runner(replayClient, replayWorker).ResumeAsync(graph.GraphId, Owner, Ct);
-        Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(replay).Status);
-        Assert.Equal(0, replayClient.Calls);
-        Assert.Empty(replayWorker.Jobs);
-        Assert.Single(verificationSpans);
-        Assert.Equal(receipt, Assert.Single(replay.Tasks[0].Verifications));
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(replay).Status);
+        Assert.AreEqual(0, replayClient.Calls);
+        Assert.IsEmpty(replayWorker.Jobs);
+        Assert.ContainsSingle(verificationSpans);
+        Assert.AreEqual(receipt, Assert.ContainsSingle(replay.Tasks[0].Verifications));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task FailedCommand_RejectsCandidate_AndPreservesCommandEvidence()
     {
         await using var scope = await Scope.OpenAsync();
@@ -73,14 +76,14 @@ public sealed class TaskCommandVerificationIntegrationTests
 
         var rejected = await scope.Runner(new WriterClient(), worker).StartAsync(Graph(), Owner, 1, scope.Options(), Ct);
 
-        var state = Assert.Single(rejected.Tasks);
-        Assert.Equal(TaskGraphRunStatus.Failed, TaskGraphProgress.Inspect(rejected).Status);
-        Assert.Equal(TaskAcceptanceOutcome.Rejected, state.Acceptance!.Outcome);
-        Assert.Equal(7, Assert.Single(state.Verifications).Completion!.ExitCode);
-        Assert.Equal("verified candidate", await File.ReadAllTextAsync(Assert.Single(state.Result!.Artifacts).Location));
+        var state = Assert.ContainsSingle(rejected.Tasks);
+        Assert.AreEqual(TaskGraphRunStatus.Failed, TaskGraphProgress.Inspect(rejected).Status);
+        Assert.AreEqual(TaskAcceptanceOutcome.Rejected, state.Acceptance!.Outcome);
+        Assert.AreEqual(7, Assert.ContainsSingle(state.Verifications).Completion!.ExitCode);
+        Assert.AreEqual("verified candidate", await File.ReadAllTextAsync(Assert.ContainsSingle(state.Result!.Artifacts).Location));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task UnknownCommand_RequiresExplicitReconciliation_ResumeDoesNotRerunProcessOrProvider()
     {
         await using var scope = await Scope.OpenAsync();
@@ -89,47 +92,47 @@ public sealed class TaskCommandVerificationIntegrationTests
         var worker = new Worker((_, _) => Task.FromResult(Completion(TaskCommandOutcome.NeedsReconciliation, exitCode: null)));
         var runner = scope.Runner(client, worker);
         var unknown = await runner.StartAsync(graph, Owner, 1, scope.Options(), Ct);
-        var receipt = Assert.Single(Assert.Single(unknown.Tasks).Verifications);
-        Assert.Equal(TaskVerificationInvocationState.NeedsReconciliation, receipt.State);
-        Assert.Equal(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(unknown).Status);
+        var receipt = Assert.ContainsSingle(Assert.ContainsSingle(unknown.Tasks).Verifications);
+        Assert.AreEqual(TaskVerificationInvocationState.NeedsReconciliation, receipt.State);
+        Assert.AreEqual(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(unknown).Status);
 
         var resumed = await runner.ResumeAsync(graph.GraphId, Owner, Ct);
-        Assert.Equal(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(resumed).Status);
-        Assert.Single(worker.Jobs);
-        Assert.Equal(2, client.Calls);
+        Assert.AreEqual(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(resumed).Status);
+        Assert.ContainsSingle(worker.Jobs);
+        Assert.AreEqual(2, client.Calls);
 
         await runner.ReconcileVerificationAsync(graph.GraphId, "task", receipt.InvocationId,
             Completion(TaskCommandOutcome.Passed), "Inspected completed process output and exit status.", Owner, Ct);
         var completed = await runner.ResumeAsync(graph.GraphId, Owner, Ct);
-        Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
-        Assert.Single(worker.Jobs);
-        Assert.Equal(2, client.Calls);
-        Assert.Equal("Inspected completed process output and exit status.", Assert.Single(completed.Tasks[0].Verifications).ReconciliationNote);
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(completed).Status);
+        Assert.ContainsSingle(worker.Jobs);
+        Assert.AreEqual(2, client.Calls);
+        Assert.AreEqual("Inspected completed process output and exit status.", Assert.ContainsSingle(completed.Tasks[0].Verifications).ReconciliationNote);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReopenedStartedInvocation_IsUnknown_AndNeverExecutesAutomatically()
     {
         await using var scope = await Scope.OpenAsync();
         var graph = Graph();
         var worker = new Worker((_, _) => throw new InvalidOperationException("Process outcome was lost."));
         var interrupted = await scope.Runner(new WriterClient(), worker).StartAsync(graph, Owner, 1, scope.Options(), Ct);
-        var invocationId = Assert.Single(Assert.Single(interrupted.Tasks).Verifications).InvocationId;
+        var invocationId = Assert.ContainsSingle(Assert.ContainsSingle(interrupted.Tasks).Verifications).InvocationId;
         await scope.ReopenAsync();
         var unusedClient = new WriterClient();
         var unusedWorker = new Worker((_, _) => throw new InvalidOperationException("Unknown process was repeated."));
 
         var resumed = await scope.Runner(unusedClient, unusedWorker).ResumeAsync(graph.GraphId, Owner, Ct);
 
-        Assert.Equal(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(resumed).Status);
-        var invocation = Assert.Single(Assert.Single(resumed.Tasks).Verifications);
-        Assert.Equal(invocationId, invocation.InvocationId);
-        Assert.Equal(TaskVerificationInvocationState.NeedsReconciliation, invocation.State);
-        Assert.Equal(0, unusedClient.Calls);
-        Assert.Empty(unusedWorker.Jobs);
+        Assert.AreEqual(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(resumed).Status);
+        var invocation = Assert.ContainsSingle(Assert.ContainsSingle(resumed.Tasks).Verifications);
+        Assert.AreEqual(invocationId, invocation.InvocationId);
+        Assert.AreEqual(TaskVerificationInvocationState.NeedsReconciliation, invocation.State);
+        Assert.AreEqual(0, unusedClient.Calls);
+        Assert.IsEmpty(unusedWorker.Jobs);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ChangedAcceptedProfile_IsRejectedBeforeEitherProviderOrWorkerRunsAgain()
     {
         await using var scope = await Scope.OpenAsync();
@@ -140,29 +143,29 @@ public sealed class TaskCommandVerificationIntegrationTests
         var client = new WriterClient();
         var worker = new Worker((_, _) => throw new InvalidOperationException("Changed binding executed."));
 
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => scope.Runner(client, worker).StartAsync(graph, Owner, 1,
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => scope.Runner(client, worker).StartAsync(graph, Owner, 1,
             options with { VerificationProfiles = [options.VerificationProfiles[0] with { Arguments = ["--info"] }] }, Ct));
 
-        Assert.Equal(0, client.Calls);
-        Assert.Empty(worker.Jobs);
-        Assert.Single((await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks[0].Verifications);
+        Assert.AreEqual(0, client.Calls);
+        Assert.IsEmpty(worker.Jobs);
+        Assert.ContainsSingle((await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks[0].Verifications);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task MissingWorker_RejectsNewGraphBeforeAcceptance()
     {
         await using var scope = await Scope.OpenAsync();
         var graph = Graph();
         var client = new WriterClient();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Runner(client).StartAsync(graph, Owner, 1, scope.Options(), Ct));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => scope.Runner(client).StartAsync(graph, Owner, 1, scope.Options(), Ct));
 
-        Assert.Null(await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct));
-        Assert.Empty(await scope.Store.ListAsync(Ct));
-        Assert.Equal(0, client.Calls);
+        Assert.IsNull(await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct));
+        Assert.IsEmpty(await scope.Store.ListAsync(Ct));
+        Assert.AreEqual(0, client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task MissingWorker_CanReadExistingUnknownCommandWithoutAdmittingFurtherWork()
     {
         await using var scope = await Scope.OpenAsync();
@@ -174,15 +177,15 @@ public sealed class TaskCommandVerificationIntegrationTests
 
         var unchanged = await scope.Runner(client).ResumeAsync(graph.GraphId, Owner, Ct);
 
-        Assert.Equal(0, client.Calls);
-        Assert.Equal(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(unchanged).Status);
-        Assert.Single(worker.Jobs);
-        Assert.Equal(TaskVerificationInvocationState.NeedsReconciliation, Assert.Single(unchanged.Tasks[0].Verifications).State);
+        Assert.AreEqual(0, client.Calls);
+        Assert.AreEqual(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(unchanged).Status);
+        Assert.ContainsSingle(worker.Jobs);
+        Assert.AreEqual(TaskVerificationInvocationState.NeedsReconciliation, Assert.ContainsSingle(unchanged.Tasks[0].Verifications).State);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task GraphControl_DoesNotDiscardAWorkerCompletionThatArrivesAfterCancellation(bool permanent)
     {
         await using var scope = await Scope.OpenAsync();
@@ -206,11 +209,11 @@ public sealed class TaskCommandVerificationIntegrationTests
             release.TrySetResult();
             var stopped = await active.WaitAsync(TimeSpan.FromSeconds(10));
 
-            Assert.Equal(permanent ? WorkflowControl.Cancel : WorkflowControl.Pause, stopped.Control);
-            var receipt = Assert.Single(Assert.Single(stopped.Tasks).Verifications);
-            Assert.Equal(TaskVerificationInvocationState.Completed, receipt.State);
-            Assert.Equal(TaskCommandOutcome.Passed, receipt.Completion!.Outcome);
-            Assert.Single(worker.Jobs);
+            Assert.AreEqual(permanent ? WorkflowControl.Cancel : WorkflowControl.Pause, stopped.Control);
+            var receipt = Assert.ContainsSingle(Assert.ContainsSingle(stopped.Tasks).Verifications);
+            Assert.AreEqual(TaskVerificationInvocationState.Completed, receipt.State);
+            Assert.AreEqual(TaskCommandOutcome.Passed, receipt.Completion!.Outcome);
+            Assert.ContainsSingle(worker.Jobs);
         }
         finally
         {
@@ -220,7 +223,7 @@ public sealed class TaskCommandVerificationIntegrationTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task KnownWorkerReceipt_SurvivesSharedExecutionBudgetOvershoot()
     {
         var clock = new ManualTimeProvider();
@@ -234,20 +237,20 @@ public sealed class TaskCommandVerificationIntegrationTests
         var completed = await scope.Runner(new WriterClient(), worker).StartAsync(graph, Owner, 1,
             scope.Options() with { SharedBudget = new(20, 20, 100_000, TimeSpan.FromHours(1)) }, Ct);
 
-        Assert.Equal(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(completed).Status);
-        var receipt = Assert.Single(Assert.Single(completed.Tasks).Verifications);
-        Assert.Equal(TaskVerificationInvocationState.Completed, receipt.State);
-        Assert.Equal(TaskCommandOutcome.Passed, receipt.Completion!.Outcome);
-        Assert.True((await scope.Store.GetBudgetAsync(new RunId(completed.AgentBinding!.RootRunId), Ct)).ExecutionTime >= TimeSpan.FromHours(2));
+        Assert.AreEqual(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(completed).Status);
+        var receipt = Assert.ContainsSingle(Assert.ContainsSingle(completed.Tasks).Verifications);
+        Assert.AreEqual(TaskVerificationInvocationState.Completed, receipt.State);
+        Assert.AreEqual(TaskCommandOutcome.Passed, receipt.Completion!.Outcome);
+        Assert.IsTrue((await scope.Store.GetBudgetAsync(new RunId(completed.AgentBinding!.RootRunId), Ct)).ExecutionTime >= TimeSpan.FromHours(2));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task PassingWorkerCannotAcceptASealedSourceChangedDuringVerification()
     {
         await using var scope = await Scope.OpenAsync();
         var worker = new Worker(async (job, _) =>
         {
-            var sealedArtifact = Assert.Single(job.Result.Artifacts).Location;
+            var sealedArtifact = Assert.ContainsSingle(job.Result.Artifacts).Location;
             File.SetAttributes(sealedArtifact, FileAttributes.Normal);
             await File.WriteAllTextAsync(sealedArtifact, "tampered after command admission");
             return Completion(TaskCommandOutcome.Passed);
@@ -255,14 +258,14 @@ public sealed class TaskCommandVerificationIntegrationTests
 
         var rejected = await scope.Runner(new WriterClient(), worker).StartAsync(Graph(), Owner, 1, scope.Options(), Ct);
 
-        var state = Assert.Single(rejected.Tasks);
-        Assert.Equal(TaskGraphRunStatus.Failed, TaskGraphProgress.Inspect(rejected).Status);
-        Assert.Equal(TaskAcceptanceOutcome.Rejected, state.Acceptance!.Outcome);
-        Assert.Equal(TaskCommandOutcome.Passed, Assert.Single(state.Verifications).Completion!.Outcome);
-        Assert.Equal("committed source", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
+        var state = Assert.ContainsSingle(rejected.Tasks);
+        Assert.AreEqual(TaskGraphRunStatus.Failed, TaskGraphProgress.Inspect(rejected).Status);
+        Assert.AreEqual(TaskAcceptanceOutcome.Rejected, state.Acceptance!.Outcome);
+        Assert.AreEqual(TaskCommandOutcome.Passed, Assert.ContainsSingle(state.Verifications).Completion!.Outcome);
+        Assert.AreEqual("committed source", await File.ReadAllTextAsync(Path.Combine(scope.Source, "source.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task TrustedLocalWorker_CompilesAndRunsControlledCombinedCandidate_WithoutTouchingSource()
     {
         await using var scope = await Scope.OpenAsync(withProject: true);
@@ -272,22 +275,24 @@ public sealed class TaskCommandVerificationIntegrationTests
 
         var completed = await scope.Runner(new WriterClient(combinedCandidate: true), worker).StartAsync(graph, Owner, 1, options, Ct);
 
-        Assert.True(TaskGraphProgress.Inspect(completed).Status == TaskGraphRunStatus.Succeeded,
-            JsonSerializer.Serialize(completed.Tasks.Select(task => new { task.TaskId, task.Status, task.Error, task.Result, task.Acceptance, task.Verifications }), new JsonSerializerOptions { WriteIndented = true }));
-        var state = Assert.Single(completed.Tasks, task => task.TaskId == "task");
-        var precursor = Assert.Single(completed.Tasks, task => task.TaskId == "precursor");
-        Assert.Equal(TaskGraphTaskStatus.Succeeded, precursor.Status);
-        Assert.Equal(precursor.Result!.Revision, Assert.Single(state.Inputs!.Dependencies).Revision);
-        Assert.Equal(2, state.Verifications.Length);
-        Assert.All(state.Verifications, invocation => Assert.Equal(TaskCommandOutcome.Passed, invocation.Completion!.Outcome));
-        var testReceipt = Assert.Single(state.Verifications, invocation => invocation.ProfileId == "tests");
-        Assert.Equal(new TaskVerificationTestSummary(1, 1, 0, 0), testReceipt.Completion!.Tests);
+        Assert.IsTrue(TaskGraphProgress.Inspect(completed).Status == TaskGraphRunStatus.Succeeded, JsonSerializer.Serialize(completed.Tasks.Select(task => new { task.TaskId, task.Status, task.Error, task.Result, task.Acceptance, task.Verifications }), new JsonSerializerOptions { WriteIndented = true }));
+        var state = Assert.ContainsSingle(task => task.TaskId == "task", completed.Tasks);
+        var precursor = Assert.ContainsSingle(task => task.TaskId == "precursor", completed.Tasks);
+        Assert.AreEqual(TaskGraphTaskStatus.Succeeded, precursor.Status);
+        Assert.AreEqual(precursor.Result!.Revision, Assert.ContainsSingle(state.Inputs!.Dependencies).Revision);
+        Assert.AreEqual(2, state.Verifications.Length);
+        foreach (var invocation in state.Verifications)
+        {
+            Assert.AreEqual(TaskCommandOutcome.Passed, invocation.Completion!.Outcome);
+        }
+        var testReceipt = Assert.ContainsSingle(invocation => invocation.ProfileId == "tests", state.Verifications);
+        Assert.AreEqual(new TaskVerificationTestSummary(1, 1, 0, 0), testReceipt.Completion!.Tests);
         Assert.Contains("CONTROLLED_TEST_PASS", testReceipt.Completion.StandardOutput.Text, StringComparison.Ordinal);
-        Assert.False(Directory.Exists(Path.Combine(scope.Source, "bin")));
-        Assert.False(Directory.Exists(Path.Combine(scope.Source, "obj")));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "result.txt")));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "checked.txt")));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "results.trx")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(scope.Source, "bin")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(scope.Source, "obj")));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "result.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "checked.txt")));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "results.trx")));
     }
 
     private static WorkflowTaskGraph Graph(bool includeTests = false)
@@ -320,7 +325,7 @@ public sealed class TaskCommandVerificationIntegrationTests
     private sealed class Worker(Func<TaskVerificationJob, CancellationToken, Task<TaskVerificationCompletion>> execute) : ITaskVerificationWorker
     {
         public ConcurrentQueue<TaskVerificationJob> Jobs { get; } = new();
-        public void ValidateProfile(TaskVerificationProfile profile, CallerIdentity caller) => Assert.True(caller.IsOwner);
+        public void ValidateProfile(TaskVerificationProfile profile, CallerIdentity caller) => Assert.IsTrue(caller.IsOwner);
         public Task<TaskVerificationCompletion> ExecuteAsync(TaskVerificationJob job, CancellationToken ct)
         {
             Jobs.Enqueue(job);
@@ -451,7 +456,7 @@ public sealed class TaskCommandVerificationIntegrationTests
             var error = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
             await output;
-            Assert.True(process.ExitCode == 0, await error);
+            Assert.IsTrue(process.ExitCode == 0, await error);
         }
     }
 }

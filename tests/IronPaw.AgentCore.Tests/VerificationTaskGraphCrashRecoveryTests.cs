@@ -8,9 +8,10 @@ using IronPaw.Workflow.CrashHarness;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class VerificationTaskGraphCrashRecoveryTests
 {
-    [Fact]
+    [TestMethod]
     public async Task KilledAfterCommandStarted_ReopensUnknownAndRequiresReconciliationWithoutReplay()
     {
         using var scope = new CrashScope();
@@ -19,18 +20,18 @@ public sealed class VerificationTaskGraphCrashRecoveryTests
         var ct = timeout.Token;
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), ct);
         var recovered = (await store.GetTaskGraphAsync(graphId, ct))!;
-        var candidate = Assert.Single(recovered.Tasks);
-        var invocation = Assert.Single(candidate.Verifications);
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, candidate.Status);
-        Assert.Equal(TaskVerificationInvocationState.NeedsReconciliation, invocation.State);
-        Assert.Null(invocation.Completion);
-        Assert.Null(candidate.Acceptance);
-        Assert.Null(candidate.LeaseToken);
-        Assert.Equal(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(recovered).Status);
+        var candidate = Assert.ContainsSingle(recovered.Tasks);
+        var invocation = Assert.ContainsSingle(candidate.Verifications);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, candidate.Status);
+        Assert.AreEqual(TaskVerificationInvocationState.NeedsReconciliation, invocation.State);
+        Assert.IsNull(invocation.Completion);
+        Assert.IsNull(candidate.Acceptance);
+        Assert.IsNull(candidate.LeaseToken);
+        Assert.AreEqual(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(recovered).Status);
         var providerBefore = await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct);
-        Assert.Equal(2, providerBefore.Length);
-        Assert.Equal([invocation.InvocationId], await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.WorkerEffectsPath(scope.Root), ct));
-        var child = Assert.Single(await store.ListAsync(ct), run => run.ParentRunId is not null);
+        Assert.AreEqual(2, providerBefore.Length);
+        Assert.AreSequenceEqual([invocation.InvocationId], await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.WorkerEffectsPath(scope.Root), ct));
+        var child = Assert.ContainsSingle(run => run.ParentRunId is not null, await store.ListAsync(ct));
         var childBefore = JsonSerializer.Serialize(child);
         var model = new MustNotCallProvider();
         var worker = new MustNotRunWorker();
@@ -38,25 +39,25 @@ public sealed class VerificationTaskGraphCrashRecoveryTests
 
         var stillUnknown = await runner.ResumeAsync(graphId, VerificationTaskGraphCrashFixture.Caller, ct);
 
-        Assert.Equal(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(stillUnknown).Status);
-        Assert.Equal(0, worker.Executions);
-        Assert.Equal(0, model.Calls);
+        Assert.AreEqual(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(stillUnknown).Status);
+        Assert.AreEqual(0, worker.Executions);
+        Assert.AreEqual(0, model.Calls);
         await runner.ReconcileVerificationAsync(graphId, VerificationTaskGraphCrashFixture.TaskId, invocation.InvocationId,
             VerificationTaskGraphCrashFixture.EstablishedCompletion(), "Inspected the matching durable worker effect and established its successful outcome.",
             VerificationTaskGraphCrashFixture.Caller, ct);
         var accepted = await runner.ResumeAsync(graphId, VerificationTaskGraphCrashFixture.Caller, ct);
 
-        Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(accepted).Status);
-        Assert.Equal(candidate.AttemptId, accepted.Tasks[0].AttemptId);
-        Assert.Equal(invocation.InvocationId, Assert.Single(accepted.Tasks[0].Verifications).InvocationId);
-        Assert.Equal(0, worker.Executions);
-        Assert.Equal(0, model.Calls);
-        Assert.Equal(childBefore, JsonSerializer.Serialize(await store.GetAsync(new RunId(child.RunId), ct)));
-        Assert.Equal(providerBefore, await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct));
-        Assert.Equal([invocation.InvocationId], await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.WorkerEffectsPath(scope.Root), ct));
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(accepted).Status);
+        Assert.AreEqual(candidate.AttemptId, accepted.Tasks[0].AttemptId);
+        Assert.AreEqual(invocation.InvocationId, Assert.ContainsSingle(accepted.Tasks[0].Verifications).InvocationId);
+        Assert.AreEqual(0, worker.Executions);
+        Assert.AreEqual(0, model.Calls);
+        Assert.AreEqual(childBefore, JsonSerializer.Serialize(await store.GetAsync(new RunId(child.RunId), ct)));
+        Assert.AreSequenceEqual(providerBefore, await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct));
+        Assert.AreSequenceEqual([invocation.InvocationId], await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.WorkerEffectsPath(scope.Root), ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task KilledAfterCompletedCommandBeforeAcceptance_ReusesExactReceiptWithNoWorkerOrProviderCalls()
     {
         using var scope = new CrashScope();
@@ -65,15 +66,15 @@ public sealed class VerificationTaskGraphCrashRecoveryTests
         var ct = timeout.Token;
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), ct);
         var recovered = (await store.GetTaskGraphAsync(graphId, ct))!;
-        var candidate = Assert.Single(recovered.Tasks);
-        var invocation = Assert.Single(candidate.Verifications);
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, candidate.Status);
-        Assert.Null(candidate.Acceptance);
-        Assert.Null(candidate.LeaseToken);
-        Assert.Equal(TaskVerificationInvocationState.Completed, invocation.State);
-        Assert.Equal(TaskCommandOutcome.Passed, invocation.Completion!.Outcome);
-        Assert.Equal(candidate.Result!.Revision, invocation.Revision);
-        Assert.Equal(TaskInputIdentity.ResultDigest(candidate.Result), invocation.ResultDigest);
+        var candidate = Assert.ContainsSingle(recovered.Tasks);
+        var invocation = Assert.ContainsSingle(candidate.Verifications);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, candidate.Status);
+        Assert.IsNull(candidate.Acceptance);
+        Assert.IsNull(candidate.LeaseToken);
+        Assert.AreEqual(TaskVerificationInvocationState.Completed, invocation.State);
+        Assert.AreEqual(TaskCommandOutcome.Passed, invocation.Completion!.Outcome);
+        Assert.AreEqual(candidate.Result!.Revision, invocation.Revision);
+        Assert.AreEqual(TaskInputIdentity.ResultDigest(candidate.Result), invocation.ResultDigest);
         var callsBefore = await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct);
         var budgetBefore = await store.GetBudgetAsync(new RunId(recovered.AgentBinding!.RootRunId), ct);
         var model = new MustNotCallProvider();
@@ -82,20 +83,20 @@ public sealed class VerificationTaskGraphCrashRecoveryTests
         var accepted = await new AgentTaskGraphRunner(store, store, new GitTaskWorkspaceManager(), model, worker)
             .ResumeAsync(graphId, VerificationTaskGraphCrashFixture.Caller, ct);
 
-        Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(accepted).Status);
-        Assert.Equal(TaskAcceptanceOutcome.Accepted, accepted.Tasks[0].Acceptance!.Outcome);
-        Assert.Equal(invocation, Assert.Single(accepted.Tasks[0].Verifications));
-        Assert.Equal(candidate.AttemptId, accepted.Tasks[0].AttemptId);
-        Assert.Equal(JsonSerializer.Serialize(candidate.Result), JsonSerializer.Serialize(accepted.Tasks[0].Result));
-        Assert.Equal(0, worker.Executions);
-        Assert.Equal(0, model.Calls);
-        Assert.Equal([invocation.InvocationId], await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.WorkerEffectsPath(scope.Root), ct));
-        Assert.Equal(callsBefore, await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct));
-        Assert.Equal(budgetBefore.ChargedTokens, (await store.GetBudgetAsync(new RunId(recovered.AgentBinding.RootRunId), ct)).ChargedTokens);
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(accepted).Status);
+        Assert.AreEqual(TaskAcceptanceOutcome.Accepted, accepted.Tasks[0].Acceptance!.Outcome);
+        Assert.AreEqual(invocation, Assert.ContainsSingle(accepted.Tasks[0].Verifications));
+        Assert.AreEqual(candidate.AttemptId, accepted.Tasks[0].AttemptId);
+        Assert.AreEqual(JsonSerializer.Serialize(candidate.Result), JsonSerializer.Serialize(accepted.Tasks[0].Result));
+        Assert.AreEqual(0, worker.Executions);
+        Assert.AreEqual(0, model.Calls);
+        Assert.AreSequenceEqual([invocation.InvocationId], await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.WorkerEffectsPath(scope.Root), ct));
+        Assert.AreSequenceEqual(callsBefore, await File.ReadAllLinesAsync(VerificationTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct));
+        Assert.AreEqual(budgetBefore.ChargedTokens, (await store.GetBudgetAsync(new RunId(recovered.AgentBinding.RootRunId), ct)).ChargedTokens);
         var journal = await store.ReadTaskGraphJournalAsync(graphId, ct);
-        Assert.Single(journal, entry => entry.EventType == "verification_started");
-        Assert.Single(journal, entry => entry.EventType == "verification_receipt");
-        Assert.Single(journal, entry => entry.EventType == "task_acceptance");
+        Assert.ContainsSingle(entry => entry.EventType == "verification_started", journal);
+        Assert.ContainsSingle(entry => entry.EventType == "verification_receipt", journal);
+        Assert.ContainsSingle(entry => entry.EventType == "task_acceptance", journal);
     }
 
     private sealed class MustNotRunWorker : ITaskVerificationWorker
@@ -152,10 +153,10 @@ public sealed class VerificationTaskGraphCrashRecoveryTests
                     }
                     if (graphId is null) await Task.Delay(25, timeout.Token);
                 }
-                Assert.False(string.IsNullOrWhiteSpace(graphId));
+                Assert.IsFalse(string.IsNullOrWhiteSpace(graphId));
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(timeout.Token);
-                Assert.True(process.HasExited);
+                Assert.IsTrue(process.HasExited);
                 return graphId;
             }
             finally

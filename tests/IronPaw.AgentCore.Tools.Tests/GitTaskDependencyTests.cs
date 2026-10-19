@@ -4,13 +4,14 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
-public sealed class GitTaskDependencyTests : IDisposable
+[TestClass]
+public sealed class GitTaskDependencyTests
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "IronPawTaskDependencyTests", Guid.NewGuid().ToString("n"));
     private readonly GitTaskWorkspaceManager manager = new();
     private TaskGraphAgentBinding binding = null!;
 
-    [Fact]
+    [TestMethod]
     public async Task ChainAppliesEachTasksOwnDeltaAndPreservesDirtySource()
     {
         await RepositoryAsync();
@@ -18,12 +19,12 @@ public sealed class GitTaskDependencyTests : IDisposable
         var first = await ProduceAsync("first", [], "source.txt", "first");
         var second = await ProduceAsync("second", [first], "source.txt", "second");
         var (workspace, _) = await PrepareAsync("third", [first, second]);
-        Assert.Equal("second", await ReadAsync(workspace, "source.txt"));
-        Assert.Equal("dirty source", await File.ReadAllTextAsync(Path.Combine(binding.SourceWorkspaceRoot, "source.txt")));
-        Assert.False(Directory.Exists(Path.Combine(workspace.WorkspacePath, ".git")));
+        Assert.AreEqual("second", await ReadAsync(workspace, "source.txt"));
+        Assert.AreEqual("dirty source", await File.ReadAllTextAsync(Path.Combine(binding.SourceWorkspaceRoot, "source.txt")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(workspace.WorkspacePath, ".git")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DiamondDeduplicatesInheritedChangesAndComposesDisjointBranches()
     {
         await RepositoryAsync();
@@ -31,22 +32,22 @@ public sealed class GitTaskDependencyTests : IDisposable
         var left = await ProduceAsync("left", [common], "left.txt", "left");
         var right = await ProduceAsync("right", [common], "right.txt", "right");
         var (workspace, _) = await PrepareAsync("join", [common, left, right]);
-        Assert.Equal("common", await ReadAsync(workspace, "common.txt"));
-        Assert.Equal("left", await ReadAsync(workspace, "left.txt"));
-        Assert.Equal("right", await ReadAsync(workspace, "right.txt"));
+        Assert.AreEqual("common", await ReadAsync(workspace, "common.txt"));
+        Assert.AreEqual("left", await ReadAsync(workspace, "left.txt"));
+        Assert.AreEqual("right", await ReadAsync(workspace, "right.txt"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task IdenticalConcurrentWritesCoalesce()
     {
         await RepositoryAsync();
         var left = await ProduceAsync("left", [], "source.txt", "same");
         var right = await ProduceAsync("right", [], "source.txt", "same");
         var (workspace, _) = await PrepareAsync("join", [left, right]);
-        Assert.Equal("same", await ReadAsync(workspace, "source.txt"));
+        Assert.AreEqual("same", await ReadAsync(workspace, "source.txt"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task InputsReadSealedBytesRatherThanLaterProducerWorkspaceEdits()
     {
         await RepositoryAsync();
@@ -54,39 +55,39 @@ public sealed class GitTaskDependencyTests : IDisposable
         var producerWorkspace = await manager.OpenExistingAsync(binding, Claim(producer.Task, producer.Inputs), CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(producerWorkspace.WorkspacePath, "source.txt"), "later mutable edit");
         var (consumer, _) = await PrepareAsync("consumer", [producer]);
-        Assert.Equal("sealed output", await ReadAsync(consumer, "source.txt"));
+        Assert.AreEqual("sealed output", await ReadAsync(consumer, "source.txt"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DifferentConcurrentWritesFailBeforeInitializationReceipt()
     {
         await RepositoryAsync();
         var left = await ProduceAsync("left", [], "source.txt", "left");
         var right = await ProduceAsync("right", [], "source.txt", "right");
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => PrepareAsync("join", [left, right]));
-        Assert.Equal(2, Directory.EnumerateFiles(binding.WorkspaceStoreRoot, "workspace.json", SearchOption.AllDirectories).Count());
-        Assert.Equal("base", await File.ReadAllTextAsync(Path.Combine(binding.SourceWorkspaceRoot, "source.txt")));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => PrepareAsync("join", [left, right]));
+        Assert.AreEqual(2, Directory.EnumerateFiles(binding.WorkspaceStoreRoot, "workspace.json", SearchOption.AllDirectories).Count());
+        Assert.AreEqual("base", await File.ReadAllTextAsync(Path.Combine(binding.SourceWorkspaceRoot, "source.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task FileDirectoryCollisionsRejectDisjointBranchMerge()
     {
         await RepositoryAsync();
         var left = await ProduceAsync("left", [], "added", "file");
         var right = await ProduceAsync("right", [], "added/child.txt", "child");
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => PrepareAsync("join", [left, right]));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => PrepareAsync("join", [left, right]));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DeletionAndCompetingEditConflict()
     {
         await RepositoryAsync();
         var left = await ProduceAsync("left", [], "source.txt", null);
         var right = await ProduceAsync("right", [], "source.txt", "changed");
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => PrepareAsync("join", [left, right]));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => PrepareAsync("join", [left, right]));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task FileToDirectoryAndDirectoryToFileTransitionsCompose()
     {
         await RepositoryAsync();
@@ -97,7 +98,7 @@ public sealed class GitTaskDependencyTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "source.txt", "child.txt"), "nested");
         var transition = await SealAsync(workspace, claim);
         var (consumer, _) = await PrepareAsync("consumer", [transition]);
-        Assert.Equal("nested", await ReadAsync(consumer, "source.txt/child.txt"));
+        Assert.AreEqual("nested", await ReadAsync(consumer, "source.txt/child.txt"));
         var reverseTask = Task("reverse", ["."]);
         var (reverse, reverseClaim) = await PrepareAsync(reverseTask, [transition]);
         File.Delete(Path.Combine(reverse.WorkspacePath, "source.txt", "child.txt"));
@@ -105,13 +106,13 @@ public sealed class GitTaskDependencyTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(reverse.WorkspacePath, "source.txt"), "flat");
         var reverseInput = await SealAsync(reverse, reverseClaim);
         var (joined, _) = await PrepareAsync("joined", [transition, reverseInput]);
-        Assert.Equal("flat", await ReadAsync(joined, "source.txt"));
+        Assert.AreEqual("flat", await ReadAsync(joined, "source.txt"));
     }
 
-    [Theory]
-    [InlineData("changed")]
-    [InlineData("deleted")]
-    [InlineData("baseline")]
+    [TestMethod]
+    [DataRow("changed")]
+    [DataRow("deleted")]
+    [DataRow("baseline")]
     public async Task AlteredSealedPredecessorIsRejectedBeforeConsumerCreation(string tamper)
     {
         await RepositoryAsync();
@@ -122,24 +123,24 @@ public sealed class GitTaskDependencyTests : IDisposable
         if (tamper == "deleted") File.Delete(producer.Result.Artifacts.Single().Location);
         if (tamper == "baseline") await File.AppendAllTextAsync(Path.Combine(workspace.AttemptPath, "inputs.json"), " ");
         var before = Directory.EnumerateDirectories(binding.WorkspaceStoreRoot).Count();
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => PrepareAsync("consumer", [producer]));
-        Assert.Equal(before, Directory.EnumerateDirectories(binding.WorkspaceStoreRoot).Count());
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => PrepareAsync("consumer", [producer]));
+        Assert.AreEqual(before, Directory.EnumerateDirectories(binding.WorkspaceStoreRoot).Count());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CaptureRejectsOwnWritesAndDeletesOutsideScope()
     {
         await RepositoryAsync();
         var task = Task("restricted", ["allowed.txt"]);
         var (workspace, _) = await PrepareAsync(task, []);
         await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "source.txt"), "out of scope");
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.CaptureAsync(workspace, [], CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.CaptureAsync(workspace, [], CancellationToken.None));
         File.Delete(Path.Combine(workspace.WorkspacePath, "source.txt"));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.CaptureAsync(workspace, [], CancellationToken.None));
-        Assert.False(Directory.Exists(Path.Combine(workspace.AttemptPath, "revisions")));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.CaptureAsync(workspace, [], CancellationToken.None));
+        Assert.IsFalse(Directory.Exists(Path.Combine(workspace.AttemptPath, "revisions")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AcceptedInitializationDoesNotExpandConsumerWritePermissions()
     {
         await RepositoryAsync();
@@ -147,15 +148,15 @@ public sealed class GitTaskDependencyTests : IDisposable
         var task = Task("consumer", ["report.txt"]) with
         { ExpectedArtifacts = [new("report", "report", TaskArtifactKind.Report, "report.txt")] };
         var (workspace, _) = await PrepareAsync(task, [producer]);
-        Assert.Equal("accepted output", await ReadAsync(workspace, "source.txt"));
+        Assert.AreEqual("accepted output", await ReadAsync(workspace, "source.txt"));
         await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "report.txt"), "report");
         var capture = await manager.CaptureAsync(workspace, [new("report", "report", TaskArtifactKind.Report, "report.txt")], CancellationToken.None);
-        Assert.Single(capture.Artifacts);
+        Assert.ContainsSingle(capture.Artifacts);
         await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "source.txt"), "unauthorized consumer change");
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.CaptureAsync(workspace, [], CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.CaptureAsync(workspace, [], CancellationToken.None));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReusePreservesWorkingEditsAndRejectsChangedPinsOrPermissions()
     {
         await RepositoryAsync();
@@ -163,31 +164,31 @@ public sealed class GitTaskDependencyTests : IDisposable
         var task = Task("consumer", ["."]);
         var (workspace, claim) = await PrepareAsync(task, [producer]);
         await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "source.txt"), "in progress");
-        Assert.Equal(workspace, await manager.PrepareAsync(binding, claim, [producer], CancellationToken.None));
-        Assert.Equal("in progress", await ReadAsync(workspace, "source.txt"));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding,
+        Assert.AreEqual(workspace, await manager.PrepareAsync(binding, claim, [producer], CancellationToken.None));
+        Assert.AreEqual("in progress", await ReadAsync(workspace, "source.txt"));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding,
             claim with { Task = task with { Resources = new() { ReadPaths = ["."] } } }, [producer], CancellationToken.None));
         var changed = claim.Inputs! with { Dependencies = [] };
         changed = changed with { Digest = TaskInputIdentity.Digest(changed) };
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding, claim with { Inputs = changed }, [], CancellationToken.None));
-        Assert.Equal("in progress", await ReadAsync(workspace, "source.txt"));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding, claim with { Inputs = changed }, [], CancellationToken.None));
+        Assert.AreEqual("in progress", await ReadAsync(workspace, "source.txt"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LookupIsReadOnlyAndMissingInitializationFailsClosed()
     {
         await RepositoryAsync();
         var (workspace, claim) = await PrepareAsync("task", []);
         var paths = Directory.EnumerateFileSystemEntries(binding.WorkspaceStoreRoot, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ToArray();
-        Assert.Equal(workspace, await manager.OpenExistingAsync(binding, claim, CancellationToken.None));
-        Assert.Equal(paths, Directory.EnumerateFileSystemEntries(binding.WorkspaceStoreRoot, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ToArray());
+        Assert.AreEqual(workspace, await manager.OpenExistingAsync(binding, claim, CancellationToken.None));
+        Assert.AreSequenceEqual(paths, Directory.EnumerateFileSystemEntries(binding.WorkspaceStoreRoot, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ToArray());
         File.Delete(Path.Combine(workspace.AttemptPath, "inputs.json"));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding, claim, [], CancellationToken.None));
-        Assert.False(File.Exists(Path.Combine(workspace.AttemptPath, "inputs.json")));
-        Assert.Equal("base", await ReadAsync(workspace, "source.txt"));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding, claim, [], CancellationToken.None));
+        Assert.IsFalse(File.Exists(Path.Combine(workspace.AttemptPath, "inputs.json")));
+        Assert.AreEqual("base", await ReadAsync(workspace, "source.txt"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ChangedBaselineCannotAuthorizeRecaptureOrReuse()
     {
         await RepositoryAsync();
@@ -195,12 +196,12 @@ public sealed class GitTaskDependencyTests : IDisposable
         var path = Path.Combine(workspace.AttemptPath, "inputs.json");
         var initial = await File.ReadAllTextAsync(path);
         await File.WriteAllTextAsync(path, initial.Replace("\"Entries\":[", "\"Entries\":[ ", StringComparison.Ordinal));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding, claim, [], CancellationToken.None));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.CaptureAsync(workspace, [], CancellationToken.None));
-        Assert.Equal("base", await ReadAsync(workspace, "source.txt"));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding, claim, [], CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.CaptureAsync(workspace, [], CancellationToken.None));
+        Assert.AreEqual("base", await ReadAsync(workspace, "source.txt"));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReceiptOrDependencyListTamperingIsRejected()
     {
         await RepositoryAsync();
@@ -208,12 +209,12 @@ public sealed class GitTaskDependencyTests : IDisposable
         var task = Task("consumer", ["."]);
         var inputs = Inputs(task, [producer]);
         var claim = Claim(task, inputs);
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding, claim,
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding, claim,
             [producer with { Result = producer.Result with { Explanation = "changed" } }], CancellationToken.None));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding, claim, [], CancellationToken.None));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding,
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding, claim, [], CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.PrepareAsync(binding,
             claim with { Inputs = inputs with { Digest = "sha256:wrong" } }, [producer], CancellationToken.None));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.OpenOrCreateAsync(binding, claim, CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.OpenOrCreateAsync(binding, claim, CancellationToken.None));
     }
 
     private async Task<TaskDependencyInput> ProduceAsync(string id, ImmutableArray<TaskDependencyInput> dependencies, string path, string? contents)
@@ -236,7 +237,7 @@ public sealed class GitTaskDependencyTests : IDisposable
         { Artifacts = capture.Artifacts };
         var acceptance = new TaskAcceptanceReceipt(TaskAcceptanceOutcome.Accepted, "test", "accepted", "sha256:graph",
             claim.Task.TaskId, claim.AttemptId, TaskInputIdentity.ResultDigest(result), result.Revision, DateTimeOffset.UtcNow);
-        Assert.True(await manager.VerifyAsync(workspace, result, CancellationToken.None));
+        Assert.IsTrue(await manager.VerifyAsync(workspace, result, CancellationToken.None));
         return new(claim.Task, claim.AttemptId, result, acceptance, claim.Inputs!);
     }
 
@@ -285,10 +286,11 @@ public sealed class GitTaskDependencyTests : IDisposable
         using var process = Process.Start(info)!;
         var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync(); await output;
-        Assert.True(process.ExitCode == 0, await error);
+        Assert.IsTrue(process.ExitCode == 0, await error);
     }
 
-    public void Dispose()
+    [TestCleanup]
+    public void Cleanup()
     {
         if (!Directory.Exists(root)) return;
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);

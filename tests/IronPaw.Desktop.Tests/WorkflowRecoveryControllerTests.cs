@@ -4,161 +4,164 @@ using IronPaw.Desktop;
 
 namespace IronPaw.Desktop.Tests;
 
+[TestClass]
 public sealed class WorkflowRecoveryControllerTests
 {
-    [Fact]
+    [TestMethod]
     public async Task AnswerPersistsExactChildRequestBeforeResumingRoot()
     {
         var scope = new Scope(WorkflowHumanRequestKind.Input);
         var result = await scope.Controller.AnswerAndResumeAsync(new("child"), "request-7", "Use blue", scope.Sink, default);
-        Assert.Equal("root", result.RunId.Value);
-        Assert.Equal(["answer:child:request-7:Use blue", "resume:root"], scope.Orchestrator.Calls);
-        Assert.Equal(CallerIdentity.LocalOwner(), scope.Orchestrator.LastCaller);
-        Assert.Same(scope.Sink, scope.Orchestrator.LastSink);
+        Assert.AreEqual("root", result.RunId.Value);
+        Assert.AreSequenceEqual(["answer:child:request-7:Use blue", "resume:root"], scope.Orchestrator.Calls);
+        Assert.AreEqual(CallerIdentity.LocalOwner(), scope.Orchestrator.LastCaller);
+        Assert.AreSame<object>(scope.Sink, scope.Orchestrator.LastSink);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task FailedReceiptNeverResumes()
     {
         var scope = new Scope(WorkflowHumanRequestKind.Input);
         scope.Orchestrator.ReceiptFailure = new WorkflowConflictException("stale request");
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => scope.Controller.AnswerAndResumeAsync(new("child"), "request-7", "Use blue", scope.Sink, default));
-        Assert.Single(scope.Orchestrator.Calls);
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => scope.Controller.AnswerAndResumeAsync(new("child"), "request-7", "Use blue", scope.Sink, default));
+        Assert.ContainsSingle(scope.Orchestrator.Calls);
     }
 
-    [Theory]
-    [InlineData("missing")]
-    [InlineData("answered")]
+    [TestMethod]
+    [DataRow("missing")]
+    [DataRow("answered")]
     public async Task InvalidOrAnsweredRequestCannotResume(string requestId)
     {
         var scope = new Scope(WorkflowHumanRequestKind.Input);
-        scope.Store.Runs["child"] = scope.Store.Runs["child"] with { HumanRequests = [
-            scope.Store.Runs["child"].HumanRequests![0] with { RequestId = "answered", Response = new("already", null, "owner", DateTimeOffset.UtcNow) } ] };
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => scope.Controller.AnswerAndResumeAsync(new("child"), requestId, "Use blue", scope.Sink, default));
-        Assert.Empty(scope.Orchestrator.Calls);
+        scope.Store.Runs["child"] = scope.Store.Runs["child"] with
+        {
+            HumanRequests = [
+            scope.Store.Runs["child"].HumanRequests![0] with { RequestId = "answered", Response = new("already", null, "owner", DateTimeOffset.UtcNow) } ]
+        };
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => scope.Controller.AnswerAndResumeAsync(new("child"), requestId, "Use blue", scope.Sink, default));
+        Assert.IsEmpty(scope.Orchestrator.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task RequestKindMustMatchResponse()
     {
         var scope = new Scope(WorkflowHumanRequestKind.ToolApproval);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => scope.Controller.AnswerAndResumeAsync(new("child"), "request-7", "yes", scope.Sink, default));
-        Assert.Empty(scope.Orchestrator.Calls);
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => scope.Controller.AnswerAndResumeAsync(new("child"), "request-7", "yes", scope.Sink, default));
+        Assert.IsEmpty(scope.Orchestrator.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ApprovalPersistsExactOperationBeforeRootResume()
     {
         var scope = new Scope(WorkflowHumanRequestKind.ToolApproval);
         await scope.Controller.DecideApprovalAsync(new("child"), "request-7", true, scope.Sink, default);
-        Assert.Equal(["approval:child:request-7:True", "resume:root"], scope.Orchestrator.Calls);
-        Assert.Equal(CallerIdentity.LocalOwner(), scope.Orchestrator.LastCaller);
+        Assert.AreSequenceEqual(["approval:child:request-7:True", "resume:root"], scope.Orchestrator.Calls);
+        Assert.AreEqual(CallerIdentity.LocalOwner(), scope.Orchestrator.LastCaller);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DenialRecordsDecisionWithoutExecutingOrResuming()
     {
         var scope = new Scope(WorkflowHumanRequestKind.ToolApproval);
-        Assert.Null(await scope.Controller.DecideApprovalAsync(new("child"), "request-7", false, scope.Sink, default));
-        Assert.Equal(["approval:child:request-7:False"], scope.Orchestrator.Calls);
+        Assert.IsNull(await scope.Controller.DecideApprovalAsync(new("child"), "request-7", false, scope.Sink, default));
+        Assert.AreSequenceEqual(["approval:child:request-7:False"], scope.Orchestrator.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReconciliationPreservesSuppliedOutcomeAndEvidenceBeforeResume()
     {
         var scope = new Scope();
         await scope.Controller.ReconcileAndResumeAsync(new("child"), "effect-4", "file was saved", false, "Read resulting file and checksum", scope.Sink, default);
-        Assert.Equal(["reconcile:child:effect-4", "resume:root"], scope.Orchestrator.Calls);
-        Assert.Equal(new ToolResult(false, "file was saved", ContentTrust.Local), scope.Orchestrator.LastResult);
-        Assert.Equal("Read resulting file and checksum", scope.Orchestrator.LastNote);
+        Assert.AreSequenceEqual(["reconcile:child:effect-4", "resume:root"], scope.Orchestrator.Calls);
+        Assert.AreEqual(new ToolResult(false, "file was saved", ContentTrust.Local), scope.Orchestrator.LastResult);
+        Assert.AreEqual("Read resulting file and checksum", scope.Orchestrator.LastNote);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CompletedOutcomeCannotBeReconciledAgain()
     {
         var scope = new Scope();
         scope.Store.Runs["child"] = scope.Store.Runs["child"] with { ToolExecutions = [scope.Store.Runs["child"].ToolExecutions![0] with { Result = ToolResult.Success("done"), State = WorkflowToolState.Completed }] };
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => scope.Controller.ReconcileAndResumeAsync(new("child"), "effect-4", "replacement", false, "evidence", scope.Sink, default));
-        Assert.Empty(scope.Orchestrator.Calls);
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => scope.Controller.ReconcileAndResumeAsync(new("child"), "effect-4", "replacement", false, "evidence", scope.Sink, default));
+        Assert.IsEmpty(scope.Orchestrator.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CancelledRootCanRecordUnknownOutcomeWithoutResuming()
     {
         var scope = new Scope();
         scope.Store.Runs["root"] = scope.Store.Runs["root"] with { Control = WorkflowControl.Cancel };
-        Assert.Null(await scope.Controller.ReconcileAndResumeAsync(new("child"), "effect-4", "saved", false, "checked disk", scope.Sink, default));
-        Assert.Equal(["reconcile:child:effect-4"], scope.Orchestrator.Calls);
+        Assert.IsNull(await scope.Controller.ReconcileAndResumeAsync(new("child"), "effect-4", "saved", false, "checked disk", scope.Sink, default));
+        Assert.AreSequenceEqual(["reconcile:child:effect-4"], scope.Orchestrator.Calls);
     }
 
-    [Theory]
-    [InlineData("", "evidence")]
-    [InlineData("result", "")]
+    [TestMethod]
+    [DataRow("", "evidence")]
+    [DataRow("result", "")]
     public async Task ReconciliationRequiresExplicitResultAndEvidence(string result, string evidence)
     {
         var scope = new Scope();
-        await Assert.ThrowsAsync<ArgumentException>(() => scope.Controller.ReconcileAndResumeAsync(new("child"), "effect-4", result, false, evidence, scope.Sink, default));
-        Assert.Empty(scope.Orchestrator.Calls);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => scope.Controller.ReconcileAndResumeAsync(new("child"), "effect-4", result, false, evidence, scope.Sink, default));
+        Assert.IsEmpty(scope.Orchestrator.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task PauseAndPermanentCancellationAlwaysUseRootAndLocalOwner()
     {
         var scope = new Scope();
         await scope.Controller.PauseAsync(new("child"), default);
         await scope.Controller.CancelAsync(new("child"), default);
-        Assert.Equal(["pause:root", "cancel:root"], scope.Orchestrator.Calls);
-        Assert.Equal(CallerIdentity.LocalOwner(), scope.Orchestrator.LastCaller);
+        Assert.AreSequenceEqual(["pause:root", "cancel:root"], scope.Orchestrator.Calls);
+        Assert.AreEqual(CallerIdentity.LocalOwner(), scope.Orchestrator.LastCaller);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task RootControlRemainsResponsiveDuringPendingResume()
     {
         var scope = new Scope();
         var pending = new TaskCompletionSource<AgentRunResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         scope.Orchestrator.PendingResume = pending.Task;
         var resume = scope.Controller.ResumeAsync(new("child"), scope.Sink, default);
-        Assert.False(resume.IsCompleted);
+        Assert.IsFalse(resume.IsCompleted);
         await scope.Controller.PauseAsync(new("child"), default);
-        Assert.Equal(["resume:root", "pause:root"], scope.Orchestrator.Calls);
+        Assert.AreSequenceEqual(["resume:root", "pause:root"], scope.Orchestrator.Calls);
         pending.SetResult(scope.Orchestrator.Result);
         await resume;
     }
 
-    [Fact]
+    [TestMethod]
     public async Task BrowserAndDetailsIncludeOnlySelectedRootsDescendants()
     {
         var scope = new Scope();
         scope.Store.Runs["other"] = MakeRun("other", "other", null);
         var roots = await scope.Controller.ListRootsAsync(default);
-        Assert.Equal(2, roots.Count);
-        Assert.DoesNotContain(roots, run => run.RunId == "child");
+        Assert.AreEqual(2, roots.Count);
+        Assert.DoesNotContain(run => run.RunId == "child", roots);
         var detail = await scope.Controller.InspectAsync(new("child"), default);
-        Assert.Equal("root", detail.Root.RunId);
-        Assert.Equal("child", detail.Selected.RunId);
-        Assert.Equal(["root", "child"], detail.Invocations.Select(run => run.RunId));
-        Assert.Equal(3, detail.Usage.ModelCalls);
-        Assert.Equal(2, detail.Journal.Count);
-        Assert.Equal("root", detail.Budget.RootRunId);
+        Assert.AreEqual("root", detail.Root.RunId);
+        Assert.AreEqual("child", detail.Selected.RunId);
+        Assert.AreSequenceEqual(["root", "child"], detail.Invocations.Select(run => run.RunId));
+        Assert.AreEqual(3, detail.Usage.ModelCalls);
+        Assert.AreEqual(2, detail.Journal.Count);
+        Assert.AreEqual("root", detail.Budget.RootRunId);
     }
 
-    [Fact]
+    [TestMethod]
     public void NewRunSettingsAcceptOptionalRootLimits()
     {
-        Assert.Equal(new WorkflowBudget(), DesktopRunSettings.ParseBudget("", ""));
-        Assert.Equal(new WorkflowBudget(MaxTotalTokens: 12000, MaxExecutionTime: TimeSpan.FromSeconds(90)),
-            DesktopRunSettings.ParseBudget("12000", "90"));
+        Assert.AreEqual(new WorkflowBudget(), DesktopRunSettings.ParseBudget("", ""));
+        Assert.AreEqual(new WorkflowBudget(MaxTotalTokens: 12000, MaxExecutionTime: TimeSpan.FromSeconds(90)), DesktopRunSettings.ParseBudget("12000", "90"));
     }
 
-    [Theory]
-    [InlineData("-1", "")]
-    [InlineData("0", "")]
-    [InlineData("abc", "")]
-    [InlineData("", "0")]
-    [InlineData("", "-20")]
-    [InlineData("", "1.5")]
+    [TestMethod]
+    [DataRow("-1", "")]
+    [DataRow("0", "")]
+    [DataRow("abc", "")]
+    [DataRow("", "0")]
+    [DataRow("", "-20")]
+    [DataRow("", "1.5")]
     public void InvalidNewRunLimitsFailBeforeExecution(string tokens, string seconds) =>
-        Assert.Throws<ArgumentException>(() => DesktopRunSettings.ParseBudget(tokens, seconds));
+        Assert.ThrowsExactly<ArgumentException>(() => DesktopRunSettings.ParseBudget(tokens, seconds));
 
     internal static WorkflowCheckpoint MakeRun(string id, string root, string? parent) => new(id, root, parent,
         "task-" + id, new(new("desktop-test"), "inspect work", "local", "rule-based-v1", new(ToolProfile.Coding), CallerIdentity.LocalOwner()),
@@ -170,9 +173,11 @@ public sealed class WorkflowRecoveryControllerTests
         public Scope(WorkflowHumanRequestKind? kind = null)
         {
             Store.Runs["root"] = MakeRun("root", "root", null);
-            Store.Runs["child"] = MakeRun("child", "root", "root") with {
+            Store.Runs["child"] = MakeRun("child", "root", "root") with
+            {
                 HumanRequests = kind is null ? [] : [new("request-7", kind.Value, "Choose a color", "source", DateTimeOffset.UtcNow)],
-                ToolExecutions = [new("effect-4", new("tool-call", "write_file", JsonSerializer.SerializeToElement(new { path = "result.txt" }))) ] };
+                ToolExecutions = [new("effect-4", new("tool-call", "write_file", JsonSerializer.SerializeToElement(new { path = "result.txt" })))]
+            };
             Orchestrator = new(Store);
             Controller = new(Orchestrator, Store);
         }

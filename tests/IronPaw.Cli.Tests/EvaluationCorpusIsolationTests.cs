@@ -6,9 +6,10 @@ using IronPaw.Cli;
 
 namespace IronPaw.Cli.Tests;
 
+[TestClass]
 public sealed class EvaluationCorpusIsolationTests
 {
-    [Fact]
+    [TestMethod]
     public async Task InheritedGitOverridesCannotRedirectCorpusWritesOrSnapshotReadsIntoAnotherRepository()
     {
         using var scope = new Scope();
@@ -27,14 +28,22 @@ public sealed class EvaluationCorpusIsolationTests
         var originalHead = (await Git(sentinel, ["rev-parse", "HEAD"])).Trim();
         var originalIndex = FileDigest(Path.Combine(sentinel, ".git", "index"));
         var originalObjects = ObjectSnapshot(sentinel);
-        var settings = EvaluationProviderClientTests.Settings() with {
-            MaxTotalSpend = 0.000000000001m, MaxInputTokensPerRequest = 50000, PairedTrials = 1
+        var settings = EvaluationProviderClientTests.Settings() with
+        {
+            MaxTotalSpend = 0.000000000001m,
+            MaxInputTokensPerRequest = 50000,
+            PairedTrials = 1
         };
         var config = Path.Combine(scope.Root, "evaluation.json");
         await File.WriteAllTextAsync(config, TaskGraphDocumentJson.Serialize(settings));
-        var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet") {
-            WorkingDirectory = workspace, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+        var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
+        {
+            WorkingDirectory = workspace,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
         };
         foreach (var argument in new[] { typeof(CliOptions).Assembly.Location, "--run-evaluation", config,
             "--evaluation-output", campaign, "--allow-local-verification" }) start.ArgumentList.Add(argument);
@@ -53,26 +62,26 @@ public sealed class EvaluationCorpusIsolationTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         try { await process.WaitForExitAsync(deadline.Token); }
         catch { if (!process.HasExited) process.Kill(entireProcessTree: true); throw; }
-        Assert.True(process.ExitCode == 2, (await stdout) + (await stderr));
+        Assert.IsTrue(process.ExitCode == 2, (await stdout) + (await stderr));
 
         using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(campaign, "report.json")));
-        Assert.Equal("BudgetExhausted", report.RootElement.GetProperty("status").GetString());
-        Assert.Empty(report.RootElement.GetProperty("checkpoint").GetProperty("requests").EnumerateArray());
-        Assert.Equal(originalIndex, FileDigest(Path.Combine(sentinel, ".git", "index")));
-        Assert.Equal(originalObjects, ObjectSnapshot(sentinel));
-        Assert.Equal(originalHead, (await Git(sentinel, ["rev-parse", "HEAD"])).Trim());
-        Assert.Equal("preserve this repository", await File.ReadAllTextAsync(Path.Combine(sentinel, "protected.txt")));
-        Assert.Equal("uncommitted staged content", await File.ReadAllTextAsync(Path.Combine(sentinel, "pending.txt")));
+        Assert.AreEqual("BudgetExhausted", report.RootElement.GetProperty("status").GetString());
+        Assert.IsEmpty(report.RootElement.GetProperty("checkpoint").GetProperty("requests").EnumerateArray());
+        Assert.AreEqual(originalIndex, FileDigest(Path.Combine(sentinel, ".git", "index")));
+        Assert.AreSequenceEqual(originalObjects, ObjectSnapshot(sentinel));
+        Assert.AreEqual(originalHead, (await Git(sentinel, ["rev-parse", "HEAD"])).Trim());
+        Assert.AreEqual("preserve this repository", await File.ReadAllTextAsync(Path.Combine(sentinel, "protected.txt")));
+        Assert.AreEqual("uncommitted staged content", await File.ReadAllTextAsync(Path.Combine(sentinel, "pending.txt")));
         foreach (var caseId in new[] { "addition", "subtraction", "multiplication" })
         {
             var source = Path.Combine(campaign, "source", caseId);
-            Assert.True(Directory.Exists(Path.Combine(source, ".git")));
-            Assert.NotEqual(originalHead, (await Git(source, ["rev-parse", "HEAD"])).Trim());
+            Assert.IsTrue(Directory.Exists(Path.Combine(source, ".git")));
+            Assert.AreNotEqual(originalHead, (await Git(source, ["rev-parse", "HEAD"])).Trim());
             var tracked = await Git(source, ["ls-tree", "-r", "--name-only", "HEAD"]);
             Assert.Contains("Calc.cs", tracked); Assert.Contains("Program.cs", tracked);
             Assert.DoesNotContain("protected.txt", tracked); Assert.DoesNotContain("pending.txt", tracked);
         }
-        Assert.Empty(Directory.EnumerateFileSystemEntries(workspace));
+        Assert.IsEmpty(Directory.EnumerateFileSystemEntries(workspace));
     }
 
     private static string FileDigest(string path) => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
@@ -80,8 +89,14 @@ public sealed class EvaluationCorpusIsolationTests
         .Order(StringComparer.Ordinal).Select(path => Path.GetRelativePath(repository, path) + ":" + FileDigest(path)).ToArray();
     private static async Task<string> Git(string directory, string[] arguments)
     {
-        var start = new ProcessStartInfo("git") { WorkingDirectory = directory, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true };
+        var start = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = directory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
         foreach (var key in start.Environment.Keys.Where(key => key.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)).ToArray()) start.Environment.Remove(key);
         start.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
         start.Environment["GIT_CONFIG_GLOBAL"] = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
@@ -91,7 +106,7 @@ public sealed class EvaluationCorpusIsolationTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         try { await process.WaitForExitAsync(deadline.Token); }
         catch { if (!process.HasExited) process.Kill(entireProcessTree: true); throw; }
-        Assert.True(process.ExitCode == 0, await error);
+        Assert.IsTrue(process.ExitCode == 0, await error);
         return await output;
     }
 

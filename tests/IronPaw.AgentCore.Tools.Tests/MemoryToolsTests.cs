@@ -5,9 +5,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class MemoryToolsTests
 {
-    [Fact]
+    [TestMethod]
     public async Task SaveMemoryTool_SavesGlobalMemory()
     {
         var (store, root) = CreateStore();
@@ -19,11 +20,11 @@ public sealed class MemoryToolsTests
 
             var result = await tool.ExecuteAsync(call, context, CancellationToken.None);
 
-            Assert.False(result.IsError);
+            Assert.IsFalse(result.IsError);
             var memories = await store.LoadGlobalAsync(CancellationToken.None);
-            Assert.Single(memories);
-            Assert.Equal("User likes dark mode", memories[0].Content);
-            Assert.Equal("agent", memories[0].Source);
+            Assert.ContainsSingle(memories);
+            Assert.AreEqual("User likes dark mode", memories[0].Content);
+            Assert.AreEqual("agent", memories[0].Source);
         }
         finally
         {
@@ -31,7 +32,7 @@ public sealed class MemoryToolsTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SaveMemoryTool_SavesSessionMemory()
     {
         var (store, root) = CreateStore();
@@ -43,10 +44,10 @@ public sealed class MemoryToolsTests
 
             var result = await tool.ExecuteAsync(call, context, CancellationToken.None);
 
-            Assert.False(result.IsError);
+            Assert.IsFalse(result.IsError);
             var sessionMemories = await store.LoadSessionAsync(context.SessionKey, CancellationToken.None);
-            Assert.Single(sessionMemories);
-            Assert.Equal("Working on auth", sessionMemories[0].Content);
+            Assert.ContainsSingle(sessionMemories);
+            Assert.AreEqual("Working on auth", sessionMemories[0].Content);
         }
         finally
         {
@@ -54,7 +55,7 @@ public sealed class MemoryToolsTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SaveMemoryTool_ReturnsErrorForMissingContent()
     {
         var (store, root) = CreateStore();
@@ -64,7 +65,7 @@ public sealed class MemoryToolsTests
             var call = CreateToolCall("save_memory", new { category = "test" });
 
             var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
-            Assert.True(result.IsError);
+            Assert.IsTrue(result.IsError);
         }
         finally
         {
@@ -72,7 +73,7 @@ public sealed class MemoryToolsTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task RecallMemoryTool_FindsMemories()
     {
         var (store, root) = CreateStore();
@@ -86,9 +87,9 @@ public sealed class MemoryToolsTests
 
             var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-            Assert.False(result.IsError);
+            Assert.IsFalse(result.IsError);
             var parsed = JsonDocument.Parse(result.Content);
-            Assert.Single(parsed.RootElement.EnumerateArray());
+            Assert.ContainsSingle(parsed.RootElement.EnumerateArray());
         }
         finally
         {
@@ -96,7 +97,7 @@ public sealed class MemoryToolsTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ForgetMemoryTool_RemovesMemory()
     {
         var (store, root) = CreateStore();
@@ -109,8 +110,8 @@ public sealed class MemoryToolsTests
 
             var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
 
-            Assert.False(result.IsError);
-            Assert.Empty(await store.LoadGlobalAsync(CancellationToken.None));
+            Assert.IsFalse(result.IsError);
+            Assert.IsEmpty(await store.LoadGlobalAsync(CancellationToken.None));
         }
         finally
         {
@@ -118,7 +119,7 @@ public sealed class MemoryToolsTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ForgetMemoryTool_ReturnsErrorForMissingId()
     {
         var (store, root) = CreateStore();
@@ -128,7 +129,7 @@ public sealed class MemoryToolsTests
             var call = CreateToolCall("forget_memory", new { memory_id = "nonexistent" });
 
             var result = await tool.ExecuteAsync(call, CreateContext(), CancellationToken.None);
-            Assert.True(result.IsError);
+            Assert.IsTrue(result.IsError);
         }
         finally
         {

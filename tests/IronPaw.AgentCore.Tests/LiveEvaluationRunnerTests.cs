@@ -6,98 +6,127 @@ using IronPaw.AgentCore.Persistence.CSharpDb;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class LiveEvaluationRunnerTests
 {
     private static readonly CallerIdentity Owner = new("live-evaluation-test-owner", "Local evaluation test", true);
     private static readonly CancellationToken Ct = CancellationToken.None;
 
-    [Fact]
+    [TestMethod]
     public async Task ThreePairsUseTheSameInputsChecksAndCaps_AndCompletedResumeNeverCallsProvider()
     {
         await using var scope = await Scope.OpenAsync();
         var client = new FixtureClient();
         var report = await scope.Runner(client).StartAsync(Settings() with { PairedTrials = 3 }, "paired", scope.Root, Owner, true, Ct);
 
-        Assert.Equal("Completed", report.Status);
-        Assert.Equal("NOT_ESTABLISHED", report.LiveBaselineQualification);
-        Assert.Equal(6, report.Trials.Length);
-        Assert.All(report.Trials, trial => Assert.True(trial.VerifiedCompletion, TaskGraphDocumentJson.Serialize(trial)));
-        Assert.Equal(21, client.Calls);
-        Assert.All(report.Checkpoint.Requests, request => Assert.Equal(LiveEvaluationRequestState.Completed, request.State));
-        Assert.True(client.ParallelBranchesObserved);
+        Assert.AreEqual("Completed", report.Status);
+        Assert.AreEqual("NOT_ESTABLISHED", report.LiveBaselineQualification);
+        Assert.AreEqual(6, report.Trials.Length);
+        foreach (var trial in report.Trials)
+        {
+            Assert.IsTrue(trial.VerifiedCompletion, TaskGraphDocumentJson.Serialize(trial));
+        }
+        Assert.AreEqual(21, client.Calls);
+        foreach (var request in report.Checkpoint.Requests)
+        {
+            Assert.AreEqual(LiveEvaluationRequestState.Completed, request.State);
+        }
+        Assert.IsTrue(client.ParallelBranchesObserved);
         foreach (var pair in report.Trials.GroupBy(t => t.TrialId))
         {
-            Assert.Single(pair.Select(t => t.BaseCommit).Distinct());
-            Assert.Single(pair.Select(t => t.InputDigest).Distinct());
-            Assert.Equal(new[] { "direct", "graph" }, pair.Select(t => t.Strategy).Order());
-            Assert.All(pair, trial => Assert.Equal(2, trial.Tasks.Single(t => t.TaskId is "direct" or "join").Verifications.Length));
+            Assert.ContainsSingle(pair.Select(t => t.BaseCommit).Distinct());
+            Assert.ContainsSingle(pair.Select(t => t.InputDigest).Distinct());
+            Assert.AreSequenceEqual(new[] { "direct", "graph" }, pair.Select(t => t.Strategy).Order());
+            foreach (var trial in pair)
+            {
+                Assert.AreEqual(2, trial.Tasks.Single(t => t.TaskId is "direct" or "join").Verifications.Length);
+            }
         }
         var snapshot = await File.ReadAllTextAsync(Path.Combine(scope.Root, "report.json"));
         Assert.Contains("NOT_ESTABLISHED", snapshot);
         await scope.ReopenAsync();
         var reject = new FixtureClient { Reject = true };
         var resumed = await scope.Runner(reject).ResumeAsync("paired", scope.Root, Owner, true, Ct);
-        Assert.Equal("Completed", resumed.Status);
-        Assert.Equal(0, reject.Calls);
-        Assert.Equal(report.Checkpoint.Requests.Length, resumed.Checkpoint.Requests.Length);
-        Assert.Equal(report.Checkpoint.ChargedSpend, resumed.Checkpoint.ChargedSpend);
-        Assert.Equal(report.Trials.Select(t => t.ElapsedWallMilliseconds), resumed.Trials.Select(t => t.ElapsedWallMilliseconds));
-        Assert.DoesNotContain(Directory.EnumerateDirectories(Path.Combine(scope.Root, "source"), "*", SearchOption.AllDirectories),
-            directory => Path.GetFileName(directory) is "bin" or "obj");
+        Assert.AreEqual("Completed", resumed.Status);
+        Assert.AreEqual(0, reject.Calls);
+        Assert.AreEqual(report.Checkpoint.Requests.Length, resumed.Checkpoint.Requests.Length);
+        Assert.AreEqual(report.Checkpoint.ChargedSpend, resumed.Checkpoint.ChargedSpend);
+        Assert.AreSequenceEqual(report.Trials.Select(t => t.ElapsedWallMilliseconds), resumed.Trials.Select(t => t.ElapsedWallMilliseconds));
+        Assert.DoesNotContain(directory => Path.GetFileName(directory) is "bin" or "obj", Directory.EnumerateDirectories(Path.Combine(scope.Root, "source"), "*", SearchOption.AllDirectories));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task InterruptedProviderPreservesReservationAndStopsFurtherTrialsAfterReopen()
     {
         await using var scope = await Scope.OpenAsync();
         var client = new FixtureClient { Interrupt = true };
         var report = await scope.Runner(client).StartAsync(Settings(), "interrupted", scope.Root, Owner, true, Ct);
-        Assert.Equal("NeedsReconciliation", report.Status);
-        Assert.True(report.Checkpoint.NeedsReconciliation);
-        Assert.Empty(report.Trials);
-        Assert.NotEmpty(report.PendingTrials);
-        Assert.All(report.Checkpoint.Requests, request => Assert.Equal(request.Request.ReservedSpend, request.ChargedSpend));
-        Assert.True(report.Checkpoint.ChargedSpend > 0);
+        Assert.AreEqual("NeedsReconciliation", report.Status);
+        Assert.IsTrue(report.Checkpoint.NeedsReconciliation);
+        Assert.IsEmpty(report.Trials);
+        Assert.IsNotEmpty(report.PendingTrials);
+        foreach (var request in report.Checkpoint.Requests)
+        {
+            Assert.AreEqual(request.Request.ReservedSpend, request.ChargedSpend);
+        }
+        Assert.IsTrue(report.Checkpoint.ChargedSpend > 0);
         await scope.ReopenAsync();
         var reject = new FixtureClient { Reject = true };
         var resumed = await scope.Runner(reject).ResumeAsync("interrupted", scope.Root, Owner, true, Ct);
-        Assert.Equal("NeedsReconciliation", resumed.Status);
-        Assert.Equal(0, reject.Calls);
-        Assert.Equal(report.Checkpoint.ChargedSpend, resumed.Checkpoint.ChargedSpend);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => scope.Runner(reject).InspectAsync("interrupted", scope.Root, Owner with { Id = "different" }, Ct));
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => scope.Runner(reject).InspectAsync("interrupted", scope.Root + "-moved", Owner, Ct));
+        Assert.AreEqual("NeedsReconciliation", resumed.Status);
+        Assert.AreEqual(0, reject.Calls);
+        Assert.AreEqual(report.Checkpoint.ChargedSpend, resumed.Checkpoint.ChargedSpend);
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => scope.Runner(reject).InspectAsync("interrupted", scope.Root, Owner with { Id = "different" }, Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => scope.Runner(reject).InspectAsync("interrupted", scope.Root + "-moved", Owner, Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task InsufficientCapPreventsProviderDispatchAndPreservesFailedTrial()
     {
         await using var scope = await Scope.OpenAsync();
         var client = new FixtureClient();
         var report = await scope.Runner(client).StartAsync(Settings() with { MaxTotalSpend = .000001m }, "cap", scope.Root, Owner, true, Ct);
-        Assert.Equal(0, client.Calls);
-        Assert.Empty(report.Checkpoint.Requests);
-        Assert.Equal("BudgetExhausted", report.Status);
-        Assert.NotEmpty(report.Trials);
-        Assert.All(report.Trials, trial => Assert.False(trial.VerifiedCompletion));
+        Assert.AreEqual(0, client.Calls);
+        Assert.IsEmpty(report.Checkpoint.Requests);
+        Assert.AreEqual("BudgetExhausted", report.Status);
+        Assert.IsNotEmpty(report.Trials);
+        foreach (var trial in report.Trials)
+        {
+            Assert.IsFalse(trial.VerifiedCompletion);
+        }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DisabledConfigurationOrMissingHostGrantHasNoExecutionEffects()
     {
         await using var scope = await Scope.OpenAsync();
         var reject = new FixtureClient { Reject = true };
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Runner(reject).StartAsync(new(), "disabled", scope.Root, Owner, true, Ct));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => scope.Runner(reject).StartAsync(Settings(), "grant", scope.Root, Owner, false, Ct));
-        Assert.False(Directory.Exists(Path.Combine(scope.Root, "source")));
-        Assert.Null(await ((ILiveEvaluationStore)scope.Store).GetEvaluationAsync("disabled", Owner, Ct));
-        Assert.Equal(0, reject.Calls);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => scope.Runner(reject).StartAsync(new(), "disabled", scope.Root, Owner, true, Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => scope.Runner(reject).StartAsync(Settings(), "grant", scope.Root, Owner, false, Ct));
+        Assert.IsFalse(Directory.Exists(Path.Combine(scope.Root, "source")));
+        Assert.IsNull(await ((ILiveEvaluationStore)scope.Store).GetEvaluationAsync("disabled", Owner, Ct));
+        Assert.AreEqual(0, reject.Calls);
     }
 
-    private static LiveEvaluationSettings Settings() => new() {
-        Enabled = true, Provider = "openai", Model = "controlled-fixture-only", MaxTotalSpend = 10,
-        Pricing = new() { InputPerMillion = 1, OutputPerMillion = 1, CacheReadPerMillion = 1, CacheWritePerMillion = 1,
-            Source = "Synthetic test rates; not provider pricing", AsOfUtc = new(2026, 10, 18, 0, 0, 0, TimeSpan.Zero) },
-        MaxInputTokensPerRequest = 50_000, MaxOutputTokensPerRequest = 1000, InputFramingTokenAllowance = 1024, PairedTrials = 1
+    private static LiveEvaluationSettings Settings() => new()
+    {
+        Enabled = true,
+        Provider = "openai",
+        Model = "controlled-fixture-only",
+        MaxTotalSpend = 10,
+        Pricing = new()
+        {
+            InputPerMillion = 1,
+            OutputPerMillion = 1,
+            CacheReadPerMillion = 1,
+            CacheWritePerMillion = 1,
+            Source = "Synthetic test rates; not provider pricing",
+            AsOfUtc = new(2026, 10, 18, 0, 0, 0, TimeSpan.Zero)
+        },
+        MaxInputTokensPerRequest = 50_000,
+        MaxOutputTokensPerRequest = 1000,
+        InputFramingTokenAllowance = 1024,
+        PairedTrials = 1
     };
 
     private sealed class FixtureClient : ILlmClient

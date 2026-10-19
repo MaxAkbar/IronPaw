@@ -9,29 +9,30 @@ using Spectre.Console;
 
 namespace IronPaw.Cli.Tests;
 
+[TestClass]
 public sealed class LiveEvaluationCommandsTests
 {
-    [Theory]
-    [InlineData("{}")]
-    [InlineData("{ \"enabled\": true }")]
-    [InlineData("{ \"provider\": \"local\" }")]
-    [InlineData("not JSON")]
-    [InlineData("{ \"enabled\": false, \"Enabled\": true }")]
+    [TestMethod]
+    [DataRow("{}")]
+    [DataRow("{ \"enabled\": true }")]
+    [DataRow("{ \"provider\": \"local\" }")]
+    [DataRow("not JSON")]
+    [DataRow("{ \"enabled\": false, \"Enabled\": true }")]
     public async Task DisabledOrInvalidConfigRejectsBeforeClientJournalOrOutputCreation(string json)
     {
         using var scope = new Scope();
         var file = await scope.WriteAsync(json);
         var result = await scope.ExecuteAsync(["--run-evaluation", file, "--evaluation-output", scope.Output, "--allow-local-verification"]);
-        Assert.Equal(2, result.Code);
-        Assert.Equal(0, scope.ClientFactories);
-        Assert.False(Directory.Exists(scope.Output));
+        Assert.AreEqual(2, result.Code);
+        Assert.AreEqual(0, scope.ClientFactories);
+        Assert.IsFalse(Directory.Exists(scope.Output));
         Assert.Contains("Evaluation command rejected", result.Text);
     }
 
-    [Theory]
-    [InlineData("--show-evaluation")]
-    [InlineData("--resume-evaluation")]
-    [InlineData("--reconcile-evaluation")]
+    [TestMethod]
+    [DataRow("--show-evaluation")]
+    [DataRow("--resume-evaluation")]
+    [DataRow("--reconcile-evaluation")]
     public async Task MissingJournalDoesNotCreateDirectoriesOrResolveCredentials(string command)
     {
         using var scope = new Scope();
@@ -39,16 +40,16 @@ public sealed class LiveEvaluationCommandsTests
         if (command == "--resume-evaluation") arguments.Add("--allow-local-verification");
         if (command == "--reconcile-evaluation") arguments.AddRange(["--request", "missing", "--result-file", "missing.json", "--reconcile-note", "verified"]);
         var result = await scope.ExecuteAsync(arguments.ToArray());
-        Assert.Equal(2, result.Code);
+        Assert.AreEqual(2, result.Code);
         Assert.Contains("no evaluation.cdb", result.Text);
-        Assert.False(Directory.Exists(scope.Output));
-        Assert.Equal(0, scope.ClientFactories);
+        Assert.IsFalse(Directory.Exists(scope.Output));
+        Assert.AreEqual(0, scope.ClientFactories);
     }
 
-    [Theory]
-    [InlineData("--show-evaluation")]
-    [InlineData("--resume-evaluation")]
-    [InlineData("--reconcile-evaluation")]
+    [TestMethod]
+    [DataRow("--show-evaluation")]
+    [DataRow("--resume-evaluation")]
+    [DataRow("--reconcile-evaluation")]
     public async Task MissingCampaignRejectsBeforeClientOrReceiptFileAccess(string command)
     {
         using var scope = new Scope();
@@ -57,13 +58,13 @@ public sealed class LiveEvaluationCommandsTests
         if (command == "--resume-evaluation") arguments.Add("--allow-local-verification");
         if (command == "--reconcile-evaluation") arguments.AddRange(["--request", "missing", "--result-file", "missing.json", "--reconcile-note", "verified"]);
         var result = await scope.ExecuteAsync(arguments.ToArray());
-        Assert.Equal(2, result.Code);
+        Assert.AreEqual(2, result.Code);
         Assert.Contains("No saved evaluation campaign", result.Text);
         Assert.DoesNotContain("missing.json", result.Text);
-        Assert.Equal(0, scope.ClientFactories);
+        Assert.AreEqual(0, scope.ClientFactories);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task FreshRunRejectsNonemptyOutputBeforeProviderOrJournal()
     {
         using var scope = new Scope();
@@ -72,14 +73,14 @@ public sealed class LiveEvaluationCommandsTests
         await File.WriteAllTextAsync(marker, "preserved");
         var config = await scope.WriteAsync(TaskGraphDocumentJson.Serialize(EvaluationProviderClientTests.Settings()));
         var result = await scope.ExecuteAsync(["--run-evaluation", config, "--evaluation-output", scope.Output, "--allow-local-verification"]);
-        Assert.Equal(2, result.Code);
+        Assert.AreEqual(2, result.Code);
         Assert.Contains("new or empty", result.Text);
-        Assert.Equal("preserved", await File.ReadAllTextAsync(marker));
-        Assert.False(File.Exists(Path.Combine(scope.Output, "evaluation.cdb")));
-        Assert.Equal(0, scope.ClientFactories);
+        Assert.AreEqual("preserved", await File.ReadAllTextAsync(marker));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Output, "evaluation.cdb")));
+        Assert.AreEqual(0, scope.ClientFactories);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ForeignCampaignRejectsBeforeReadingReceiptOrCreatingProvider()
     {
         using var scope = new Scope();
@@ -88,25 +89,25 @@ public sealed class LiveEvaluationCommandsTests
                 new CallerIdentity("different-owner", "Different owner", true), CancellationToken.None);
         var result = await scope.ExecuteAsync(["--reconcile-evaluation", "foreign", "--evaluation-output", scope.Output,
             "--request", "request", "--result-file", "must-not-read-this-file.json", "--reconcile-note", "verified"]);
-        Assert.Equal(2, result.Code);
+        Assert.AreEqual(2, result.Code);
         Assert.DoesNotContain("must-not-read-this-file.json", result.Text);
-        Assert.Equal(0, scope.ClientFactories);
+        Assert.AreEqual(0, scope.ClientFactories);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task FreshRunRejectsOutputInsideCurrentWorkspaceWithoutCreatingIt()
     {
         using var scope = new Scope();
         var config = await scope.WriteAsync(TaskGraphDocumentJson.Serialize(EvaluationProviderClientTests.Settings()));
         var output = Path.Combine(Directory.GetCurrentDirectory(), ".evaluation-rejection-" + Guid.NewGuid().ToString("n"));
         var result = await scope.ExecuteAsync(["--run-evaluation", config, "--evaluation-output", output, "--allow-local-verification"]);
-        Assert.Equal(2, result.Code);
+        Assert.AreEqual(2, result.Code);
         Assert.Contains("outside the current source workspace", result.Text);
-        Assert.False(Directory.Exists(output));
-        Assert.Equal(0, scope.ClientFactories);
+        Assert.IsFalse(Directory.Exists(output));
+        Assert.AreEqual(0, scope.ClientFactories);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ProgramDisabledRunDoesNotBootstrapApplicationStateOrReadProviderConfiguration()
     {
         using var scope = new Scope();
@@ -115,9 +116,14 @@ public sealed class LiveEvaluationCommandsTests
         Directory.CreateDirectory(workspace);
         var journal = AppBootstrapper.ResolveWorkflowDatabasePath(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "IronPaw", "state"), workspace);
-        var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet") {
-            WorkingDirectory = workspace, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+        var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
+        {
+            WorkingDirectory = workspace,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
         };
         foreach (var argument in new[] { typeof(CliOptions).Assembly.Location, "--run-evaluation", config,
             "--evaluation-output", scope.Output, "--allow-local-verification" }) start.ArgumentList.Add(argument);
@@ -131,14 +137,14 @@ public sealed class LiveEvaluationCommandsTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         try { await process.WaitForExitAsync(deadline.Token); }
         catch { if (!process.HasExited) process.Kill(entireProcessTree: true); throw; }
-        Assert.True(process.ExitCode == 2, await error);
+        Assert.IsTrue(process.ExitCode == 2, await error);
         Assert.Contains("Live evaluation is disabled", await output);
-        Assert.False(Directory.Exists(Path.GetDirectoryName(journal)));
-        Assert.False(Directory.Exists(scope.Output));
-        Assert.Empty(Directory.EnumerateFileSystemEntries(workspace));
+        Assert.IsFalse(Directory.Exists(Path.GetDirectoryName(journal)));
+        Assert.IsFalse(Directory.Exists(scope.Output));
+        Assert.IsEmpty(Directory.EnumerateFileSystemEntries(workspace));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ControlledPairRunsThroughCliAndReopensForInspectAndCompletedResumeWithoutProviderCalls()
     {
         using var scope = new Scope();
@@ -146,23 +152,26 @@ public sealed class LiveEvaluationCommandsTests
         var config = await scope.WriteAsync(TaskGraphDocumentJson.Serialize(settings));
         var provider = new CorpusWriter();
         var started = await scope.ExecuteAsync(["--run-evaluation", config, "--evaluation-output", scope.Output, "--allow-local-verification"], _ => provider);
-        Assert.True(started.Code == 0, started.Text);
+        Assert.IsTrue(started.Code == 0, started.Text);
         Assert.Contains("Live baseline qualification: NOT_ESTABLISHED", started.Text);
         var reportPath = Path.Combine(scope.Output, "report.json");
         using var report = JsonDocument.Parse(await File.ReadAllTextAsync(reportPath));
         var id = report.RootElement.GetProperty("campaignId").GetString()!;
-        Assert.Equal("Completed", report.RootElement.GetProperty("status").GetString());
+        Assert.AreEqual("Completed", report.RootElement.GetProperty("status").GetString());
         var trials = report.RootElement.GetProperty("trials").EnumerateArray().ToArray();
-        Assert.Equal(2, trials.Length);
-        Assert.All(trials, trial => Assert.True(trial.GetProperty("verifiedCompletion").GetBoolean()));
-        Assert.True(provider.Calls > 0);
+        Assert.AreEqual(2, trials.Length);
+        foreach (var trial in trials)
+        {
+            Assert.IsTrue(trial.GetProperty("verifiedCompletion").GetBoolean());
+        }
+        Assert.IsTrue(provider.Calls > 0);
         var calls = provider.Calls;
         var shown = await scope.ExecuteAsync(["--show-evaluation", id, "--evaluation-output", scope.Output]);
-        Assert.Equal(0, shown.Code);
+        Assert.AreEqual(0, shown.Code);
         Assert.Contains("Completed", shown.Text);
         var resumed = await scope.ExecuteAsync(["--resume-evaluation", id, "--evaluation-output", scope.Output, "--allow-local-verification"], _ => provider);
-        Assert.True(resumed.Code == 0, resumed.Text);
-        Assert.Equal(calls, provider.Calls);
+        Assert.IsTrue(resumed.Code == 0, resumed.Text);
+        Assert.AreEqual(calls, provider.Calls);
         foreach (var command in new[] { "--reconcile-evaluation-command", "--reconcile-evaluation-task", "--reconcile-evaluation-tool" })
         {
             var arguments = new List<string> { command, id, "--evaluation-output", scope.Output, "--evaluation-graph", "foreign-graph", "--task", "task",
@@ -170,14 +179,14 @@ public sealed class LiveEvaluationCommandsTests
             if (command.EndsWith("-command", StringComparison.Ordinal)) arguments.AddRange(["--invocation", "invocation"]);
             if (command.EndsWith("-tool", StringComparison.Ordinal)) arguments.AddRange(["--tool-execution", "execution"]);
             var rejected = await scope.ExecuteAsync(arguments.ToArray());
-            Assert.Equal(2, rejected.Code);
+            Assert.AreEqual(2, rejected.Code);
             Assert.Contains("does not belong", rejected.Text);
             Assert.DoesNotContain("must-not-read-this-file.json", rejected.Text);
-            Assert.Equal(calls, provider.Calls);
+            Assert.AreEqual(calls, provider.Calls);
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task UnknownPaidRequestCanBeInspectedAndReconciledWithoutAutomaticProviderRetry()
     {
         using var scope = new Scope();
@@ -185,31 +194,31 @@ public sealed class LiveEvaluationCommandsTests
         var config = await scope.WriteAsync(TaskGraphDocumentJson.Serialize(settings));
         var provider = new InterruptedClient();
         var started = await scope.ExecuteAsync(["--run-evaluation", config, "--evaluation-output", scope.Output, "--allow-local-verification"], _ => provider);
-        Assert.Equal(2, started.Code);
+        Assert.AreEqual(2, started.Code);
         using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(scope.Output, "report.json")));
         var id = report.RootElement.GetProperty("campaignId").GetString()!;
-        Assert.Equal("NeedsReconciliation", report.RootElement.GetProperty("status").GetString());
+        Assert.AreEqual("NeedsReconciliation", report.RootElement.GetProperty("status").GetString());
         LiveEvaluationCheckpoint checkpoint;
         await using (var store = await CSharpDbWorkflowStore.OpenAsync(Path.Combine(scope.Output, "evaluation.cdb")))
             checkpoint = (await ((ILiveEvaluationStore)store).GetEvaluationAsync(id, CallerIdentity.LocalOwner(), CancellationToken.None))!;
-        var request = Assert.Single(checkpoint.Requests);
-        Assert.Equal(LiveEvaluationRequestState.NeedsReconciliation, request.State);
+        var request = Assert.ContainsSingle(checkpoint.Requests);
+        Assert.AreEqual(LiveEvaluationRequestState.NeedsReconciliation, request.State);
         var calls = provider.Calls;
         var resumed = await scope.ExecuteAsync(["--resume-evaluation", id, "--evaluation-output", scope.Output, "--allow-local-verification"], _ => provider);
-        Assert.Equal(2, resumed.Code);
-        Assert.Equal(calls, provider.Calls);
+        Assert.AreEqual(2, resumed.Code);
+        Assert.AreEqual(calls, provider.Calls);
         var shown = await scope.ExecuteAsync(["--show-evaluation", id, "--evaluation-output", scope.Output]);
-        Assert.Equal(0, shown.Code);
+        Assert.AreEqual(0, shown.Code);
         var receiptPath = await scope.WriteAsync(TaskGraphDocumentJson.Serialize(new LiveEvaluationReceipt(true, request.Receipt!.ActualSpend, 20, 0,
             "{\"source\":\"controlled external usage fixture\"}")));
         var reconciled = await scope.ExecuteAsync(["--reconcile-evaluation", id, "--evaluation-output", scope.Output,
             "--request", request.Request.RequestId, "--result-file", receiptPath, "--reconcile-note", "Verified controlled provider usage"]);
-        Assert.True(reconciled.Code == 0, reconciled.Text);
-        Assert.Equal(calls, provider.Calls);
+        Assert.IsTrue(reconciled.Code == 0, reconciled.Text);
+        Assert.AreEqual(calls, provider.Calls);
         await using var reopened = await CSharpDbWorkflowStore.OpenAsync(Path.Combine(scope.Output, "evaluation.cdb"));
         var saved = (await ((ILiveEvaluationStore)reopened).GetEvaluationAsync(id, CallerIdentity.LocalOwner(), CancellationToken.None))!;
-        Assert.False(saved.NeedsReconciliation);
-        Assert.Equal("Verified controlled provider usage", Assert.Single(saved.Requests).ReconciliationNote);
+        Assert.IsFalse(saved.NeedsReconciliation);
+        Assert.AreEqual("Verified controlled provider usage", Assert.ContainsSingle(saved.Requests).ReconciliationNote);
     }
 
     private sealed class InterruptedClient : ILlmClient

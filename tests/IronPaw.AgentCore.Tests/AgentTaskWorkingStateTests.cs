@@ -8,12 +8,13 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class AgentTaskWorkingStateTests
 {
     private static readonly CallerIdentity Owner = new("working-state-owner", "Owner", true);
     private static readonly CancellationToken Ct = CancellationToken.None;
 
-    [Fact]
+    [TestMethod]
     public async Task NewExecutionChecksPreparedBytesBeforeFirstProviderAdmission()
     {
         await using var fixture = await Fixture.OpenAsync();
@@ -23,14 +24,14 @@ public sealed class AgentTaskWorkingStateTests
             AfterPrepare = workspace => File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "source.txt"), "Changed after preparation")
         };
         var stopped = await fixture.Runner(client, manager).StartAsync(fixture.Graph, Owner, 1, fixture.Options(), Ct);
-        Assert.Equal(TaskGraphTaskStatus.Failed, Assert.Single(stopped.Tasks).Status);
-        Assert.Equal(0, client.Calls);
-        Assert.Equal(1, manager.Validations);
-        Assert.Empty(manager.LastTools);
-        Assert.DoesNotContain(await fixture.Store.ListAsync(Ct), child => child.ParentRunId is not null);
+        Assert.AreEqual(TaskGraphTaskStatus.Failed, Assert.ContainsSingle(stopped.Tasks).Status);
+        Assert.AreEqual(0, client.Calls);
+        Assert.AreEqual(1, manager.Validations);
+        Assert.IsEmpty(manager.LastTools);
+        Assert.DoesNotContain(child => child.ParentRunId is not null, await fixture.Store.ListAsync(Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CompletedChildBytesMustMatchConfirmedWritesBeforeAnyCapture()
     {
         await using var fixture = await Fixture.OpenAsync();
@@ -44,19 +45,19 @@ public sealed class AgentTaskWorkingStateTests
 
         var stopped = await fixture.Runner(client, manager).StartAsync(fixture.Graph, Owner, 1, fixture.Options(), Ct);
 
-        Assert.Equal(TaskGraphTaskStatus.Failed, Assert.Single(stopped.Tasks).Status);
-        Assert.Equal(2, client.Calls);
-        Assert.True(manager.Validations >= 2);
-        Assert.Equal(0, manager.Captures);
-        Assert.Empty(stopped.Tasks[0].Result!.Artifacts);
-        var child = Assert.Single(await fixture.Store.ListAsync(Ct), run => run.ParentRunId is not null);
-        Assert.Equal(AgentRunStatus.Succeeded, child.Result!.Status);
-        Assert.False(Assert.Single(child.ToolExecutions!).Result!.IsError);
+        Assert.AreEqual(TaskGraphTaskStatus.Failed, Assert.ContainsSingle(stopped.Tasks).Status);
+        Assert.AreEqual(2, client.Calls);
+        Assert.IsTrue(manager.Validations >= 2);
+        Assert.AreEqual(0, manager.Captures);
+        Assert.IsEmpty(stopped.Tasks[0].Result!.Artifacts);
+        var child = Assert.ContainsSingle(run => run.ParentRunId is not null, await fixture.Store.ListAsync(Ct));
+        Assert.AreEqual(AgentRunStatus.Succeeded, child.Result!.Status);
+        Assert.IsFalse(Assert.ContainsSingle(child.ToolExecutions!).Result!.IsError);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task RecoveryBeforeFirstProviderChecksPinnedBytesEvenWhenQueuedChildAlreadyExists(bool createQueuedChild)
     {
         await using var fixture = await Fixture.OpenAsync();
@@ -81,41 +82,41 @@ public sealed class AgentTaskWorkingStateTests
 
         var stopped = await fixture.Runner(client, manager).RecoverTaskAsync(fixture.Graph.GraphId, "task", Owner, Ct);
 
-        Assert.Equal(TaskGraphTaskStatus.Failed, Assert.Single(stopped.Tasks).Status);
-        Assert.Equal(0, client.Calls);
-        Assert.Equal(1, manager.Validations);
-        Assert.Empty(manager.LastTools);
-        Assert.Equal(claim.AttemptId, stopped.Tasks[0].AttemptId);
+        Assert.AreEqual(TaskGraphTaskStatus.Failed, Assert.ContainsSingle(stopped.Tasks).Status);
+        Assert.AreEqual(0, client.Calls);
+        Assert.AreEqual(1, manager.Validations);
+        Assert.IsEmpty(manager.LastTools);
+        Assert.AreEqual(claim.AttemptId, stopped.Tasks[0].AttemptId);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task RecoveryUsesConfirmedToolReceiptsToValidateCompletedChildWorkspace(bool tamper)
     {
         await using var fixture = await Fixture.OpenAsync();
         var writer = new Writer();
         var interrupt = new ObservedWorkspaces(fixture.Manager) { InterruptCapture = true };
         var stopped = await fixture.Runner(writer, interrupt).StartAsync(fixture.Graph, Owner, 1, fixture.Options(), Ct);
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, Assert.Single(stopped.Tasks).Status);
-        var child = Assert.Single(await fixture.Store.ListAsync(Ct), run => run.ParentRunId is not null);
-        Assert.Equal(AgentRunStatus.Succeeded, child.Result!.Status);
-        var tool = Assert.Single(child.ToolExecutions!);
-        Assert.Equal(WorkflowToolState.Completed, tool.State);
-        Assert.False(tool.Result!.IsError);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, Assert.ContainsSingle(stopped.Tasks).Status);
+        var child = Assert.ContainsSingle(run => run.ParentRunId is not null, await fixture.Store.ListAsync(Ct));
+        Assert.AreEqual(AgentRunStatus.Succeeded, child.Result!.Status);
+        var tool = Assert.ContainsSingle(child.ToolExecutions!);
+        Assert.AreEqual(WorkflowToolState.Completed, tool.State);
+        Assert.IsFalse(tool.Result!.IsError);
         var workspace = JsonSerializer.Deserialize<TaskWorkspace>(await File.ReadAllTextAsync(
-            Assert.Single(Directory.EnumerateFiles(fixture.Managed, "workspace.json", SearchOption.AllDirectories))))!;
+            Assert.ContainsSingle(Directory.EnumerateFiles(fixture.Managed, "workspace.json", SearchOption.AllDirectories))))!;
         if (tamper) await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "output.txt"), "Changed after confirmed write");
         var unused = new Writer();
         var manager = new ObservedWorkspaces(fixture.Manager);
 
         var recovered = await fixture.Runner(unused, manager).RecoverTaskAsync(fixture.Graph.GraphId, "task", Owner, Ct);
 
-        Assert.Equal(tamper ? TaskGraphTaskStatus.Failed : TaskGraphTaskStatus.Succeeded, Assert.Single(recovered.Tasks).Status);
-        Assert.Equal(0, unused.Calls);
-        Assert.True(manager.Validations >= 1);
-        Assert.Equal(tool.ExecutionId, Assert.Single(manager.LastTools).ExecutionId);
-        Assert.Equal(tool.ExecutionId, Assert.Single((await fixture.Store.GetAsync(new(child.RunId), Ct))!.ToolExecutions!).ExecutionId);
+        Assert.AreEqual(tamper ? TaskGraphTaskStatus.Failed : TaskGraphTaskStatus.Succeeded, Assert.ContainsSingle(recovered.Tasks).Status);
+        Assert.AreEqual(0, unused.Calls);
+        Assert.IsTrue(manager.Validations >= 1);
+        Assert.AreEqual(tool.ExecutionId, Assert.ContainsSingle(manager.LastTools).ExecutionId);
+        Assert.AreEqual(tool.ExecutionId, Assert.ContainsSingle((await fixture.Store.GetAsync(new(child.RunId), Ct))!.ToolExecutions!).ExecutionId);
     }
 
     private sealed class ObservedWorkspaces(ITaskWorkspaceManager inner) : ITaskWorkspaceManager
@@ -148,7 +149,7 @@ public sealed class AgentTaskWorkingStateTests
         public Task<bool> VerifyAsync(TaskWorkspace workspace, WorkflowTaskResult result, CancellationToken ct) => inner.VerifyAsync(workspace, result, ct);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task RecoveryPreservesSuccessfulWritesUsingExistingWindowsFileCasing()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -162,15 +163,15 @@ public sealed class AgentTaskWorkingStateTests
         var writer = new Writer("SOURCE.txt");
         var stopped = await fixture.Runner(writer, new ObservedWorkspaces(fixture.Manager) { InterruptCapture = true })
             .StartAsync(graph, Owner, 1, fixture.Options(), Ct);
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, Assert.Single(stopped.Tasks).Status);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, Assert.ContainsSingle(stopped.Tasks).Status);
         var unused = new Writer();
 
         var recovered = await fixture.Runner(unused, new ObservedWorkspaces(fixture.Manager))
             .RecoverTaskAsync(graph.GraphId, "task", Owner, Ct);
 
-        Assert.Equal(TaskGraphTaskStatus.Succeeded, Assert.Single(recovered.Tasks).Status);
-        Assert.Equal(0, unused.Calls);
-        Assert.Equal("Confirmed output", await File.ReadAllTextAsync(Assert.Single(recovered.Tasks[0].Result!.Artifacts).Location));
+        Assert.AreEqual(TaskGraphTaskStatus.Succeeded, Assert.ContainsSingle(recovered.Tasks).Status);
+        Assert.AreEqual(0, unused.Calls);
+        Assert.AreEqual("Confirmed output", await File.ReadAllTextAsync(Assert.ContainsSingle(recovered.Tasks[0].Result!.Artifacts).Location));
     }
 
     private sealed class Writer(string path = "output.txt", Func<Task>? afterWrite = null) : ILlmClient
@@ -242,7 +243,7 @@ public sealed class AgentTaskWorkingStateTests
             var error = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
             await output;
-            Assert.True(process.ExitCode == 0, await error);
+            Assert.IsTrue(process.ExitCode == 0, await error);
         }
     }
 }

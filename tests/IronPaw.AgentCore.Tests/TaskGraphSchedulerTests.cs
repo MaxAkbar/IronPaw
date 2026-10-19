@@ -5,14 +5,15 @@ using IronPaw.AgentCore.Persistence.CSharpDb;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class TaskGraphSchedulerTests
 {
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(20);
     private static readonly CallerIdentity Caller = CallerIdentity.Authenticated("graph-owner", "Graph owner");
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task ChainAndDiamond_ExecuteInStableDependencyOrder(bool diamond)
     {
         await using var scope = await Scope.OpenAsync();
@@ -25,21 +26,23 @@ public sealed class TaskGraphSchedulerTests
 
         var result = await scope.Runtime(executor, verifier).StartAsync(graph, Caller, 1, timeout.Token);
 
-        Assert.Equal(diamond ? ["inspect", "review", "test", "deliver"] : ["inspect", "implement", "deliver"],
-            executor.Calls.Select(claim => claim.Task.TaskId).ToArray());
-        Assert.All(result.Tasks, state => Assert.Equal(TaskGraphTaskStatus.Succeeded, state.Status));
-        Assert.All(result.Tasks, state =>
+        Assert.AreSequenceEqual(diamond ? ["inspect", "review", "test", "deliver"] : ["inspect", "implement", "deliver"], executor.Calls.Select(claim => claim.Task.TaskId).ToArray());
+        foreach (var state in result.Tasks)
         {
-            Assert.Equal(TaskAcceptanceOutcome.Accepted, state.Acceptance!.Outcome);
-            Assert.Equal(state.AttemptId, state.Acceptance.AttemptId);
-            Assert.Equal(result.DefinitionFingerprint, state.Acceptance.GraphFingerprint);
-            Assert.Equal(state.Result!.Revision, state.Acceptance.Revision);
-            Assert.False(string.IsNullOrWhiteSpace(state.Acceptance.ResultDigest));
-        });
-        Assert.Equal(result.Tasks.Length, verifier.Calls.Count);
+            Assert.AreEqual(TaskGraphTaskStatus.Succeeded, state.Status);
+        }
+        foreach (var state in result.Tasks)
+        {
+            Assert.AreEqual(TaskAcceptanceOutcome.Accepted, state.Acceptance!.Outcome);
+            Assert.AreEqual(state.AttemptId, state.Acceptance.AttemptId);
+            Assert.AreEqual(result.DefinitionFingerprint, state.Acceptance.GraphFingerprint);
+            Assert.AreEqual(state.Result!.Revision, state.Acceptance.Revision);
+            Assert.IsFalse(string.IsNullOrWhiteSpace(state.Acceptance.ResultDigest));
+        }
+        Assert.AreEqual(result.Tasks.Length, verifier.Calls.Count);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task IndependentBranches_RespectThePersistedParallelLimit()
     {
         await using var scope = await Scope.OpenAsync();
@@ -58,15 +61,18 @@ public sealed class TaskGraphSchedulerTests
         try
         {
             await twoStarted.Task.WaitAsync(timeout.Token);
-            Assert.Equal(2, executor.Calls.Count);
+            Assert.AreEqual(2, executor.Calls.Count);
             var active = (await scope.Store.GetTaskGraphAsync(graph.GraphId, timeout.Token))!;
-            Assert.Equal(2, active.MaxConcurrency);
-            Assert.Equal(2, active.Tasks.Count(task => task.Status == TaskGraphTaskStatus.Running));
+            Assert.AreEqual(2, active.MaxConcurrency);
+            Assert.AreEqual(2, active.Tasks.Count(task => task.Status == TaskGraphTaskStatus.Running));
             release.TrySetResult();
             var result = await run.WaitAsync(timeout.Token);
-            Assert.Equal(6, executor.Calls.Count);
-            Assert.Equal(2, executor.MaximumActive);
-            Assert.All(result.Tasks, task => Assert.Equal(TaskGraphTaskStatus.Succeeded, task.Status));
+            Assert.AreEqual(6, executor.Calls.Count);
+            Assert.AreEqual(2, executor.MaximumActive);
+            foreach (var task in result.Tasks)
+            {
+                Assert.AreEqual(TaskGraphTaskStatus.Succeeded, task.Status);
+            }
         }
         finally
         {
@@ -76,7 +82,7 @@ public sealed class TaskGraphSchedulerTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task FailedDependency_BlocksDescendantsWhileIndependentWorkFinishes()
     {
         await using var scope = await Scope.OpenAsync();
@@ -87,13 +93,13 @@ public sealed class TaskGraphSchedulerTests
 
         var result = await scope.Runtime(executor, new RecordingVerifier()).StartAsync(graph, Caller, 2, timeout.Token);
 
-        Assert.Equal(TaskGraphTaskStatus.Failed, State(result, "failed").Status);
-        Assert.Equal(TaskGraphTaskStatus.Succeeded, State(result, "independent").Status);
-        Assert.Null(State(result, "blocked").AttemptId);
-        Assert.DoesNotContain(executor.Calls, claim => claim.Task.TaskId == "blocked");
+        Assert.AreEqual(TaskGraphTaskStatus.Failed, State(result, "failed").Status);
+        Assert.AreEqual(TaskGraphTaskStatus.Succeeded, State(result, "independent").Status);
+        Assert.IsNull(State(result, "blocked").AttemptId);
+        Assert.DoesNotContain(claim => claim.Task.TaskId == "blocked", executor.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ProposedSuccess_DoesNotUnblockDependentBeforeTrustedAcceptance()
     {
         await using var scope = await Scope.OpenAsync();
@@ -116,13 +122,16 @@ public sealed class TaskGraphSchedulerTests
         {
             await verifying.Task.WaitAsync(timeout.Token);
             var pending = (await scope.Store.GetTaskGraphAsync(graph.GraphId, timeout.Token))!;
-            Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, State(pending, "parent").Status);
-            Assert.Null(State(pending, "parent").Acceptance);
-            Assert.Null(State(pending, "dependent").AttemptId);
-            Assert.Equal("parent", Assert.Single(executor.Calls).Task.TaskId);
+            Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, State(pending, "parent").Status);
+            Assert.IsNull(State(pending, "parent").Acceptance);
+            Assert.IsNull(State(pending, "dependent").AttemptId);
+            Assert.AreEqual("parent", Assert.ContainsSingle(executor.Calls).Task.TaskId);
             release.TrySetResult();
             var result = await run.WaitAsync(timeout.Token);
-            Assert.All(result.Tasks, task => Assert.Equal(TaskGraphTaskStatus.Succeeded, task.Status));
+            foreach (var task in result.Tasks)
+            {
+                Assert.AreEqual(TaskGraphTaskStatus.Succeeded, task.Status);
+            }
         }
         finally
         {
@@ -132,9 +141,9 @@ public sealed class TaskGraphSchedulerTests
         }
     }
 
-    [Theory]
-    [InlineData(TaskAcceptanceOutcome.Rejected)]
-    [InlineData(TaskAcceptanceOutcome.Inconclusive)]
+    [TestMethod]
+    [DataRow(TaskAcceptanceOutcome.Rejected)]
+    [DataRow(TaskAcceptanceOutcome.Inconclusive)]
     public async Task RejectedOrInconclusiveVerification_CannotUnblockDependent(TaskAcceptanceOutcome decision)
     {
         await using var scope = await Scope.OpenAsync();
@@ -146,15 +155,15 @@ public sealed class TaskGraphSchedulerTests
 
         var result = await scope.Runtime(executor, verifier).StartAsync(graph, Caller, 2, timeout.Token);
 
-        Assert.NotEqual(TaskGraphTaskStatus.Succeeded, State(result, "parent").Status);
-        Assert.Equal(decision, State(result, "parent").Acceptance!.Outcome);
-        Assert.Null(State(result, "blocked").AttemptId);
-        Assert.Equal(TaskGraphTaskStatus.Succeeded, State(result, "independent").Status);
-        Assert.Equal(1, verifier.Calls.Count(claim => claim.Task.TaskId == "parent"));
-        Assert.DoesNotContain(executor.Calls, claim => claim.Task.TaskId == "blocked");
+        Assert.AreNotEqual(TaskGraphTaskStatus.Succeeded, State(result, "parent").Status);
+        Assert.AreEqual(decision, State(result, "parent").Acceptance!.Outcome);
+        Assert.IsNull(State(result, "blocked").AttemptId);
+        Assert.AreEqual(TaskGraphTaskStatus.Succeeded, State(result, "independent").Status);
+        Assert.AreEqual(1, verifier.Calls.Count(claim => claim.Task.TaskId == "parent"));
+        Assert.DoesNotContain(claim => claim.Task.TaskId == "blocked", executor.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task InconclusiveVerification_ExplicitResumeRetriesVerifierWithoutRepeatingExecutor()
     {
         await using var scope = await Scope.OpenAsync();
@@ -164,7 +173,7 @@ public sealed class TaskGraphSchedulerTests
         var verifier = new RecordingVerifier((_, _, _) => System.Threading.Tasks.Task.FromResult(
             new TaskAcceptanceDecision(TaskAcceptanceOutcome.Inconclusive, "trusted-test-verifier", "Need more observations.")));
         var first = await scope.Runtime(executor, verifier).StartAsync(graph, Caller, 1, timeout.Token);
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, State(first, "parent").Status);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, State(first, "parent").Status);
         var initialAttempt = State(first, "parent").AttemptId;
         await scope.ReopenAsync();
         var laterExecutor = new RecordingExecutor();
@@ -172,14 +181,17 @@ public sealed class TaskGraphSchedulerTests
 
         var resumed = await scope.Runtime(laterExecutor, laterVerifier).ResumeAsync(graph.GraphId, Caller, timeout.Token);
 
-        Assert.Equal(initialAttempt, State(resumed, "parent").AttemptId);
-        Assert.Equal("parent", Assert.Single(executor.Calls).Task.TaskId);
-        Assert.Equal("dependent", Assert.Single(laterExecutor.Calls).Task.TaskId);
-        Assert.Equal(["parent", "dependent"], laterVerifier.Calls.Select(claim => claim.Task.TaskId).ToArray());
-        Assert.All(resumed.Tasks, task => Assert.Equal(TaskGraphTaskStatus.Succeeded, task.Status));
+        Assert.AreEqual(initialAttempt, State(resumed, "parent").AttemptId);
+        Assert.AreEqual("parent", Assert.ContainsSingle(executor.Calls).Task.TaskId);
+        Assert.AreEqual("dependent", Assert.ContainsSingle(laterExecutor.Calls).Task.TaskId);
+        Assert.AreSequenceEqual(["parent", "dependent"], laterVerifier.Calls.Select(claim => claim.Task.TaskId).ToArray());
+        foreach (var task in resumed.Tasks)
+        {
+            Assert.AreEqual(TaskGraphTaskStatus.Succeeded, task.Status);
+        }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CompletedGraph_ReplayAndReopenDoNotExecuteOrVerifyAgain()
     {
         await using var scope = await Scope.OpenAsync();
@@ -194,22 +206,25 @@ public sealed class TaskGraphSchedulerTests
 
         var reopened = await scope.Runtime(unusedExecutor, unusedVerifier).ResumeAsync(graph.GraphId, Caller, timeout.Token);
 
-        Assert.Empty(unusedExecutor.Calls);
-        Assert.Empty(unusedVerifier.Calls);
-        Assert.Equal(first.DefinitionFingerprint, replay.DefinitionFingerprint);
-        Assert.Equal(first.Tasks.Select(task => task.AttemptId), reopened.Tasks.Select(task => task.AttemptId));
-        Assert.All(reopened.Tasks, task => Assert.Equal(TaskGraphTaskStatus.Succeeded, task.Status));
+        Assert.IsEmpty(unusedExecutor.Calls);
+        Assert.IsEmpty(unusedVerifier.Calls);
+        Assert.AreEqual(first.DefinitionFingerprint, replay.DefinitionFingerprint);
+        Assert.AreSequenceEqual(first.Tasks.Select(task => task.AttemptId), reopened.Tasks.Select(task => task.AttemptId));
+        foreach (var task in reopened.Tasks)
+        {
+            Assert.AreEqual(TaskGraphTaskStatus.Succeeded, task.Status);
+        }
     }
 
-    [Theory]
-    [InlineData("resume", false)]
-    [InlineData("resume", true)]
-    [InlineData("pause", false)]
-    [InlineData("pause", true)]
-    [InlineData("cancel", false)]
-    [InlineData("cancel", true)]
-    [InlineData("reconcile", false)]
-    [InlineData("reconcile", true)]
+    [TestMethod]
+    [DataRow("resume", false)]
+    [DataRow("resume", true)]
+    [DataRow("pause", false)]
+    [DataRow("pause", true)]
+    [DataRow("cancel", false)]
+    [DataRow("cancel", true)]
+    [DataRow("reconcile", false)]
+    [DataRow("reconcile", true)]
     public async Task RecoveryCommands_RequireOriginalCallerAndOwnershipLevel(string operation, bool changedOwnership)
     {
         await using var scope = await Scope.OpenAsync();
@@ -223,7 +238,7 @@ public sealed class TaskGraphSchedulerTests
         var executor = new RecordingExecutor();
         var runtime = scope.Runtime(executor, new RecordingVerifier());
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(async () =>
         {
             switch (operation)
             {
@@ -236,14 +251,14 @@ public sealed class TaskGraphSchedulerTests
         });
 
         var after = (await scope.Store.GetTaskGraphAsync(graph.GraphId, timeout.Token))!;
-        Assert.Equal(before.Revision, after.Revision);
-        Assert.Equal(before.Control, after.Control);
-        Assert.Empty(executor.Calls);
+        Assert.AreEqual(before.Revision, after.Revision);
+        Assert.AreEqual(before.Control, after.Control);
+        Assert.IsEmpty(executor.Calls);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task InterruptedExecutorWithPossibleEffects_RemainsUnknownAndIsNeverRetried(bool permanentCancel)
     {
         await using var scope = await Scope.OpenAsync();
@@ -269,17 +284,17 @@ public sealed class TaskGraphSchedulerTests
             try { await run.WaitAsync(timeout.Token); }
             catch (OperationCanceledException) when (callerCancellation.IsCancellationRequested || permanentCancel) { }
             var interrupted = (await scope.Store.GetTaskGraphAsync(graph.GraphId, timeout.Token))!;
-            Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, State(interrupted, "effect").Status);
-            Assert.Null(State(interrupted, "effect").Result);
-            Assert.Null(State(interrupted, "dependent").AttemptId);
-            Assert.Equal(1, effects);
+            Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, State(interrupted, "effect").Status);
+            Assert.IsNull(State(interrupted, "effect").Result);
+            Assert.IsNull(State(interrupted, "dependent").AttemptId);
+            Assert.AreEqual(1, effects);
             var attempt = State(interrupted, "effect").AttemptId;
             await scope.ReopenAsync();
             var unused = new RecordingExecutor();
             try { await scope.Runtime(unused, new RecordingVerifier()).ResumeAsync(graph.GraphId, Caller, timeout.Token); }
             catch (WorkflowCancelledException) when (permanentCancel) { }
-            Assert.Empty(unused.Calls);
-            Assert.Equal(attempt, State((await scope.Store.GetTaskGraphAsync(graph.GraphId, timeout.Token))!, "effect").AttemptId);
+            Assert.IsEmpty(unused.Calls);
+            Assert.AreEqual(attempt, State((await scope.Store.GetTaskGraphAsync(graph.GraphId, timeout.Token))!, "effect").AttemptId);
         }
         finally
         {
@@ -288,7 +303,7 @@ public sealed class TaskGraphSchedulerTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task PauseDuringExecution_PreservesKnownOutcomeAndResumeClaimsOnlyRemainingWork()
     {
         await using var scope = await Scope.OpenAsync();
@@ -315,16 +330,19 @@ public sealed class TaskGraphSchedulerTests
             try { await run.WaitAsync(timeout.Token); }
             catch (OperationCanceledException) { }
             var paused = (await scope.Store.GetTaskGraphAsync(graph.GraphId, timeout.Token))!;
-            Assert.Equal(WorkflowControl.Pause, paused.Control);
-            Assert.NotNull(State(paused, "first").Result);
-            Assert.Null(State(paused, "next").AttemptId);
-            Assert.Equal("first", Assert.Single(executor.Calls).Task.TaskId);
+            Assert.AreEqual(WorkflowControl.Pause, paused.Control);
+            Assert.IsNotNull(State(paused, "first").Result);
+            Assert.IsNull(State(paused, "next").AttemptId);
+            Assert.AreEqual("first", Assert.ContainsSingle(executor.Calls).Task.TaskId);
 
             var resumed = await runtime.ResumeAsync(graph.GraphId, Caller, timeout.Token);
 
-            Assert.Equal(WorkflowControl.None, resumed.Control);
-            Assert.All(resumed.Tasks, task => Assert.Equal(TaskGraphTaskStatus.Succeeded, task.Status));
-            Assert.Equal(["first", "next"], executor.Calls.Select(claim => claim.Task.TaskId).ToArray());
+            Assert.AreEqual(WorkflowControl.None, resumed.Control);
+            foreach (var task in resumed.Tasks)
+            {
+                Assert.AreEqual(TaskGraphTaskStatus.Succeeded, task.Status);
+            }
+            Assert.AreSequenceEqual(["first", "next"], executor.Calls.Select(claim => claim.Task.TaskId).ToArray());
         }
         finally
         {
@@ -334,7 +352,7 @@ public sealed class TaskGraphSchedulerTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExclusiveStoreReopen_MarksClaimUnknownAndReconciliationVerifiesWithoutRepeatingEffect()
     {
         await using var scope = await Scope.OpenAsync();
@@ -348,30 +366,33 @@ public sealed class TaskGraphSchedulerTests
         var runtime = scope.Runtime(executor, verifier);
 
         var unknown = await runtime.ResumeAsync(graph.GraphId, Caller, timeout.Token);
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, State(unknown, "effect").Status);
-        Assert.Equal(claim.AttemptId, State(unknown, "effect").AttemptId);
-        Assert.Empty(executor.Calls);
-        Assert.Empty(verifier.Calls);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, State(unknown, "effect").Status);
+        Assert.AreEqual(claim.AttemptId, State(unknown, "effect").AttemptId);
+        Assert.IsEmpty(executor.Calls);
+        Assert.IsEmpty(verifier.Calls);
 
         var reconciled = await runtime.ReconcileAsync(graph.GraphId, "effect", Success(claim),
             "External inspection established the exact revision and artifacts.", Caller, timeout.Token);
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, State(reconciled, "effect").Status);
-        Assert.Equal(claim.AttemptId, State(reconciled, "effect").AttemptId);
-        Assert.Empty(executor.Calls);
-        Assert.Empty(verifier.Calls);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, State(reconciled, "effect").Status);
+        Assert.AreEqual(claim.AttemptId, State(reconciled, "effect").AttemptId);
+        Assert.IsEmpty(executor.Calls);
+        Assert.IsEmpty(verifier.Calls);
 
         var resumed = await runtime.ResumeAsync(graph.GraphId, Caller, timeout.Token);
 
-        Assert.Equal("dependent", Assert.Single(executor.Calls).Task.TaskId);
-        Assert.Equal(["effect", "dependent"], verifier.Calls.Select(item => item.Task.TaskId).ToArray());
-        Assert.All(resumed.Tasks, task => Assert.Equal(TaskGraphTaskStatus.Succeeded, task.Status));
-        Assert.Equal(claim.AttemptId, State(resumed, "effect").Acceptance!.AttemptId);
-        Assert.Equal(reconciled.Tasks[0].ReconciliationNote, State(resumed, "effect").ReconciliationNote);
+        Assert.AreEqual("dependent", Assert.ContainsSingle(executor.Calls).Task.TaskId);
+        Assert.AreSequenceEqual(["effect", "dependent"], verifier.Calls.Select(item => item.Task.TaskId).ToArray());
+        foreach (var task in resumed.Tasks)
+        {
+            Assert.AreEqual(TaskGraphTaskStatus.Succeeded, task.Status);
+        }
+        Assert.AreEqual(claim.AttemptId, State(resumed, "effect").Acceptance!.AttemptId);
+        Assert.AreEqual(reconciled.Tasks[0].ReconciliationNote, State(resumed, "effect").ReconciliationNote);
     }
 
-    [Theory]
-    [InlineData(WorkflowControl.Pause)]
-    [InlineData(WorkflowControl.Cancel)]
+    [TestMethod]
+    [DataRow(WorkflowControl.Pause)]
+    [DataRow(WorkflowControl.Cancel)]
     public async Task LateReadOnlyVerificationReceipt_PreservesControlAndCannotDispatchDependent(WorkflowControl control)
     {
         await using var scope = await Scope.OpenAsync();
@@ -398,26 +419,25 @@ public sealed class TaskGraphSchedulerTests
             else await runtime.CancelAsync(graph.GraphId, Caller, timeout.Token);
             release.TrySetResult();
             var settled = await run.WaitAsync(timeout.Token);
-            Assert.Equal(control, settled.Control);
-            Assert.Equal(TaskGraphTaskStatus.Succeeded, State(settled, "parent").Status);
-            Assert.Null(State(settled, "dependent").AttemptId);
-            Assert.Equal("parent", Assert.Single(executor.Calls).Task.TaskId);
-            Assert.Equal(control == WorkflowControl.Pause ? TaskGraphRunStatus.Paused : TaskGraphRunStatus.Cancelled,
-                TaskGraphProgress.Inspect(settled).Status);
+            Assert.AreEqual(control, settled.Control);
+            Assert.AreEqual(TaskGraphTaskStatus.Succeeded, State(settled, "parent").Status);
+            Assert.IsNull(State(settled, "dependent").AttemptId);
+            Assert.AreEqual("parent", Assert.ContainsSingle(executor.Calls).Task.TaskId);
+            Assert.AreEqual(control == WorkflowControl.Pause ? TaskGraphRunStatus.Paused : TaskGraphRunStatus.Cancelled, TaskGraphProgress.Inspect(settled).Status);
             if (control == WorkflowControl.Cancel)
-                await Assert.ThrowsAsync<WorkflowCancelledException>(() => runtime.ResumeAsync(graph.GraphId, Caller, timeout.Token));
+                await Assert.ThrowsExactlyAsync<WorkflowCancelledException>(() => runtime.ResumeAsync(graph.GraphId, Caller, timeout.Token));
             else
             {
                 var resumed = await runtime.ResumeAsync(graph.GraphId, Caller, timeout.Token);
-                Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(resumed).Status);
-                Assert.Equal(1, executor.Calls.Count(claim => claim.Task.TaskId == "parent"));
-                Assert.Equal(1, verifier.Calls.Count(claim => claim.Task.TaskId == "parent"));
+                Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(resumed).Status);
+                Assert.AreEqual(1, executor.Calls.Count(claim => claim.Task.TaskId == "parent"));
+                Assert.AreEqual(1, verifier.Calls.Count(claim => claim.Task.TaskId == "parent"));
             }
         }
         finally { release.TrySetResult(); timeout.Cancel(); await DrainAsync(run); }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CompetingSchedulers_ShareTheStoreConcurrencyLimitAndNeverDuplicateAnAttempt()
     {
         await using var scope = await Scope.OpenAsync();
@@ -444,15 +464,15 @@ public sealed class TaskGraphSchedulerTests
             await entered.Task.WaitAsync(timeout.Token);
             secondRun = second.ResumeAsync(graph.GraphId, Caller, timeout.Token);
             await capacity.Task.WaitAsync(timeout.Token);
-            Assert.Equal(2, executor.Calls.Count);
-            Assert.Equal(2, (await scope.Store.GetTaskGraphAsync(graph.GraphId, timeout.Token))!.Tasks.Count(state => state.LeaseToken is not null));
+            Assert.AreEqual(2, executor.Calls.Count);
+            Assert.AreEqual(2, (await scope.Store.GetTaskGraphAsync(graph.GraphId, timeout.Token))!.Tasks.Count(state => state.LeaseToken is not null));
             release.TrySetResult();
             await System.Threading.Tasks.Task.WhenAll(firstRun, secondRun).WaitAsync(timeout.Token);
             var settled = await first.ResumeAsync(graph.GraphId, Caller, timeout.Token);
-            Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(settled).Status);
-            Assert.Equal(6, executor.Calls.Count);
-            Assert.Equal(6, executor.Calls.Select(claim => claim.AttemptId).Distinct().Count());
-            Assert.Equal(2, executor.MaximumActive);
+            Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(settled).Status);
+            Assert.AreEqual(6, executor.Calls.Count);
+            Assert.AreEqual(6, executor.Calls.Select(claim => claim.AttemptId).Distinct().Count());
+            Assert.AreEqual(2, executor.MaximumActive);
         }
         finally
         {
@@ -461,15 +481,15 @@ public sealed class TaskGraphSchedulerTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task MissingHostExecutionOrVerificationBoundary_IsRejectedAtConstruction()
     {
         await using var scope = await Scope.OpenAsync();
         var executor = new RecordingExecutor();
         var verifier = new RecordingVerifier();
-        Assert.Throws<ArgumentNullException>(() => new TaskGraphScheduler(null!, executor, verifier));
-        Assert.Throws<ArgumentNullException>(() => new TaskGraphScheduler(scope.Store, null!, verifier));
-        Assert.Throws<ArgumentNullException>(() => new TaskGraphScheduler(scope.Store, executor, null!));
+        Assert.ThrowsExactly<ArgumentNullException>(() => new TaskGraphScheduler(null!, executor, verifier));
+        Assert.ThrowsExactly<ArgumentNullException>(() => new TaskGraphScheduler(scope.Store, null!, verifier));
+        Assert.ThrowsExactly<ArgumentNullException>(() => new TaskGraphScheduler(scope.Store, executor, null!));
     }
 
     private static WorkflowTaskGraph Graph(params WorkflowTaskDefinition[] tasks) =>
@@ -497,7 +517,7 @@ public sealed class TaskGraphSchedulerTests
     private static TaskAcceptanceDecision Accepted() => new(TaskAcceptanceOutcome.Accepted,
         "trusted-test-verifier", "Independently examined the exact result revision.");
 
-    [Fact]
+    [TestMethod]
     public async Task BudgetExhaustionRacingVerifierAcceptance_SettlesWithoutAnotherResume()
     {
         var time = new ManualTimeProvider();
@@ -519,15 +539,15 @@ public sealed class TaskGraphSchedulerTests
         var result = await scope.Runtime(executor, verifier).ResumeAsync(graph.GraphId, Caller, timeout.Token);
 
         var candidate = State(result, "candidate");
-        Assert.Equal(TaskGraphTaskStatus.BudgetExhausted, candidate.Status);
-        Assert.Equal(TaskAcceptanceOutcome.BudgetExhausted, candidate.Acceptance!.Outcome);
-        Assert.Equal("shared-budget/v1", candidate.Acceptance.VerifierId);
-        Assert.Null(candidate.LeaseToken);
-        Assert.Null(candidate.Error);
-        Assert.Equal(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(result).Status);
-        Assert.Null(State(result, "blocked").AttemptId);
-        Assert.Single(executor.Calls);
-        Assert.Single(verifier.Calls);
+        Assert.AreEqual(TaskGraphTaskStatus.BudgetExhausted, candidate.Status);
+        Assert.AreEqual(TaskAcceptanceOutcome.BudgetExhausted, candidate.Acceptance!.Outcome);
+        Assert.AreEqual("shared-budget/v1", candidate.Acceptance.VerifierId);
+        Assert.IsNull(candidate.LeaseToken);
+        Assert.IsNull(candidate.Error);
+        Assert.AreEqual(TaskGraphRunStatus.BudgetExhausted, TaskGraphProgress.Inspect(result).Status);
+        Assert.IsNull(State(result, "blocked").AttemptId);
+        Assert.ContainsSingle(executor.Calls);
+        Assert.ContainsSingle(verifier.Calls);
     }
 
     private sealed class ManualTimeProvider : TimeProvider

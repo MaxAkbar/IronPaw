@@ -7,9 +7,10 @@ using IronPaw.AgentCore.Providers;
 
 namespace IronPaw.AgentCore.Providers.Tests;
 
+[TestClass]
 public sealed class ProvidersTests
 {
-    [Fact]
+    [TestMethod]
     public void LlmClientFactory_ResolveOpenAiCompatibleOptions_ReturnsProviderSpecificDefaults()
     {
         using var _ = BeginLlmBudgetEnvironmentScope();
@@ -19,24 +20,24 @@ public sealed class ProvidersTests
         var lmStudio = LlmClientFactory.ResolveOpenAiCompatibleOptions("lmstudio");
         var nonCompatible = LlmClientFactory.ResolveOpenAiCompatibleOptions("anthropic");
 
-        Assert.NotNull(openAi);
-        Assert.Equal(128_000, openAi!.ContextWindowTokens);
-        Assert.Equal(2_048, openAi.SafetyMarginTokens);
-        Assert.Equal(256, openAi.MinimumOutputTokensPerRequest);
-        Assert.Equal(2, openAi.MaxAutoContinuationPasses);
+        Assert.IsNotNull(openAi);
+        Assert.AreEqual(128_000, openAi!.ContextWindowTokens);
+        Assert.AreEqual(2_048, openAi.SafetyMarginTokens);
+        Assert.AreEqual(256, openAi.MinimumOutputTokensPerRequest);
+        Assert.AreEqual(2, openAi.MaxAutoContinuationPasses);
 
-        Assert.NotNull(ollama);
-        Assert.Equal(8_192, ollama!.ContextWindowTokens);
-        Assert.Equal(768, ollama.SafetyMarginTokens);
-        Assert.Equal(128, ollama.MinimumOutputTokensPerRequest);
-        Assert.Equal(1, ollama.MaxAutoContinuationPasses);
+        Assert.IsNotNull(ollama);
+        Assert.AreEqual(8_192, ollama!.ContextWindowTokens);
+        Assert.AreEqual(768, ollama.SafetyMarginTokens);
+        Assert.AreEqual(128, ollama.MinimumOutputTokensPerRequest);
+        Assert.AreEqual(1, ollama.MaxAutoContinuationPasses);
 
-        Assert.NotNull(lmStudio);
-        Assert.Equal(8_192, lmStudio!.ContextWindowTokens);
-        Assert.Null(nonCompatible);
+        Assert.IsNotNull(lmStudio);
+        Assert.AreEqual(8_192, lmStudio!.ContextWindowTokens);
+        Assert.IsNull(nonCompatible);
     }
 
-    [Fact]
+    [TestMethod]
     public void LlmClientFactory_ResolveOpenAiCompatibleOptions_RuntimeOverridesBeatEnvironment()
     {
         using var _ = BeginLlmBudgetEnvironmentScope(
@@ -54,20 +55,20 @@ public sealed class ProvidersTests
                 MinimumOutputTokensPerRequest: 512,
                 MaxAutoContinuationPasses: 3));
 
-        Assert.NotNull(fromEnvironmentOnly);
-        Assert.Equal(4096, fromEnvironmentOnly!.ContextWindowTokens);
-        Assert.Equal(400, fromEnvironmentOnly.SafetyMarginTokens);
-        Assert.Equal(64, fromEnvironmentOnly.MinimumOutputTokensPerRequest);
-        Assert.Equal(1, fromEnvironmentOnly.MaxAutoContinuationPasses);
+        Assert.IsNotNull(fromEnvironmentOnly);
+        Assert.AreEqual(4096, fromEnvironmentOnly!.ContextWindowTokens);
+        Assert.AreEqual(400, fromEnvironmentOnly.SafetyMarginTokens);
+        Assert.AreEqual(64, fromEnvironmentOnly.MinimumOutputTokensPerRequest);
+        Assert.AreEqual(1, fromEnvironmentOnly.MaxAutoContinuationPasses);
 
-        Assert.NotNull(fromRuntimeOverride);
-        Assert.Equal(32768, fromRuntimeOverride!.ContextWindowTokens);
-        Assert.Equal(1024, fromRuntimeOverride.SafetyMarginTokens);
-        Assert.Equal(512, fromRuntimeOverride.MinimumOutputTokensPerRequest);
-        Assert.Equal(3, fromRuntimeOverride.MaxAutoContinuationPasses);
+        Assert.IsNotNull(fromRuntimeOverride);
+        Assert.AreEqual(32768, fromRuntimeOverride!.ContextWindowTokens);
+        Assert.AreEqual(1024, fromRuntimeOverride.SafetyMarginTokens);
+        Assert.AreEqual(512, fromRuntimeOverride.MinimumOutputTokensPerRequest);
+        Assert.AreEqual(3, fromRuntimeOverride.MaxAutoContinuationPasses);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task RuleBasedLlmClient_NoMessages_ReturnsNoMessagesDelta()
     {
         var client = new RuleBasedLlmClient();
@@ -75,12 +76,12 @@ public sealed class ProvidersTests
 
         var deltas = await CollectAsync(client.StreamAsync(request, CancellationToken.None));
 
-        var text = Assert.IsType<AssistantTextDelta>(deltas[0]);
+        var text = Assert.IsExactInstanceOfType<AssistantTextDelta>(deltas[0]);
         Assert.Contains("No messages were provided", text.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.IsType<CompletedDelta>(deltas[^1]);
+        Assert.IsExactInstanceOfType<CompletedDelta>(deltas[^1]);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task RuleBasedLlmClient_PlanPrompt_EmitsWriteFileToolCall()
     {
         var client = new RuleBasedLlmClient();
@@ -98,13 +99,13 @@ public sealed class ProvidersTests
             ]);
 
         var deltas = await CollectAsync(client.StreamAsync(request, CancellationToken.None));
-        var toolCall = Assert.IsType<ToolCallDelta>(deltas.Single(delta => delta is ToolCallDelta));
+        var toolCall = Assert.IsExactInstanceOfType<ToolCallDelta>(deltas.Single(delta => delta is ToolCallDelta));
 
-        Assert.Equal("write_file", toolCall.ToolName);
-        Assert.Equal("Strategy.md", toolCall.Arguments.GetProperty("path").GetString());
+        Assert.AreEqual("write_file", toolCall.ToolName);
+        Assert.AreEqual("Strategy.md", toolCall.Arguments.GetProperty("path").GetString());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task RoutedLlmClient_UsesFallbackForUnknownProvider()
     {
         var primary = new StubLlmClient(new AssistantTextDelta("primary"));
@@ -117,12 +118,12 @@ public sealed class ProvidersTests
         var request = CreateRequest(provider: "unknown", messages: [new ChatMessage(ChatRole.User, "x")]);
         var deltas = await CollectAsync(routed.StreamAsync(request, CancellationToken.None));
 
-        Assert.Equal(0, primary.Calls);
-        Assert.Equal(1, fallback.Calls);
-        Assert.Equal("fallback", Assert.IsType<AssistantTextDelta>(deltas[0]).Text);
+        Assert.AreEqual(0, primary.Calls);
+        Assert.AreEqual(1, fallback.Calls);
+        Assert.AreEqual("fallback", Assert.IsExactInstanceOfType<AssistantTextDelta>(deltas[0]).Text);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OpenAiLlmClient_NoApiKey_ReturnsErrorDelta()
     {
         var client = new OpenAiLlmClient(
@@ -132,11 +133,11 @@ public sealed class ProvidersTests
         var request = CreateRequest(provider: "openai", model: "gpt-4o-mini", messages: [new ChatMessage(ChatRole.User, "hi")]);
         var deltas = await CollectAsync(client.StreamAsync(request, CancellationToken.None));
 
-        var error = Assert.IsType<LlmErrorDelta>(Assert.Single(deltas));
+        var error = Assert.IsExactInstanceOfType<LlmErrorDelta>(Assert.ContainsSingle(deltas));
         Assert.Contains("OPENAI_API_KEY", error.Error, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OpenAiLlmClient_ParsesAssistantTextToolCallAndUsage()
     {
         // SSE format: each line is "data: <json>" and terminated with "data: [DONE]"
@@ -155,18 +156,18 @@ public sealed class ProvidersTests
         var request = CreateRequest(provider: "openai", model: "gpt-4o-mini", messages: [new ChatMessage(ChatRole.User, "hi")]);
         var deltas = await CollectAsync(client.StreamAsync(request, CancellationToken.None));
 
-        Assert.Contains(deltas, delta => delta is AssistantTextDelta text && text.Text.Contains("openai", StringComparison.OrdinalIgnoreCase));
-        var toolCall = Assert.IsType<ToolCallDelta>(deltas.Single(delta => delta is ToolCallDelta));
-        Assert.Equal("write_file", toolCall.ToolName);
-        Assert.Equal("Plan.md", toolCall.Arguments.GetProperty("path").GetString());
+        Assert.Contains(delta => delta is AssistantTextDelta text && text.Text.Contains("openai", StringComparison.OrdinalIgnoreCase), deltas);
+        var toolCall = Assert.IsExactInstanceOfType<ToolCallDelta>(deltas.Single(delta => delta is ToolCallDelta));
+        Assert.AreEqual("write_file", toolCall.ToolName);
+        Assert.AreEqual("Plan.md", toolCall.Arguments.GetProperty("path").GetString());
 
-        var usage = Assert.IsType<UsageDelta>(deltas.Single(delta => delta is UsageDelta));
-        Assert.Equal(12, usage.InputTokens);
-        Assert.Equal(7, usage.OutputTokens);
-        Assert.IsType<CompletedDelta>(deltas[^1]);
+        var usage = Assert.IsExactInstanceOfType<UsageDelta>(deltas.Single(delta => delta is UsageDelta));
+        Assert.AreEqual(12, usage.InputTokens);
+        Assert.AreEqual(7, usage.OutputTokens);
+        Assert.IsExactInstanceOfType<CompletedDelta>(deltas[^1]);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OpenAiLlmClient_LengthFinishReason_AutoContinuesStreamingText()
     {
         const string firstResponseBody =
@@ -200,24 +201,24 @@ public sealed class ProvidersTests
         var deltas = await CollectAsync(client.StreamAsync(request, CancellationToken.None));
 
         var combinedText = string.Concat(deltas.OfType<AssistantTextDelta>().Select(delta => delta.Text));
-        Assert.Equal("Part one Part two.", combinedText);
-        Assert.Equal(2, handler.RequestBodies.Count);
+        Assert.AreEqual("Part one Part two.", combinedText);
+        Assert.AreEqual(2, handler.RequestBodies.Count);
 
         using var secondRequestDocument = JsonDocument.Parse(handler.RequestBodies[1]);
         var messages = secondRequestDocument.RootElement.GetProperty("messages").EnumerateArray().ToList();
-        Assert.Equal("assistant", messages[^2].GetProperty("role").GetString());
-        Assert.Equal("Part one ", messages[^2].GetProperty("content").GetString());
-        Assert.Equal("user", messages[^1].GetProperty("role").GetString());
+        Assert.AreEqual("assistant", messages[^2].GetProperty("role").GetString());
+        Assert.AreEqual("Part one ", messages[^2].GetProperty("content").GetString());
+        Assert.AreEqual("user", messages[^1].GetProperty("role").GetString());
+        var continuationPrompt = messages[^1].GetProperty("content").GetString();
+        Assert.IsNotNull(continuationPrompt);
         Assert.Contains(
-            "Continue exactly where you left off",
-            messages[^1].GetProperty("content").GetString(),
-            StringComparison.Ordinal);
+            "Continue exactly where you left off", continuationPrompt, StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData(0, 2, 1)]
-    [InlineData(1, 2, 2)]
-    [InlineData(4, 1, 2)]
+    [TestMethod]
+    [DataRow(0, 2, 1)]
+    [DataRow(1, 2, 2)]
+    [DataRow(4, 1, 2)]
     public async Task OpenAi_RequestContinuationCapBoundsHttpAttempts(
         int requestCap, int configuredCap, int expectedRequests)
     {
@@ -230,25 +231,27 @@ public sealed class ProvidersTests
         var client = new OpenAiLlmClient(new HttpClient(handler), () => "test-key",
             options: new OpenAiClientOptions(MaxAutoContinuationPasses: configuredCap));
 
-        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "openai") with {
-            MaxAutoContinuationPasses = requestCap }, CancellationToken.None));
+        var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "openai") with
+        {
+            MaxAutoContinuationPasses = requestCap
+        }, CancellationToken.None));
 
-        Assert.Equal(expectedRequests, handler.RequestBodies.Count);
-        Assert.Contains(deltas, delta => delta is LlmErrorDelta error && error.Error.Contains("output limit"));
-        Assert.DoesNotContain(deltas, delta => delta is CompletedDelta);
+        Assert.AreEqual(expectedRequests, handler.RequestBodies.Count);
+        Assert.Contains(delta => delta is LlmErrorDelta error && error.Error.Contains("output limit"), deltas);
+        Assert.DoesNotContain(delta => delta is CompletedDelta, deltas);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OpenAi_NegativeRequestContinuationCapFailsBeforeHttp()
     {
         var handler = new RecordingSequenceHandler();
         var client = new OpenAiLlmClient(new HttpClient(handler), () => "test-key");
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => CollectAsync(client.StreamAsync(
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => CollectAsync(client.StreamAsync(
             CreateRequest(provider: "openai") with { MaxAutoContinuationPasses = -1 }, CancellationToken.None)));
-        Assert.Empty(handler.RequestBodies);
+        Assert.IsEmpty(handler.RequestBodies);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OpenAi_CumulativeUsageNormalizesWithinEachContinuationPass()
     {
         const string firstBody =
@@ -266,18 +269,19 @@ public sealed class ProvidersTests
         var handler = new RecordingSequenceHandler((HttpStatusCode.OK, firstBody), (HttpStatusCode.OK, secondBody));
         var client = new OpenAiLlmClient(new HttpClient(handler), () => "test-key");
         var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "openai", maxOutputTokens: 256)
-            with { MaxAutoContinuationPasses = 1 }, CancellationToken.None));
+            with
+        { MaxAutoContinuationPasses = 1 }, CancellationToken.None));
 
-        Assert.Equal(52, deltas.OfType<UsageDelta>().Sum(delta => delta.InputTokens ?? 0));
-        Assert.Equal(12, deltas.OfType<UsageDelta>().Sum(delta => delta.OutputTokens ?? 0));
-        Assert.IsType<CompletedDelta>(deltas[^1]);
+        Assert.AreEqual(52, deltas.OfType<UsageDelta>().Sum(delta => delta.InputTokens ?? 0));
+        Assert.AreEqual(12, deltas.OfType<UsageDelta>().Sum(delta => delta.OutputTokens ?? 0));
+        Assert.IsExactInstanceOfType<CompletedDelta>(deltas[^1]);
         using var secondRequest = JsonDocument.Parse(handler.RequestBodies[1]);
-        Assert.Equal(251, secondRequest.RootElement.GetProperty("max_tokens").GetInt32());
+        Assert.AreEqual(251, secondRequest.RootElement.GetProperty("max_tokens").GetInt32());
     }
 
-    [Theory]
-    [InlineData("openai")]
-    [InlineData("anthropic")]
+    [TestMethod]
+    [DataRow("openai")]
+    [DataRow("anthropic")]
     public async Task Provider_RequestOutputCapReachesHttpPayload(string provider)
     {
         var handler = new RecordingSequenceHandler((HttpStatusCode.OK, provider == "openai"
@@ -288,11 +292,11 @@ public sealed class ProvidersTests
 
         await CollectAsync(client.StreamAsync(CreateRequest(provider: provider, maxOutputTokens: 37), CancellationToken.None));
 
-        using var payload = JsonDocument.Parse(Assert.Single(handler.RequestBodies));
-        Assert.Equal(37, payload.RootElement.GetProperty("max_tokens").GetInt32());
+        using var payload = JsonDocument.Parse(Assert.ContainsSingle(handler.RequestBodies));
+        Assert.AreEqual(37, payload.RootElement.GetProperty("max_tokens").GetInt32());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task OpenAiLlmClient_NoOutputBudget_ReturnsErrorWithoutCallingApi()
     {
         var handler = new RecordingSequenceHandler();
@@ -313,12 +317,12 @@ public sealed class ProvidersTests
             maxOutputTokens: 512);
         var deltas = await CollectAsync(client.StreamAsync(request, CancellationToken.None));
 
-        var error = Assert.IsType<LlmErrorDelta>(Assert.Single(deltas));
+        var error = Assert.IsExactInstanceOfType<LlmErrorDelta>(Assert.ContainsSingle(deltas));
         Assert.Contains("No output token budget available", error.Error, StringComparison.Ordinal);
-        Assert.Empty(handler.RequestBodies);
+        Assert.IsEmpty(handler.RequestBodies);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AnthropicLlmClient_ParsesTextAndToolUse()
     {
         // SSE format matching Anthropic's event stream protocol
@@ -340,18 +344,18 @@ public sealed class ProvidersTests
         var request = CreateRequest(provider: "anthropic", model: "claude-3-5-haiku-latest", messages: [new ChatMessage(ChatRole.User, "hi")]);
         var deltas = await CollectAsync(client.StreamAsync(request, CancellationToken.None));
 
-        Assert.Contains(deltas, delta => delta is AssistantTextDelta text && text.Text.Contains("anthropic", StringComparison.OrdinalIgnoreCase));
-        var toolCall = Assert.IsType<ToolCallDelta>(deltas.Single(delta => delta is ToolCallDelta));
-        Assert.Equal("slugify", toolCall.ToolName);
-        Assert.Equal("Hello Test", toolCall.Arguments.GetProperty("text").GetString());
+        Assert.Contains(delta => delta is AssistantTextDelta text && text.Text.Contains("anthropic", StringComparison.OrdinalIgnoreCase), deltas);
+        var toolCall = Assert.IsExactInstanceOfType<ToolCallDelta>(deltas.Single(delta => delta is ToolCallDelta));
+        Assert.AreEqual("slugify", toolCall.ToolName);
+        Assert.AreEqual("Hello Test", toolCall.Arguments.GetProperty("text").GetString());
 
-        var usage = Assert.IsType<UsageDelta>(deltas.Single(delta => delta is UsageDelta));
-        Assert.Equal(10, usage.InputTokens);
-        Assert.Equal(3, usage.OutputTokens);
-        Assert.IsType<CompletedDelta>(deltas[^1]);
+        var usage = Assert.IsExactInstanceOfType<UsageDelta>(deltas.Single(delta => delta is UsageDelta));
+        Assert.AreEqual(10, usage.InputTokens);
+        Assert.AreEqual(3, usage.OutputTokens);
+        Assert.IsExactInstanceOfType<CompletedDelta>(deltas[^1]);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AnthropicLlmClient_NoApiKey_ReturnsErrorDelta()
     {
         var client = new AnthropicLlmClient(
@@ -361,13 +365,13 @@ public sealed class ProvidersTests
         var request = CreateRequest(provider: "anthropic", model: "claude-3-5-haiku-latest", messages: [new ChatMessage(ChatRole.User, "hi")]);
         var deltas = await CollectAsync(client.StreamAsync(request, CancellationToken.None));
 
-        var error = Assert.IsType<LlmErrorDelta>(Assert.Single(deltas));
+        var error = Assert.IsExactInstanceOfType<LlmErrorDelta>(Assert.ContainsSingle(deltas));
         Assert.Contains("ANTHROPIC_API_KEY", error.Error, StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData("openai")]
-    [InlineData("anthropic")]
+    [TestMethod]
+    [DataRow("openai")]
+    [DataRow("anthropic")]
     public async Task Provider_SerializesMultipleCallsAsOneAssistantTurn(string provider)
     {
         var handler = new RecordingSequenceHandler((HttpStatusCode.OK,
@@ -385,54 +389,54 @@ public sealed class ProvidersTests
             new(ChatRole.Tool, "second", "call-2", "read_file")
         };
         await CollectAsync(client.StreamAsync(CreateRequest(provider: provider, messages: transcript), CancellationToken.None));
-        using var payload = JsonDocument.Parse(Assert.Single(handler.RequestBodies));
+        using var payload = JsonDocument.Parse(Assert.ContainsSingle(handler.RequestBodies));
         var messages = payload.RootElement.GetProperty("messages").EnumerateArray().ToList();
-        var assistant = Assert.Single(messages, message => message.GetProperty("role").GetString() == "assistant");
+        var assistant = Assert.ContainsSingle(message => message.GetProperty("role").GetString() == "assistant", messages);
         if (provider == "openai")
         {
-            Assert.Equal("Checking two files.", assistant.GetProperty("content").GetString());
-            Assert.Equal(2, assistant.GetProperty("tool_calls").GetArrayLength());
-            Assert.Equal(new[] { "call-1", "call-2" }, messages.Where(message => message.GetProperty("role").GetString() == "tool")
+            Assert.AreEqual("Checking two files.", assistant.GetProperty("content").GetString());
+            Assert.AreEqual(2, assistant.GetProperty("tool_calls").GetArrayLength());
+            Assert.AreSequenceEqual(new[] { "call-1", "call-2" }, messages.Where(message => message.GetProperty("role").GetString() == "tool")
                 .Select(message => message.GetProperty("tool_call_id").GetString()));
         }
         else
         {
             var blocks = assistant.GetProperty("content").EnumerateArray().ToList();
-            Assert.Equal(2, blocks.Count(block => block.GetProperty("type").GetString() == "tool_use"));
+            Assert.AreEqual(2, blocks.Count(block => block.GetProperty("type").GetString() == "tool_use"));
             var results = messages[^1].GetProperty("content").EnumerateArray().ToList();
-            Assert.Equal(new[] { "call-1", "call-2" }, results.Select(block => block.GetProperty("tool_use_id").GetString()));
+            Assert.AreSequenceEqual(new[] { "call-1", "call-2" }, results.Select(block => block.GetProperty("tool_use_id").GetString()));
         }
     }
 
-    [Theory]
-    [InlineData("openai", "data: {\"error\":{\"message\":\"overloaded\"}}\ndata: [DONE]\n")]
-    [InlineData("anthropic", "data: {\"type\":\"error\",\"error\":{\"message\":\"overloaded\"}}\n")]
+    [TestMethod]
+    [DataRow("openai", "data: {\"error\":{\"message\":\"overloaded\"}}\ndata: [DONE]\n")]
+    [DataRow("anthropic", "data: {\"type\":\"error\",\"error\":{\"message\":\"overloaded\"}}\n")]
     public async Task Provider_StreamErrorNeverEmitsCompletion(string provider, string body)
     {
         ILlmClient client = provider == "openai"
             ? new OpenAiLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key")
             : new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
         var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: provider), CancellationToken.None));
-        Assert.Contains(deltas, delta => delta is LlmErrorDelta error && error.Error.Contains("overloaded"));
-        Assert.DoesNotContain(deltas, delta => delta is CompletedDelta);
+        Assert.Contains(delta => delta is LlmErrorDelta error && error.Error.Contains("overloaded"), deltas);
+        Assert.DoesNotContain(delta => delta is CompletedDelta, deltas);
     }
 
-    [Theory]
-    [InlineData("openai", "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n")]
-    [InlineData("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n")]
-    [InlineData("openai", "data: invalid-json\ndata: [DONE]\n")]
-    [InlineData("anthropic", "data: invalid-json\ndata: {\"type\":\"message_stop\"}\n")]
+    [TestMethod]
+    [DataRow("openai", "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n")]
+    [DataRow("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n")]
+    [DataRow("openai", "data: invalid-json\ndata: [DONE]\n")]
+    [DataRow("anthropic", "data: invalid-json\ndata: {\"type\":\"message_stop\"}\n")]
     public async Task Provider_InterruptedOrMalformedStreamNeverEmitsCompletion(string provider, string body)
     {
         ILlmClient client = provider == "openai"
             ? new OpenAiLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key")
             : new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
         var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: provider), CancellationToken.None));
-        Assert.Contains(deltas, delta => delta is LlmErrorDelta);
-        Assert.DoesNotContain(deltas, delta => delta is CompletedDelta);
+        Assert.Contains(delta => delta is LlmErrorDelta, deltas);
+        Assert.DoesNotContain(delta => delta is CompletedDelta, deltas);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Anthropic_CumulativeUsageIsReportedAsIncrements()
     {
         const string body =
@@ -442,11 +446,11 @@ public sealed class ProvidersTests
             "data: {\"type\":\"message_stop\"}\n";
         var client = new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
         var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "anthropic"), CancellationToken.None));
-        Assert.Equal(10L, deltas.OfType<UsageDelta>().Sum(usage => usage.InputTokens ?? 0));
-        Assert.Equal(5L, deltas.OfType<UsageDelta>().Sum(usage => usage.OutputTokens ?? 0));
+        Assert.AreEqual(10L, deltas.OfType<UsageDelta>().Sum(usage => usage.InputTokens ?? 0));
+        Assert.AreEqual(5L, deltas.OfType<UsageDelta>().Sum(usage => usage.OutputTokens ?? 0));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Anthropic_StartCacheUsageCountsOnceAcrossRepeatedUsageChunks()
     {
         const string body =
@@ -458,16 +462,16 @@ public sealed class ProvidersTests
         var client = new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
         var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "anthropic"), CancellationToken.None));
 
-        Assert.Equal(10, deltas.OfType<UsageDelta>().Sum(delta => delta.InputTokens ?? 0));
-        Assert.Equal(5, deltas.OfType<UsageDelta>().Sum(delta => delta.OutputTokens ?? 0));
-        Assert.Equal(30, deltas.OfType<UsageDelta>().Sum(delta => delta.CacheReadTokens ?? 0));
-        Assert.Equal(20, deltas.OfType<UsageDelta>().Sum(delta => delta.CacheWriteTokens ?? 0));
-        Assert.IsType<CompletedDelta>(deltas[^1]);
+        Assert.AreEqual(10, deltas.OfType<UsageDelta>().Sum(delta => delta.InputTokens ?? 0));
+        Assert.AreEqual(5, deltas.OfType<UsageDelta>().Sum(delta => delta.OutputTokens ?? 0));
+        Assert.AreEqual(30, deltas.OfType<UsageDelta>().Sum(delta => delta.CacheReadTokens ?? 0));
+        Assert.AreEqual(20, deltas.OfType<UsageDelta>().Sum(delta => delta.CacheWriteTokens ?? 0));
+        Assert.IsExactInstanceOfType<CompletedDelta>(deltas[^1]);
     }
 
-    [Theory]
-    [InlineData("{\"input_tokens\":10}", "{}", true)]
-    [InlineData("{}", "{\"output_tokens\":3}", false)]
+    [TestMethod]
+    [DataRow("{\"input_tokens\":10}", "{}", true)]
+    [DataRow("{}", "{\"output_tokens\":3}", false)]
     public async Task Anthropic_PartialUsageReceiptPreservesMissingTokenFields(
         string startUsage, string finalUsage, bool inputReported)
     {
@@ -478,19 +482,19 @@ public sealed class ProvidersTests
 
         var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: "anthropic"), CancellationToken.None));
 
-        var usage = Assert.Single(deltas.OfType<UsageDelta>());
-        if (inputReported) { Assert.Equal(10, usage.InputTokens); Assert.Null(usage.OutputTokens); }
-        else { Assert.Null(usage.InputTokens); Assert.Equal(3, usage.OutputTokens); }
-        Assert.IsType<CompletedDelta>(deltas[^1]);
+        var usage = Assert.ContainsSingle(deltas.OfType<UsageDelta>());
+        if (inputReported) { Assert.AreEqual(10, usage.InputTokens); Assert.IsNull(usage.OutputTokens); }
+        else { Assert.IsNull(usage.InputTokens); Assert.AreEqual(3, usage.OutputTokens); }
+        Assert.IsExactInstanceOfType<CompletedDelta>(deltas[^1]);
     }
 
-    [Theory]
-    [InlineData("openai", "data: {\"usage\":{\"prompt_tokens\":-1,\"completion_tokens\":0}}\ndata: [DONE]\n")]
-    [InlineData("openai", "data: {\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":-1}}\ndata: [DONE]\n")]
-    [InlineData("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":-1}}}\ndata: {\"type\":\"message_stop\"}\n")]
-    [InlineData("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_read_input_tokens\":-1}}}\ndata: {\"type\":\"message_stop\"}\n")]
-    [InlineData("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_creation_input_tokens\":-1}}}\ndata: {\"type\":\"message_stop\"}\n")]
-    [InlineData("anthropic", "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":-1}}\ndata: {\"type\":\"message_stop\"}\n")]
+    [TestMethod]
+    [DataRow("openai", "data: {\"usage\":{\"prompt_tokens\":-1,\"completion_tokens\":0}}\ndata: [DONE]\n")]
+    [DataRow("openai", "data: {\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":-1}}\ndata: [DONE]\n")]
+    [DataRow("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":-1}}}\ndata: {\"type\":\"message_stop\"}\n")]
+    [DataRow("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_read_input_tokens\":-1}}}\ndata: {\"type\":\"message_stop\"}\n")]
+    [DataRow("anthropic", "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_creation_input_tokens\":-1}}}\ndata: {\"type\":\"message_stop\"}\n")]
+    [DataRow("anthropic", "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":-1}}\ndata: {\"type\":\"message_stop\"}\n")]
     public async Task Provider_NegativeUsageFailsWithoutFabricatingZeroReceipt(string provider, string body)
     {
         ILlmClient client = provider == "openai"
@@ -499,13 +503,13 @@ public sealed class ProvidersTests
 
         var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: provider), CancellationToken.None));
 
-        Assert.Contains(deltas, delta => delta is LlmErrorDelta error && error.Error.Contains("negative token usage"));
-        Assert.DoesNotContain(deltas, delta => delta is UsageDelta or CompletedDelta);
+        Assert.Contains(delta => delta is LlmErrorDelta error && error.Error.Contains("negative token usage"), deltas);
+        Assert.DoesNotContain(delta => delta is UsageDelta or CompletedDelta, deltas);
     }
 
-    [Theory]
-    [InlineData("openai")]
-    [InlineData("anthropic")]
+    [TestMethod]
+    [DataRow("openai")]
+    [DataRow("anthropic")]
     public async Task Provider_EnforcesRequestTimeout(string provider)
     {
         using var httpClient = new HttpClient(new BlockingHandler());
@@ -513,7 +517,7 @@ public sealed class ProvidersTests
             ? new OpenAiLlmClient(httpClient, () => "test-key")
             : new AnthropicLlmClient(httpClient, () => "test-key");
         var task = CollectAsync(client.StreamAsync(CreateRequest(provider: provider) with { Timeout = TimeSpan.FromMilliseconds(30) }, CancellationToken.None));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task.WaitAsync(TimeSpan.FromSeconds(3)));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => task.WaitAsync(TimeSpan.FromSeconds(3)));
     }
 
     private sealed class BlockingHandler : HttpMessageHandler
@@ -525,9 +529,9 @@ public sealed class ProvidersTests
         }
     }
 
-    [Theory]
-    [InlineData("openai", "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}\ndata: [DONE]\n")]
-    [InlineData("anthropic", "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":10}}\ndata: {\"type\":\"message_stop\"}\n")]
+    [TestMethod]
+    [DataRow("openai", "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}\ndata: [DONE]\n")]
+    [DataRow("anthropic", "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":10}}\ndata: {\"type\":\"message_stop\"}\n")]
     public async Task Provider_OutputLimitNeverEmitsCompletion(string provider, string body)
     {
         ILlmClient client = provider == "openai"
@@ -535,8 +539,8 @@ public sealed class ProvidersTests
                 options: new OpenAiClientOptions(MaxAutoContinuationPasses: 0))
             : new AnthropicLlmClient(new HttpClient(new StaticJsonHandler(HttpStatusCode.OK, body)), () => "test-key");
         var deltas = await CollectAsync(client.StreamAsync(CreateRequest(provider: provider), CancellationToken.None));
-        Assert.Contains(deltas, delta => delta is LlmErrorDelta error && error.Error.Contains("output limit"));
-        Assert.DoesNotContain(deltas, delta => delta is CompletedDelta);
+        Assert.Contains(delta => delta is LlmErrorDelta error && error.Error.Contains("output limit"), deltas);
+        Assert.DoesNotContain(delta => delta is CompletedDelta, deltas);
     }
 
     private static LlmRequest CreateRequest(

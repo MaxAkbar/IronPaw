@@ -5,35 +5,36 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Persistence.CSharpDb.Tests;
 
-public sealed class TaskVerificationStoreTests : IDisposable
+[TestClass]
+public sealed class TaskVerificationStoreTests
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "IronPaw-VerificationStore-" + Guid.NewGuid().ToString("n"));
     private string DatabasePath => Path.Combine(_directory, "workflows.cdb");
     private static readonly CancellationToken Ct = CancellationToken.None;
     private static readonly CallerIdentity Caller = new("owner", "Owner", true);
 
-    [Fact]
+    [TestMethod]
     public async Task AdmissionIsOnceOnlyAndCompletedReceiptIsReusableAndImmutable()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var claim = await CandidateAsync(store);
         var admitted = await store.BeginTaskVerificationAsync(claim, "build", Ct);
-        Assert.True(admitted.ShouldExecute);
-        Assert.Equal(TaskVerificationInvocationState.Started, admitted.Invocation.State);
-        await Assert.ThrowsAsync<WorkflowReconciliationRequiredException>(() => store.BeginTaskVerificationAsync(claim, "build", Ct));
+        Assert.IsTrue(admitted.ShouldExecute);
+        Assert.AreEqual(TaskVerificationInvocationState.Started, admitted.Invocation.State);
+        await Assert.ThrowsExactlyAsync<WorkflowReconciliationRequiredException>(() => store.BeginTaskVerificationAsync(claim, "build", Ct));
         var complete = Completion();
         await store.CompleteTaskVerificationAsync(claim, admitted.Invocation.InvocationId, complete, Ct);
         await store.CompleteTaskVerificationAsync(claim, admitted.Invocation.InvocationId, complete, Ct);
         var replay = await store.BeginTaskVerificationAsync(claim, "build", Ct);
-        Assert.False(replay.ShouldExecute);
-        Assert.Equal(complete, replay.Invocation.Completion);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.CompleteTaskVerificationAsync(claim,
+        Assert.IsFalse(replay.ShouldExecute);
+        Assert.AreEqual(complete, replay.Invocation.Completion);
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.CompleteTaskVerificationAsync(claim,
             admitted.Invocation.InvocationId, complete with { Explanation = "Replaced evidence" }, Ct));
         await store.RecordTaskAcceptanceAsync(claim, new(TaskAcceptanceOutcome.Accepted, "host", "Required build passed"), Ct);
-        Assert.Equal(TaskGraphTaskStatus.Succeeded, (await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Status);
+        Assert.AreEqual(TaskGraphTaskStatus.Succeeded, (await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Status);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ConcurrentAdmissionStartsOneInvocation()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -43,11 +44,11 @@ public sealed class TaskVerificationStoreTests : IDisposable
             try { return (await store.BeginTaskVerificationAsync(claim, "build", Ct)).ShouldExecute; }
             catch (WorkflowReconciliationRequiredException) { return false; }
         }
-        Assert.Equal(1, (await Task.WhenAll(AdmitAsync(), AdmitAsync(), AdmitAsync())).Count(value => value));
-        Assert.Single((await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Verifications);
+        Assert.AreEqual(1, (await Task.WhenAll(AdmitAsync(), AdmitAsync(), AdmitAsync())).Count(value => value));
+        Assert.ContainsSingle((await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Verifications);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task RestartFencesUnknownWorkerAndRequiresExplicitOutcomeBeforeReplay()
     {
         TaskGraphClaim claim;
@@ -59,26 +60,26 @@ public sealed class TaskVerificationStoreTests : IDisposable
         }
         await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var unknown = (await reopened.GetTaskGraphAsync("graph", Ct))!;
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, unknown.Tasks[0].Status);
-        Assert.NotNull(unknown.Tasks[0].Result);
-        Assert.Null(unknown.Tasks[0].LeaseToken);
-        Assert.Equal(TaskVerificationInvocationState.NeedsReconciliation, unknown.Tasks[0].Verifications[0].State);
-        Assert.Equal(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(unknown).Status);
-        Assert.Null(await reopened.ClaimTaskAsync("graph", Caller, Ct));
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => reopened.CompleteTaskVerificationAsync(claim, invocationId, Completion(), Ct));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => reopened.ReconcileTaskVerificationAsync("graph", "task", invocationId,
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, unknown.Tasks[0].Status);
+        Assert.IsNotNull(unknown.Tasks[0].Result);
+        Assert.IsNull(unknown.Tasks[0].LeaseToken);
+        Assert.AreEqual(TaskVerificationInvocationState.NeedsReconciliation, unknown.Tasks[0].Verifications[0].State);
+        Assert.AreEqual(TaskGraphRunStatus.NeedsReconciliation, TaskGraphProgress.Inspect(unknown).Status);
+        Assert.IsNull(await reopened.ClaimTaskAsync("graph", Caller, Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => reopened.CompleteTaskVerificationAsync(claim, invocationId, Completion(), Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => reopened.ReconcileTaskVerificationAsync("graph", "task", invocationId,
             Completion(), "Inspected stopped worker and exact evidence", new("other", "Other", true), Ct));
         await reopened.ReconcileTaskVerificationAsync("graph", "task", invocationId, Completion(), "Inspected stopped worker and exact evidence", Caller, Ct);
         var next = (await reopened.ClaimTaskAsync("graph", Caller, Ct))!;
-        Assert.Equal(claim.AttemptId, next.AttemptId);
-        Assert.Equal(claim.Inputs!.Digest, next.Inputs!.Digest);
-        Assert.False((await reopened.BeginTaskVerificationAsync(next, "build", Ct)).ShouldExecute);
+        Assert.AreEqual(claim.AttemptId, next.AttemptId);
+        Assert.AreEqual(claim.Inputs!.Digest, next.Inputs!.Digest);
+        Assert.IsFalse((await reopened.BeginTaskVerificationAsync(next, "build", Ct)).ShouldExecute);
         await reopened.RecordTaskAcceptanceAsync(next, new(TaskAcceptanceOutcome.Accepted, "host", "Established existing build evidence"), Ct);
     }
 
-    [Theory]
-    [InlineData(WorkflowControl.Pause)]
-    [InlineData(WorkflowControl.Cancel)]
+    [TestMethod]
+    [DataRow(WorkflowControl.Pause)]
+    [DataRow(WorkflowControl.Cancel)]
     public async Task ControlsBlockAdmissionButAllowKnownReceipts(WorkflowControl control)
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -87,22 +88,22 @@ public sealed class TaskVerificationStoreTests : IDisposable
         await store.ControlTaskGraphAsync("graph", control, Caller, Ct);
         await store.CompleteTaskVerificationAsync(claim, started.Invocation.InvocationId, Completion(), Ct);
         var saved = await store.AbandonTaskClaimAsync(claim, "Stopped after known receipt", Ct);
-        Assert.Equal(control, saved.Control);
-        Assert.Equal(TaskVerificationInvocationState.Completed, saved.Tasks[0].Verifications[0].State);
-        Assert.Null(saved.Tasks[0].LeaseToken);
+        Assert.AreEqual(control, saved.Control);
+        Assert.AreEqual(TaskVerificationInvocationState.Completed, saved.Tasks[0].Verifications[0].State);
+        Assert.IsNull(saved.Tasks[0].LeaseToken);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task PausedGraphCannotStartACommand()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var claim = await CandidateAsync(store);
         await store.ControlTaskGraphAsync("graph", WorkflowControl.Pause, Caller, Ct);
-        await Assert.ThrowsAsync<WorkflowSuspendedException>(() => store.BeginTaskVerificationAsync(claim, "build", Ct));
-        Assert.Empty((await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Verifications);
+        await Assert.ThrowsExactlyAsync<WorkflowSuspendedException>(() => store.BeginTaskVerificationAsync(claim, "build", Ct));
+        Assert.IsEmpty((await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Verifications);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task UncertainVerificationKeepsClockActiveAcrossPauseAndReopenUntilReconciled()
     {
         var time = new ManualTimeProvider();
@@ -116,13 +117,13 @@ public sealed class TaskVerificationStoreTests : IDisposable
         }
         time.Advance(TimeSpan.FromSeconds(7));
         await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath, timeProvider: time);
-        Assert.Equal(TimeSpan.FromSeconds(7), (await reopened.GetBudgetAsync(AgentTaskIdentity.RootRunId("graph"), Ct)).ExecutionTime);
+        Assert.AreEqual(TimeSpan.FromSeconds(7), (await reopened.GetBudgetAsync(AgentTaskIdentity.RootRunId("graph"), Ct)).ExecutionTime);
         await reopened.ReconcileTaskVerificationAsync("graph", "task", id, Completion(), "Established exact stopped worker result", Caller, Ct);
         time.Advance(TimeSpan.FromSeconds(4));
-        Assert.Equal(TimeSpan.FromSeconds(7), (await reopened.GetBudgetAsync(AgentTaskIdentity.RootRunId("graph"), Ct)).ExecutionTime);
+        Assert.AreEqual(TimeSpan.FromSeconds(7), (await reopened.GetBudgetAsync(AgentTaskIdentity.RootRunId("graph"), Ct)).ExecutionTime);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExhaustedBudgetBlocksAdmissionAndLateAcceptanceAtomically()
     {
         var time = new ManualTimeProvider();
@@ -131,79 +132,79 @@ public sealed class TaskVerificationStoreTests : IDisposable
         var admitted = await store.BeginTaskVerificationAsync(claim, "build", Ct);
         time.Advance(TimeSpan.FromSeconds(6));
         await store.CompleteTaskVerificationAsync(claim, admitted.Invocation.InvocationId, Completion(), Ct);
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.RecordTaskAcceptanceAsync(claim,
+        await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.RecordTaskAcceptanceAsync(claim,
             new(TaskAcceptanceOutcome.Accepted, "host", "Attempted late acceptance"), Ct));
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, (await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Status);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, (await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Status);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExhaustedBudgetCreatesNoCommandIntent()
     {
         var time = new ManualTimeProvider();
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath, timeProvider: time);
         var claim = await CandidateAsync(store, new(10, 10, MaxExecutionTime: TimeSpan.FromSeconds(5)));
         time.Advance(TimeSpan.FromSeconds(5));
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.BeginTaskVerificationAsync(claim, "build", Ct));
-        Assert.Empty((await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Verifications);
+        await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.BeginTaskVerificationAsync(claim, "build", Ct));
+        Assert.IsEmpty((await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Verifications);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AcceptanceCannotBypassMissingOrFailingCommandReceipts()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var claim = await CandidateAsync(store);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.RecordTaskAcceptanceAsync(claim,
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.RecordTaskAcceptanceAsync(claim,
             new(TaskAcceptanceOutcome.Accepted, "unrelated-host", "No build evidence"), Ct));
         var invocation = await store.BeginTaskVerificationAsync(claim, "build", Ct);
         await store.CompleteTaskVerificationAsync(claim, invocation.Invocation.InvocationId,
             Completion() with { Outcome = TaskCommandOutcome.Failed, ExitCode = 1 }, Ct);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.RecordTaskAcceptanceAsync(claim,
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.RecordTaskAcceptanceAsync(claim,
             new(TaskAcceptanceOutcome.Accepted, "unrelated-host", "Failed build ignored"), Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task BindingAndClaimsCannotDrift()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var claim = await CandidateAsync(store);
         var graph = Graph();
         var changed = Binding(graph) with { VerificationProfiles = [Profile() with { Arguments = ["changed"] }] };
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.AcceptAgentTaskGraphAsync(graph, Caller, 1, changed, Ct));
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.BeginTaskVerificationAsync(claim with { LeaseToken = "foreign-token" }, "build", Ct));
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.BeginTaskVerificationAsync(claim, "undeclared", Ct));
-        Assert.Empty((await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Verifications);
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.AcceptAgentTaskGraphAsync(graph, Caller, 1, changed, Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.BeginTaskVerificationAsync(claim with { LeaseToken = "foreign-token" }, "build", Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.BeginTaskVerificationAsync(claim, "undeclared", Ct));
+        Assert.IsEmpty((await store.GetTaskGraphAsync("graph", Ct))!.Tasks[0].Verifications);
     }
 
-    [Theory]
-    [InlineData("NUL", false)]
-    [InlineData("src/con.txt", false)]
-    [InlineData("out/LPT9.trx", true)]
-    [InlineData("out/COM0.log", true)]
-    [InlineData("src/project.", false)]
-    [InlineData("src/project /inner", false)]
-    [InlineData("out/result?.trx", true)]
-    [InlineData("out/<report>.trx", true)]
-    [InlineData("out/result|file.trx", true)]
-    [InlineData("out/result\"file.trx", true)]
-    [InlineData("/outside", false)]
-    [InlineData("\\\\host\\share\\report.trx", true)]
-    [InlineData("../outside", false)]
-    [InlineData(".git/report.trx", true)]
+    [TestMethod]
+    [DataRow("NUL", false)]
+    [DataRow("src/con.txt", false)]
+    [DataRow("out/LPT9.trx", true)]
+    [DataRow("out/COM0.log", true)]
+    [DataRow("src/project.", false)]
+    [DataRow("src/project /inner", false)]
+    [DataRow("out/result?.trx", true)]
+    [DataRow("out/<report>.trx", true)]
+    [DataRow("out/result|file.trx", true)]
+    [DataRow("out/result\"file.trx", true)]
+    [DataRow("/outside", false)]
+    [DataRow("\\\\host\\share\\report.trx", true)]
+    [DataRow("../outside", false)]
+    [DataRow(".git/report.trx", true)]
     public async Task NonportableCommandPathsAreRejectedBeforeLedgerAdmission(string path, bool testResults)
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var graph = Graph();
         var profile = testResults ? Profile() with { Kind = TaskVerificationKind.Tests, TestResultsPath = path }
             : Profile() with { WorkingDirectory = path };
-        await Assert.ThrowsAsync<ArgumentException>(() => store.AcceptAgentTaskGraphAsync(graph, Caller, 1,
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => store.AcceptAgentTaskGraphAsync(graph, Caller, 1,
             Binding(graph) with { VerificationProfiles = [profile] }, Ct));
-        Assert.Null(await store.GetTaskGraphAsync(graph.GraphId, Ct));
-        Assert.Empty(await store.ListAsync(Ct));
+        Assert.IsNull(await store.GetTaskGraphAsync(graph.GraphId, Ct));
+        Assert.IsEmpty(await store.ListAsync(Ct));
     }
 
-    [Theory]
-    [InlineData(10, false)]
-    [InlineData(11, true)]
+    [TestMethod]
+    [DataRow(10, false)]
+    [DataRow(11, true)]
     public async Task SharedTokenEqualityPermitsVerificationButActualOvershootBlocksIt(long charged, bool exhausted)
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -216,7 +217,7 @@ public sealed class TaskVerificationStoreTests : IDisposable
         await store.RecordTaskResultAsync(claim, new("graph", claim.GraphFingerprint, "task", WorkflowTaskStatus.AwaitingVerification,
             "exact-sealed-revision", "Awaiting verification"), Ct);
         if (exhausted)
-            await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.BeginTaskVerificationAsync(claim, "build", Ct));
+            await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.BeginTaskVerificationAsync(claim, "build", Ct));
         else
         {
             var admission = await store.BeginTaskVerificationAsync(claim, "build", Ct);
@@ -225,13 +226,13 @@ public sealed class TaskVerificationStoreTests : IDisposable
         }
     }
 
-    [Theory]
-    [InlineData("profile")]
-    [InlineData("revision")]
-    [InlineData("identity")]
-    [InlineData("log")]
-    [InlineData("failed-accepted")]
-    [InlineData("schema")]
+    [TestMethod]
+    [DataRow("profile")]
+    [DataRow("revision")]
+    [DataRow("identity")]
+    [DataRow("log")]
+    [DataRow("failed-accepted")]
+    [DataRow("schema")]
     public async Task ReopenRejectsPersistedReceiptOrAcceptanceTampering(string defect)
     {
         TaskGraphCheckpoint saved;
@@ -259,14 +260,14 @@ public sealed class TaskVerificationStoreTests : IDisposable
         {
             await using var command = await database.ExecuteAsync("UPDATE task_graphs SET payload = '" + payload.Replace("'", "''") + "' WHERE graph_id = 'graph'");
         }
-        await Assert.ThrowsAnyAsync<Exception>(async () => { await using var rejected = await CSharpDbWorkflowStore.OpenAsync(DatabasePath); });
+        await Assert.ThrowsAsync<Exception>(async () => { await using var rejected = await CSharpDbWorkflowStore.OpenAsync(DatabasePath); });
     }
 
     private async Task<TaskGraphClaim> CandidateAsync(CSharpDbWorkflowStore store, WorkflowBudget? budget = null)
     {
         var graph = Graph();
         var accepted = await store.AcceptAgentTaskGraphAsync(graph, Caller, 1, Binding(graph) with { SharedBudget = budget ?? new(10, 10) }, Ct);
-        Assert.Equal(4, accepted.SchemaVersion);
+        Assert.AreEqual(4, accepted.SchemaVersion);
         var claim = (await store.ClaimTaskAsync("graph", Caller, Ct))!;
         await store.RecordTaskResultAsync(claim, new("graph", claim.GraphFingerprint, "task", WorkflowTaskStatus.AwaitingVerification,
             "exact-sealed-revision", "Awaiting controlled verification"), Ct);
@@ -276,8 +277,10 @@ public sealed class TaskVerificationStoreTests : IDisposable
         Path.Combine(_directory, "source"), new string('a', 40), Path.Combine(_directory, "managed"), "test", "model",
         new(ToolProfile.Minimal), new(10, 10))
     {
-        DependencyMode = TaskDependencyMode.AcceptedChanges, VerificationAuthority = TaskVerificationAuthority.TrustedLocalProcess,
-        VerificationProfiles = [Profile()], CommandVerificationRules = [new("task", "build-ok", "build")]
+        DependencyMode = TaskDependencyMode.AcceptedChanges,
+        VerificationAuthority = TaskVerificationAuthority.TrustedLocalProcess,
+        VerificationProfiles = [Profile()],
+        CommandVerificationRules = [new("task", "build-ok", "build")]
     };
     private static WorkflowTaskGraph Graph() => new("graph", "Verify deliverable", [new("task", "Build deliverable")
         { AcceptanceCriteria = [new("build-ok", "Controlled build passes")] }]);
@@ -291,5 +294,6 @@ public sealed class TaskVerificationStoreTests : IDisposable
         public override DateTimeOffset GetUtcNow() => _now;
         public void Advance(TimeSpan elapsed) => _now += elapsed;
     }
-    public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true); }
+    [TestCleanup]
+    public void Cleanup() { if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true); }
 }

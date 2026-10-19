@@ -4,19 +4,20 @@ using IronPaw.Skills.ExampleAddin;
 
 namespace IronPaw.Skills.ExampleAddin.Tests;
 
+[TestClass]
 public sealed class ExampleSkillAddinTests
 {
-    [Fact]
+    [TestMethod]
     public void CreateSkills_ReturnsExpectedSkills()
     {
         var addin = new ExampleSkillAddin();
         var skills = addin.CreateSkills();
         var names = skills.Select(skill => skill.Descriptor.Name).OrderBy(name => name).ToArray();
 
-        Assert.Equal(["slugify", "text_stats"], names);
+        Assert.AreSequenceEqual(["slugify", "text_stats"], names);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task TextStatsSkill_ReturnsExpectedCounts()
     {
         var addin = new ExampleSkillAddin();
@@ -27,15 +28,15 @@ public sealed class ExampleSkillAddinTests
             Arguments: JsonSerializer.SerializeToElement(new { text = "alpha beta\ngamma" }));
 
         var result = await skill.ExecuteAsync(call, CreateContext(), CancellationToken.None);
-        Assert.False(result.IsError);
+        Assert.IsFalse(result.IsError);
 
         using var payload = JsonDocument.Parse(result.Content);
-        Assert.Equal(16, payload.RootElement.GetProperty("characters").GetInt32());
-        Assert.Equal(3, payload.RootElement.GetProperty("words").GetInt32());
-        Assert.Equal(2, payload.RootElement.GetProperty("lines").GetInt32());
+        Assert.AreEqual(16, payload.RootElement.GetProperty("characters").GetInt32());
+        Assert.AreEqual(3, payload.RootElement.GetProperty("words").GetInt32());
+        Assert.AreEqual(2, payload.RootElement.GetProperty("lines").GetInt32());
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SlugifySkill_RespectsSeparator()
     {
         var addin = new ExampleSkillAddin();
@@ -46,8 +47,8 @@ public sealed class ExampleSkillAddinTests
             Arguments: JsonSerializer.SerializeToElement(new { text = "Hello, Skill Addin!", separator = "_" }));
 
         var result = await skill.ExecuteAsync(call, CreateContext(), CancellationToken.None);
-        Assert.False(result.IsError);
-        Assert.Equal("hello_skill_addin", result.Content);
+        Assert.IsFalse(result.IsError);
+        Assert.AreEqual("hello_skill_addin", result.Content);
     }
 
     private static SkillExecutionContext CreateContext()

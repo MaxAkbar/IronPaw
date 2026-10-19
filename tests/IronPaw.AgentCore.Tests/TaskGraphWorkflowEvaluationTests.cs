@@ -9,13 +9,15 @@ using System.Text.Json.Serialization;
 using IronPaw.AgentCore.Abstractions;
 using IronPaw.AgentCore.Persistence.CSharpDb;
 using IronPaw.AgentCore.Tools;
-using Xunit.Abstractions;
 
 namespace IronPaw.AgentCore.Tests;
 
 /// <summary>Versioned controlled replay, not a measurement of live model quality or routing superiority.</summary>
-public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
+[TestClass]
+public sealed class TaskGraphWorkflowEvaluationTests
 {
+    public TestContext TestContext { get; set; } = null!;
+
     private const string Protocol = "ironpaw-controlled-replay/v1";
     private const string CorrectCode = "public static class Calc { public static int Add(int left, int right) => checked(left + right); }";
     private const string CorrectDocs = "Calc.Add uses checked integer addition.";
@@ -23,7 +25,7 @@ public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
     private static readonly CancellationToken Ct = CancellationToken.None;
     private static readonly WorkflowBudget SharedBudget = new(24, 12, 100_000, TimeSpan.FromMinutes(5));
 
-    [Fact]
+    [TestMethod]
     public async Task ParallelCodeAndDocs_AndDirectBaseline_PassTheSameRealChecks_WithoutClaimingModelAdvantage()
     {
         await using var scope = await Scope.OpenAsync();
@@ -31,28 +33,28 @@ public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
         var parallel = await EvaluateAsync(scope, "parallel-code-doc", Graph("parallel", parallel: true), parallelClient);
         var direct = await EvaluateAsync(scope, "direct-code-doc", Graph("direct"), new ReplayClient("direct"));
 
-        Assert.True(parallel.VerifiedCompletion);
-        Assert.True(direct.VerifiedCompletion);
-        Assert.True(parallelClient.IndependentBranchesAdmitted);
-        Assert.Equal(parallel.BaseCommit, direct.BaseCommit);
-        Assert.Equal(parallel.VerificationProfiles, direct.VerificationProfiles);
-        Assert.Equal(parallel.OutputDigests, direct.OutputDigests);
-        Assert.Equal(parallel.Budget, direct.Budget);
-        Assert.Equal(5, parallel.Usage.ModelCalls);
-        Assert.Equal(2, direct.Usage.ModelCalls);
-        Assert.Equal(2, parallel.Usage.ToolCalls);
-        Assert.Equal(2, direct.Usage.ToolCalls);
+        Assert.IsTrue(parallel.VerifiedCompletion);
+        Assert.IsTrue(direct.VerifiedCompletion);
+        Assert.IsTrue(parallelClient.IndependentBranchesAdmitted);
+        Assert.AreEqual(parallel.BaseCommit, direct.BaseCommit);
+        Assert.AreSequenceEqual(parallel.VerificationProfiles, direct.VerificationProfiles);
+        Assert.AreSequenceEqual(parallel.OutputDigests, direct.OutputDigests);
+        Assert.AreEqual(parallel.Budget, direct.Budget);
+        Assert.AreEqual(5, parallel.Usage.ModelCalls);
+        Assert.AreEqual(2, direct.Usage.ModelCalls);
+        Assert.AreEqual(2, parallel.Usage.ToolCalls);
+        Assert.AreEqual(2, direct.Usage.ToolCalls);
         // Replay deliberately exposes coordination overhead. Synthetic usage cannot establish real cost advantage.
-        Assert.True(parallel.ChargedTokens > direct.ChargedTokens);
-        Assert.Equal("NOT_ESTABLISHED", parallel.LiveBaselineQualification);
+        Assert.IsTrue(parallel.ChargedTokens > direct.ChargedTokens);
+        Assert.AreEqual("NOT_ESTABLISHED", parallel.LiveBaselineQualification);
     }
 
-    [Theory]
-    [InlineData("dependency-conflict")]
-    [InlineData("missing-output")]
-    [InlineData("false-output")]
-    [InlineData("provider-failure")]
-    [InlineData("command-failure")]
+    [TestMethod]
+    [DataRow("dependency-conflict")]
+    [DataRow("missing-output")]
+    [DataRow("false-output")]
+    [DataRow("provider-failure")]
+    [DataRow("command-failure")]
     public async Task FaultCorpus_NeverAcceptsAnInvalidOverallResult(string scenario)
     {
         await using var scope = await Scope.OpenAsync();
@@ -60,20 +62,20 @@ public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
         var client = new ReplayClient(scenario);
         var result = await EvaluateAsync(scope, scenario, graph, client, expectedCompletion: false);
 
-        Assert.False(result.VerifiedCompletion);
-        Assert.False(result.FalseGraphAcceptance);
-        Assert.Equal(scenario == "provider-failure" ? TaskGraphRunStatus.NeedsReconciliation : TaskGraphRunStatus.Failed, result.Status);
+        Assert.IsFalse(result.VerifiedCompletion);
+        Assert.IsFalse(result.FalseGraphAcceptance);
+        Assert.AreEqual(scenario == "provider-failure" ? TaskGraphRunStatus.NeedsReconciliation : TaskGraphRunStatus.Failed, result.Status);
         if (scenario == "dependency-conflict")
         {
             Assert.DoesNotContain("join", client.AdmittedRoles);
-            Assert.Equal(0, result.CommandInvocations);
+            Assert.AreEqual(0, result.CommandInvocations);
         }
-        if (scenario is "missing-output" or "provider-failure") Assert.Equal(0, result.CommandInvocations);
-        if (scenario == "false-output") Assert.Equal(2, result.CommandInvocations);
-        if (scenario == "command-failure") Assert.Equal(1, result.CommandInvocations);
+        if (scenario is "missing-output" or "provider-failure") Assert.AreEqual(0, result.CommandInvocations);
+        if (scenario == "false-output") Assert.AreEqual(2, result.CommandInvocations);
+        if (scenario == "command-failure") Assert.AreEqual(1, result.CommandInvocations);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task PauseAndReopen_ReuseCompletedCommandAndProviderReceipts()
     {
         await using var scope = await Scope.OpenAsync();
@@ -92,8 +94,11 @@ public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
             await runner.PauseAsync(graph.GraphId, Owner, Ct);
             worker.Release.TrySetResult();
             var paused = await active.WaitAsync(TimeSpan.FromSeconds(15), timeout.Token);
-            Assert.Equal(TaskGraphRunStatus.Paused, TaskGraphProgress.Inspect(paused).Status);
-            Assert.All(paused.Tasks.Single().Verifications, invocation => Assert.Equal(TaskVerificationInvocationState.Completed, invocation.State));
+            Assert.AreEqual(TaskGraphRunStatus.Paused, TaskGraphProgress.Inspect(paused).Status);
+            foreach (var invocation in paused.Tasks.Single().Verifications)
+            {
+                Assert.AreEqual(TaskVerificationInvocationState.Completed, invocation.State);
+            }
             var usageBefore = await ((IWorkflowStore)scope.Store).GetUsageAsync(AgentTaskIdentity.RootRunId(graph.GraphId), Ct);
             await scope.ReopenAsync();
 
@@ -102,11 +107,11 @@ public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
             var resumed = await scope.Runner(noReplayClient, noReplayWorker).ResumeAsync(graph.GraphId, Owner, timeout.Token);
             watch.Stop();
             var report = await ReportAsync(scope, "pause-recovery", resumed, watch.Elapsed, expectedCompletion: true, recoveryReusedReceipts: true);
-            Assert.True(report.VerifiedCompletion);
-            Assert.Equal(usageBefore, report.Usage);
-            Assert.Equal(0, noReplayClient.Calls);
-            Assert.Equal(0, noReplayWorker.Calls);
-            Assert.Equal(2, worker.Calls);
+            Assert.IsTrue(report.VerifiedCompletion);
+            Assert.AreEqual(usageBefore, report.Usage);
+            Assert.AreEqual(0, noReplayClient.Calls);
+            Assert.AreEqual(0, noReplayWorker.Calls);
+            Assert.AreEqual(2, worker.Calls);
         }
         finally
         {
@@ -126,11 +131,11 @@ public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
         var checkpoint = await scope.Runner(client, worker).StartAsync(graph, Owner, graph.Tasks.Length == 1 ? 1 : 2, options, timeout.Token);
         watch.Stop();
         var report = await ReportAsync(scope, scenario, checkpoint, watch.Elapsed, expectedCompletion);
-        Assert.Equal(scope.InitialCode, await File.ReadAllTextAsync(Path.Combine(scope.Source, "Calc.cs")));
-        Assert.Equal("TODO", await File.ReadAllTextAsync(Path.Combine(scope.Source, "README.md")));
-        Assert.False(Directory.Exists(Path.Combine(scope.Source, "bin")));
-        Assert.False(Directory.Exists(Path.Combine(scope.Source, "obj")));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "results.trx")));
+        Assert.AreEqual(scope.InitialCode, await File.ReadAllTextAsync(Path.Combine(scope.Source, "Calc.cs")));
+        Assert.AreEqual("TODO", await File.ReadAllTextAsync(Path.Combine(scope.Source, "README.md")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(scope.Source, "bin")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(scope.Source, "obj")));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "results.trx")));
         return report;
     }
 
@@ -159,9 +164,9 @@ public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
                     invocation.Completion?.ExitCode, invocation.Completion?.Tests)).ToArray())).ToArray());
         var path = Path.Combine(scope.ReportDirectory, scenario + ".json");
         var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } });
-        Assert.True(Encoding.UTF8.GetByteCount(json) < 32_768, "Evaluation reports must remain bounded.");
+        Assert.IsTrue(Encoding.UTF8.GetByteCount(json) < 32_768, "Evaluation reports must remain bounded.");
         await File.WriteAllTextAsync(path, json, Ct);
-        output.WriteLine("Controlled replay evidence: " + path);
+        TestContext.WriteLine("Controlled replay evidence: " + path);
         return report;
     }
 
@@ -185,17 +190,22 @@ public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
     private static WorkflowTaskGraph ConflictGraph()
     {
         var template = Graph("dependency-conflict", parallel: true);
-        return template with { Tasks = [MakeTask("left", "dependency-conflict", ["Calc.cs"], [new("code", "Left code", TaskArtifactKind.File, "Calc.cs")]),
+        return template with
+        {
+            Tasks = [MakeTask("left", "dependency-conflict", ["Calc.cs"], [new("code", "Left code", TaskArtifactKind.File, "Calc.cs")]),
             MakeTask("right", "dependency-conflict", ["Calc.cs"], [new("code", "Right code", TaskArtifactKind.File, "Calc.cs")]),
-            template.Tasks[2] with { Dependencies = ["left", "right"] }] };
+            template.Tasks[2] with { Dependencies = ["left", "right"] }]
+        };
     }
 
     private static WorkflowTaskDefinition MakeTask(string role, string scenario, ImmutableArray<string> writes,
         ImmutableArray<TaskArtifactRequirement> artifacts) => new(role, $"eval:{scenario}:{role}")
-    {
-        ToolPolicy = new(ToolProfile.Coding), Resources = new() { ReadPaths = ["."], WritePaths = writes }, ExpectedArtifacts = artifacts,
-        AcceptanceCriteria = [new("integrity", "The output is present in the sealed candidate") { ArtifactIds = artifacts.Select(artifact => artifact.ArtifactId).ToImmutableArray() }]
-    };
+        {
+            ToolPolicy = new(ToolProfile.Coding),
+            Resources = new() { ReadPaths = ["."], WritePaths = writes },
+            ExpectedArtifacts = artifacts,
+            AcceptanceCriteria = [new("integrity", "The output is present in the sealed candidate") { ArtifactIds = artifacts.Select(artifact => artifact.ArtifactId).ToImmutableArray() }]
+        };
 
     private sealed record CommandObservation(string InvocationId, string ProfileId, string ResultDigest, string Revision,
         TaskVerificationInvocationState State, TaskCommandOutcome? Outcome, int? ExitCode, TaskVerificationTestSummary? Tests);
@@ -310,8 +320,18 @@ public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
         public string Source => Path.Combine(Root, "source");
         public string InitialCode => InitialSource;
         public static string InputDigest => "sha256:" + Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(
-            new { Protocol, Project, Program, Calc = InitialSource, Readme = "TODO", NugetConfig,
-                Objective = "Implement checked addition and its documented contract", Code = CorrectCode, Docs = CorrectDocs })));
+            new
+            {
+                Protocol,
+                Project,
+                Program,
+                Calc = InitialSource,
+                Readme = "TODO",
+                NugetConfig,
+                Objective = "Implement checked addition and its documented contract",
+                Code = CorrectCode,
+                Docs = CorrectDocs
+            })));
         private string Database => Path.Combine(Root, "workflows.cdb");
         public CSharpDbWorkflowStore Store { get; private set; } = null!;
         private readonly GitTaskWorkspaceManager manager = new();
@@ -380,7 +400,7 @@ public sealed class TaskGraphWorkflowEvaluationTests(ITestOutputHelper output)
             var stderr = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
             await stdout;
-            Assert.True(process.ExitCode == 0, await stderr);
+            Assert.IsTrue(process.ExitCode == 0, await stderr);
         }
     }
 }

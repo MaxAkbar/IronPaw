@@ -3,9 +3,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class InMemoryAgentMessageBusTests
 {
-    [Fact]
+    [TestMethod]
     public async Task SendAsync_AuthorizedSender_CanReadMessageFromSameScope()
     {
         var registry = new InMemoryAgentRegistry();
@@ -33,11 +34,11 @@ public sealed class InMemoryAgentMessageBusTests
                 RecipientAgentId: "beta"),
             CancellationToken.None);
 
-        Assert.Single(messages);
-        Assert.Equal(delivered.MessageId, messages[0].MessageId);
-        Assert.Equal("alpha", messages[0].SenderAgentId);
-        Assert.Equal("beta", messages[0].RecipientAgentId);
-        Assert.Equal("hello from alpha", messages[0].Content);
+        Assert.ContainsSingle(messages);
+        Assert.AreEqual(delivered.MessageId, messages[0].MessageId);
+        Assert.AreEqual("alpha", messages[0].SenderAgentId);
+        Assert.AreEqual("beta", messages[0].RecipientAgentId);
+        Assert.AreEqual("hello from alpha", messages[0].Content);
 
         var afterRead = await bus.ReadAsync(
             new AgentMessageReadRequest(
@@ -46,10 +47,10 @@ public sealed class InMemoryAgentMessageBusTests
                 RecipientAgentId: "beta"),
             CancellationToken.None);
 
-        Assert.Empty(afterRead);
+        Assert.IsEmpty(afterRead);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SendAsync_UnauthorizedSender_Throws()
     {
         var registry = new InMemoryAgentRegistry();
@@ -58,7 +59,7 @@ public sealed class InMemoryAgentMessageBusTests
         registry.Register(CreateAgent("gamma", allowedSenders: ["beta"]));
         var bus = new InMemoryAgentMessageBus(registry);
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() =>
             bus.SendAsync(
                 new AgentMessageSendRequest(
                     SessionKey: new SessionKey("session-a"),
@@ -69,7 +70,7 @@ public sealed class InMemoryAgentMessageBusTests
                 CancellationToken.None));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReadAsync_IsolatedBySessionAndRunScope()
     {
         var registry = new InMemoryAgentRegistry();
@@ -92,7 +93,7 @@ public sealed class InMemoryAgentMessageBusTests
                 ScopeRunId: new RunId("run-a"),
                 RecipientAgentId: "beta"),
             CancellationToken.None);
-        Assert.Empty(wrongSession);
+        Assert.IsEmpty(wrongSession);
 
         var wrongRun = await bus.ReadAsync(
             new AgentMessageReadRequest(
@@ -100,7 +101,7 @@ public sealed class InMemoryAgentMessageBusTests
                 ScopeRunId: new RunId("run-b"),
                 RecipientAgentId: "beta"),
             CancellationToken.None);
-        Assert.Empty(wrongRun);
+        Assert.IsEmpty(wrongRun);
 
         var correctScope = await bus.ReadAsync(
             new AgentMessageReadRequest(
@@ -108,10 +109,10 @@ public sealed class InMemoryAgentMessageBusTests
                 ScopeRunId: new RunId("run-a"),
                 RecipientAgentId: "beta"),
             CancellationToken.None);
-        Assert.Single(correctScope);
+        Assert.ContainsSingle(correctScope);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReadAsync_CanFilterBySenderAndCorrelation()
     {
         var registry = new InMemoryAgentRegistry();
@@ -143,12 +144,12 @@ public sealed class InMemoryAgentMessageBusTests
                 CorrelationId: "corr-1"),
             CancellationToken.None);
 
-        Assert.Single(filtered);
-        Assert.Equal("alpha", filtered[0].SenderAgentId);
-        Assert.Equal("corr-1", filtered[0].CorrelationId);
+        Assert.ContainsSingle(filtered);
+        Assert.AreEqual("alpha", filtered[0].SenderAgentId);
+        Assert.AreEqual("corr-1", filtered[0].CorrelationId);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReadAsync_ConsumeWithFilter_RemovesOnlyMatchedMessages()
     {
         var registry = new InMemoryAgentRegistry();
@@ -174,8 +175,8 @@ public sealed class InMemoryAgentMessageBusTests
                 MarkAsRead: true,
                 CorrelationId: "corr-1"),
             CancellationToken.None);
-        Assert.Single(consumed);
-        Assert.Equal("corr-1", consumed[0].CorrelationId);
+        Assert.ContainsSingle(consumed);
+        Assert.AreEqual("corr-1", consumed[0].CorrelationId);
 
         var remaining = await bus.ReadAsync(
             new AgentMessageReadRequest(
@@ -184,8 +185,8 @@ public sealed class InMemoryAgentMessageBusTests
                 RecipientAgentId: "beta",
                 MarkAsRead: true),
             CancellationToken.None);
-        Assert.Single(remaining);
-        Assert.Equal("corr-2", remaining[0].CorrelationId);
+        Assert.ContainsSingle(remaining);
+        Assert.AreEqual("corr-2", remaining[0].CorrelationId);
     }
 
     private static AgentDefinition CreateAgent(string agentId, IReadOnlyCollection<string>? allowedSenders = null)

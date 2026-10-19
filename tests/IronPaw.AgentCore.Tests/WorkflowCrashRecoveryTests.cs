@@ -5,11 +5,12 @@ using IronPaw.Workflow.CrashHarness;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class WorkflowCrashRecoveryTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task KilledHostWithReservedModel_ChargesUnknownTokensAndUncleanTimeWithoutAnotherProviderCall(bool advanceClock)
     {
         using var scope = new CrashScope();
@@ -17,25 +18,25 @@ public sealed class WorkflowCrashRecoveryTests
         var clock = advanceClock ? new RecoveryClock(DateTimeOffset.UtcNow.AddMinutes(2)) : TimeProvider.System;
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), timeProvider: clock);
         var recovered = (await store.GetAsync(new RunId(runId), CancellationToken.None))!;
-        var attempt = Assert.Single(Assert.Single(recovered.ModelCalls!).Attempts!);
-        Assert.Equal(WorkflowReservationState.Unknown, attempt.State);
-        Assert.Equal(2048, attempt.ReservedTokens);
+        var attempt = Assert.ContainsSingle(Assert.ContainsSingle(recovered.ModelCalls!).Attempts!);
+        Assert.AreEqual(WorkflowReservationState.Unknown, attempt.State);
+        Assert.AreEqual(2048, attempt.ReservedTokens);
         var budget = await store.GetBudgetAsync(new RunId(runId), CancellationToken.None);
-        Assert.Equal(2048, budget.ChargedTokens);
-        Assert.Equal(0, budget.ReservedTokens);
-        Assert.True(budget.ExecutionTime > TimeSpan.Zero);
-        if (advanceClock) Assert.Equal(TimeSpan.Zero, budget.RemainingExecutionTime);
+        Assert.AreEqual(2048, budget.ChargedTokens);
+        Assert.AreEqual(0, budget.ReservedTokens);
+        Assert.IsTrue(budget.ExecutionTime > TimeSpan.Zero);
+        if (advanceClock) Assert.AreEqual(TimeSpan.Zero, budget.RemainingExecutionTime);
         using var scheduler = new SessionLaneScheduler();
         var model = new RecoveryModel();
         var effect = new CrashEffectTool(scope.Root);
         var runtime = CrashFixture.CreateOrchestrator(scope.Root, store, scheduler, model, effect);
         var result = await runtime.ResumeAsync(new RunId(runId), CrashFixture.Request.Caller,
             NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.BudgetExhausted, result.Status);
-        Assert.Equal(0, model.CallCount);
-        Assert.Equal(0, effect.CallCount);
-        Assert.False(File.Exists(CrashFixture.EffectsPath(scope.Root)));
-        Assert.Equal(2048, (await store.GetBudgetAsync(new RunId(runId), CancellationToken.None)).ChargedTokens);
+        Assert.AreEqual(AgentRunStatus.BudgetExhausted, result.Status);
+        Assert.AreEqual(0, model.CallCount);
+        Assert.AreEqual(0, effect.CallCount);
+        Assert.IsFalse(File.Exists(CrashFixture.EffectsPath(scope.Root)));
+        Assert.AreEqual(2048, (await store.GetBudgetAsync(new RunId(runId), CancellationToken.None)).ChargedTokens);
     }
 
     private sealed class RecoveryClock(DateTimeOffset now) : TimeProvider
@@ -43,24 +44,24 @@ public sealed class WorkflowCrashRecoveryTests
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    [Fact]
+    [TestMethod]
     public async Task KilledHostWhileAwaitingHuman_ReopenRetainsRequestAndResumesWithoutRepeatingEffect()
     {
         using var scope = new CrashScope();
         var runId = await scope.StartAndKillAsync(CrashPoint.AfterHumanWait);
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root));
-        var recovered = Assert.Single(await store.ListAsync(CancellationToken.None));
-        Assert.Equal(runId, recovered.RunId);
-        Assert.Equal(WorkflowStatus.AwaitingInput, recovered.Status);
-        Assert.Null(recovered.Result);
-        Assert.Null(recovered.LeaseOwner);
-        var pending = Assert.Single(recovered.HumanRequests!);
-        Assert.Null(pending.Response);
-        Assert.Equal(WorkflowHumanRequestKind.Input, pending.Kind);
-        Assert.False(WorkflowIdentity.HasUnknownEffects(recovered));
-        Assert.NotNull(recovered.ToolExecutions![0].Result);
-        Assert.Equal(WorkflowToolState.Planned, recovered.ToolExecutions[1].State);
-        Assert.Single(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root)));
+        var recovered = Assert.ContainsSingle(await store.ListAsync(CancellationToken.None));
+        Assert.AreEqual(runId, recovered.RunId);
+        Assert.AreEqual(WorkflowStatus.AwaitingInput, recovered.Status);
+        Assert.IsNull(recovered.Result);
+        Assert.IsNull(recovered.LeaseOwner);
+        var pending = Assert.ContainsSingle(recovered.HumanRequests!);
+        Assert.IsNull(pending.Response);
+        Assert.AreEqual(WorkflowHumanRequestKind.Input, pending.Kind);
+        Assert.IsFalse(WorkflowIdentity.HasUnknownEffects(recovered));
+        Assert.IsNotNull(recovered.ToolExecutions![0].Result);
+        Assert.AreEqual(WorkflowToolState.Planned, recovered.ToolExecutions[1].State);
+        Assert.ContainsSingle(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root)));
 
         using var scheduler = new SessionLaneScheduler();
         var model = new RecoveryModel();
@@ -68,43 +69,42 @@ public sealed class WorkflowCrashRecoveryTests
         var orchestrator = CrashFixture.CreateOrchestrator(scope.Root, store, scheduler, model, tool, new CrashHumanInputTool());
         var waiting = await orchestrator.ResumeAsync(new RunId(runId), CrashFixture.Request.Caller,
             NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(AgentRunStatus.AwaitingInput, waiting.Status);
-        Assert.Equal(0, model.CallCount);
-        Assert.Equal(0, tool.CallCount);
+        Assert.AreEqual(AgentRunStatus.AwaitingInput, waiting.Status);
+        Assert.AreEqual(0, model.CallCount);
+        Assert.AreEqual(0, tool.CallCount);
         await orchestrator.AnswerAsync(new RunId(runId), pending.RequestId, "Use the verified release branch",
             CrashFixture.Request.Caller, CancellationToken.None);
         var result = await orchestrator.ResumeAsync(new RunId(runId), CrashFixture.Request.Caller,
             NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(runId, result.RunId.Value);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Equal(1, model.CallCount);
-        Assert.Equal(0, tool.CallCount);
-        Assert.Single(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root)));
-        Assert.Contains(Assert.Single(model.Requests).Messages,
-            message => message.Role == ChatRole.Tool && message.Content.Contains("verified release branch", StringComparison.Ordinal));
+        Assert.AreEqual(runId, result.RunId.Value);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        Assert.AreEqual(1, model.CallCount);
+        Assert.AreEqual(0, tool.CallCount);
+        Assert.ContainsSingle(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root)));
+        Assert.Contains(message => message.Role == ChatRole.Tool && message.Content.Contains("verified release branch", StringComparison.Ordinal), Assert.ContainsSingle(model.Requests).Messages);
         var completed = (await store.GetAsync(result.RunId, CancellationToken.None))!;
-        Assert.Equal(WorkflowStatus.Succeeded, completed.Status);
-        Assert.Equal(recovered.TaskId, completed.TaskId);
-        Assert.Equal(recovered.Usage!.ToolCalls, completed.Usage!.ToolCalls);
-        Assert.Equal(recovered.Usage.ModelCalls + 1, completed.Usage.ModelCalls);
-        Assert.Equal(pending.RequestId, Assert.Single(completed.HumanRequests!).RequestId);
-        Assert.Equal("Use the verified release branch", Assert.Single(completed.HumanRequests!).Response!.Answer);
+        Assert.AreEqual(WorkflowStatus.Succeeded, completed.Status);
+        Assert.AreEqual(recovered.TaskId, completed.TaskId);
+        Assert.AreEqual(recovered.Usage!.ToolCalls, completed.Usage!.ToolCalls);
+        Assert.AreEqual(recovered.Usage.ModelCalls + 1, completed.Usage.ModelCalls);
+        Assert.AreEqual(pending.RequestId, Assert.ContainsSingle(completed.HumanRequests!).RequestId);
+        Assert.AreEqual("Use the verified release branch", Assert.ContainsSingle(completed.HumanRequests!).Response!.Answer);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task KilledHost_ReopenResumesCommittedToolAndModelWithoutRepeatingEffect()
     {
         using var scope = new CrashScope();
         var runId = await scope.StartAndKillAsync(CrashPoint.AfterCompletedTool);
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root));
-        var recovered = Assert.Single(await store.ListAsync(CancellationToken.None));
-        Assert.Equal(runId, recovered.RunId);
-        Assert.Equal(WorkflowStatus.Interrupted, recovered.Status);
-        Assert.Null(recovered.LeaseOwner);
-        Assert.NotNull(Assert.Single(recovered.ToolExecutions!).Result);
-        Assert.Equal(2, recovered.Usage!.ModelCalls);
-        Assert.Equal(1, recovered.Usage.ToolCalls);
-        Assert.Contains(await store.ReadJournalAsync(new RunId(runId), CancellationToken.None), entry => entry.EventType == "recovered");
+        var recovered = Assert.ContainsSingle(await store.ListAsync(CancellationToken.None));
+        Assert.AreEqual(runId, recovered.RunId);
+        Assert.AreEqual(WorkflowStatus.Interrupted, recovered.Status);
+        Assert.IsNull(recovered.LeaseOwner);
+        Assert.IsNotNull(Assert.ContainsSingle(recovered.ToolExecutions!).Result);
+        Assert.AreEqual(2, recovered.Usage!.ModelCalls);
+        Assert.AreEqual(1, recovered.Usage.ToolCalls);
+        Assert.Contains(entry => entry.EventType == "recovered", await store.ReadJournalAsync(new RunId(runId), CancellationToken.None));
 
         using var scheduler = new SessionLaneScheduler();
         var model = new RecoveryModel();
@@ -113,57 +113,56 @@ public sealed class WorkflowCrashRecoveryTests
         var result = await orchestrator.ResumeAsync(new RunId(runId), CrashFixture.Request.Caller,
             NullAgentEventSink.Instance, CancellationToken.None);
 
-        Assert.Equal(runId, result.RunId.Value);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Equal("recovered successfully", result.FinalAssistantMessage);
-        Assert.Equal(1, model.CallCount);
-        Assert.Equal(0, tool.CallCount);
-        Assert.Single(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root)));
-        Assert.Contains(Assert.Single(model.Requests).Messages,
-            message => message.Role == ChatRole.Tool && message.Content == "effect recorded");
+        Assert.AreEqual(runId, result.RunId.Value);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        Assert.AreEqual("recovered successfully", result.FinalAssistantMessage);
+        Assert.AreEqual(1, model.CallCount);
+        Assert.AreEqual(0, tool.CallCount);
+        Assert.ContainsSingle(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root)));
+        Assert.Contains(message => message.Role == ChatRole.Tool && message.Content == "effect recorded", Assert.ContainsSingle(model.Requests).Messages);
         var completed = await store.GetAsync(result.RunId, CancellationToken.None);
-        Assert.Equal(WorkflowStatus.Succeeded, completed!.Status);
-        Assert.Equal(3, completed.Usage!.ModelCalls);
-        Assert.Equal(1, completed.Usage.ToolCalls);
-        Assert.Equal(10, completed.Usage.InputTokens);
-        Assert.Equal(3, completed.Usage.OutputTokens);
+        Assert.AreEqual(WorkflowStatus.Succeeded, completed!.Status);
+        Assert.AreEqual(3, completed.Usage!.ModelCalls);
+        Assert.AreEqual(1, completed.Usage.ToolCalls);
+        Assert.AreEqual(10, completed.Usage.InputTokens);
+        Assert.AreEqual(3, completed.Usage.OutputTokens);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task KilledHostAfterEffect_ReopenBlocksUnknownOutcomeUntilExplicitReconciliation()
     {
         using var scope = new CrashScope();
         var runId = await scope.StartAndKillAsync(CrashPoint.AfterEffectBeforeToolResult);
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root));
-        var recovered = Assert.Single(await store.ListAsync(CancellationToken.None));
-        Assert.Equal(WorkflowStatus.NeedsReconciliation, recovered.Status);
-        Assert.Null(recovered.LeaseOwner);
-        var execution = Assert.Single(recovered.ToolExecutions!);
-        Assert.Null(execution.Result);
-        Assert.Equal($"{runId}:{execution.ExecutionId}", Assert.Single(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root))));
+        var recovered = Assert.ContainsSingle(await store.ListAsync(CancellationToken.None));
+        Assert.AreEqual(WorkflowStatus.NeedsReconciliation, recovered.Status);
+        Assert.IsNull(recovered.LeaseOwner);
+        var execution = Assert.ContainsSingle(recovered.ToolExecutions!);
+        Assert.IsNull(execution.Result);
+        Assert.AreEqual($"{runId}:{execution.ExecutionId}", Assert.ContainsSingle(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root))));
 
         using var scheduler = new SessionLaneScheduler();
         var model = new RecoveryModel();
         var tool = new CrashEffectTool(scope.Root);
         var orchestrator = CrashFixture.CreateOrchestrator(scope.Root, store, scheduler, model, tool);
-        await Assert.ThrowsAsync<WorkflowReconciliationRequiredException>(() => orchestrator.ResumeAsync(new RunId(runId),
+        await Assert.ThrowsExactlyAsync<WorkflowReconciliationRequiredException>(() => orchestrator.ResumeAsync(new RunId(runId),
             CrashFixture.Request.Caller, NullAgentEventSink.Instance, CancellationToken.None));
-        Assert.Equal(0, model.CallCount);
-        Assert.Equal(0, tool.CallCount);
-        Assert.Single(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root)));
+        Assert.AreEqual(0, model.CallCount);
+        Assert.AreEqual(0, tool.CallCount);
+        Assert.ContainsSingle(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root)));
 
         await orchestrator.ReconcileToolAsync(new RunId(runId), execution.ExecutionId, ToolResult.Success("effect recorded"),
             "Confirmed the matching execution id in the destination file", CrashFixture.Request.Caller, CancellationToken.None);
         var result = await orchestrator.ResumeAsync(new RunId(runId), CrashFixture.Request.Caller,
             NullAgentEventSink.Instance, CancellationToken.None);
-        Assert.Equal(runId, result.RunId.Value);
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Equal(1, model.CallCount);
-        Assert.Equal(0, tool.CallCount);
-        Assert.Single(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root)));
+        Assert.AreEqual(runId, result.RunId.Value);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        Assert.AreEqual(1, model.CallCount);
+        Assert.AreEqual(0, tool.CallCount);
+        Assert.ContainsSingle(await File.ReadAllLinesAsync(CrashFixture.EffectsPath(scope.Root)));
         var completed = await store.GetAsync(result.RunId, CancellationToken.None);
-        Assert.Equal(1, completed!.Usage!.ToolCalls);
-        Assert.NotNull(Assert.Single(completed.ToolExecutions!).ReconciliationNote);
+        Assert.AreEqual(1, completed!.Usage!.ToolCalls);
+        Assert.IsNotNull(Assert.ContainsSingle(completed.ToolExecutions!).ReconciliationNote);
     }
 
     private sealed class CrashScope : IDisposable
@@ -176,8 +175,10 @@ public sealed class WorkflowCrashRecoveryTests
             var testAssembly = typeof(WorkflowCrashRecoveryTests).Assembly.Location;
             var start = new ProcessStartInfo("dotnet")
             {
-                CreateNoWindow = true, UseShellExecute = false,
-                RedirectStandardError = true, RedirectStandardOutput = true
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
             };
             // Run against the test project's runtime/dependency graph so the
             // executable project reference resolves its copied dependencies.
@@ -204,7 +205,7 @@ public sealed class WorkflowCrashRecoveryTests
                     if (runId is not null) break;
                     await Task.Delay(25, timeout.Token);
                 }
-                Assert.False(string.IsNullOrWhiteSpace(runId));
+                Assert.IsFalse(string.IsNullOrWhiteSpace(runId));
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(timeout.Token);
                 return runId;

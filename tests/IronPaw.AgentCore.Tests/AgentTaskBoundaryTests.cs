@@ -5,11 +5,12 @@ using IronPaw.AgentCore.Persistence.CSharpDb;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class AgentTaskBoundaryTests
 {
     private static readonly CallerIdentity Owner = new("owner", "Graph owner", true);
 
-    [Fact]
+    [TestMethod]
     public async Task NoRequiredCriteria_CannotBeAcceptedVacuously()
     {
         await using var scope = await Scope.OpenAsync();
@@ -18,20 +19,20 @@ public sealed class AgentTaskBoundaryTests
 
         var result = await runner.StartAsync(graph, Owner, 1, scope.Options, CancellationToken.None);
 
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, Assert.Single(result.Tasks).Status);
-        Assert.Equal(TaskAcceptanceOutcome.Inconclusive, result.Tasks[0].Acceptance!.Outcome);
-        Assert.Equal(TaskGraphRunStatus.AwaitingAcceptance, TaskGraphProgress.Inspect(result).Status);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, Assert.ContainsSingle(result.Tasks).Status);
+        Assert.AreEqual(TaskAcceptanceOutcome.Inconclusive, result.Tasks[0].Acceptance!.Outcome);
+        Assert.AreEqual(TaskGraphRunStatus.AwaitingAcceptance, TaskGraphProgress.Inspect(result).Status);
     }
 
-    [Theory]
-    [InlineData(WorkflowControl.Pause)]
-    [InlineData(WorkflowControl.Cancel)]
+    [TestMethod]
+    [DataRow(WorkflowControl.Pause)]
+    [DataRow(WorkflowControl.Cancel)]
     public async Task ControlDuringExplicitRecovery_RemainsAppliedAfterRecoverySettles(WorkflowControl control)
     {
         await using var scope = await Scope.OpenAsync();
         var graph = new WorkflowTaskGraph("graph", "Produce a result", [new("task", "Perform the task")]);
         var interrupted = await scope.Runner(new InterruptingClient()).StartAsync(graph, Owner, 1, scope.Options, CancellationToken.None);
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, interrupted.Tasks[0].Status);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, interrupted.Tasks[0].Status);
         var client = new BlockingClient();
         var runner = scope.Runner(client);
         using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -42,12 +43,12 @@ public sealed class AgentTaskBoundaryTests
             if (control == WorkflowControl.Pause) await runner.PauseAsync(graph.GraphId, Owner, cleanup.Token);
             else await runner.CancelAsync(graph.GraphId, Owner, cleanup.Token);
             var paused = await recovery.WaitAsync(cleanup.Token);
-            Assert.Equal(control, paused.Control);
-            Assert.Equal(control, (await scope.Store.GetAsync(new(paused.AgentBinding!.RootRunId), cleanup.Token))!.Control);
-            Assert.Null(paused.Tasks[0].LeaseToken);
-            if (control == WorkflowControl.Pause) Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, paused.Tasks[0].Status);
+            Assert.AreEqual(control, paused.Control);
+            Assert.AreEqual(control, (await scope.Store.GetAsync(new(paused.AgentBinding!.RootRunId), cleanup.Token))!.Control);
+            Assert.IsNull(paused.Tasks[0].LeaseToken);
+            if (control == WorkflowControl.Pause) Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, paused.Tasks[0].Status);
             else Assert.Contains(paused.Tasks[0].Status, new[] { TaskGraphTaskStatus.Cancelled, TaskGraphTaskStatus.NeedsReconciliation });
-            Assert.Equal(1, client.Calls);
+            Assert.AreEqual(1, client.Calls);
         }
         finally
         {
@@ -102,7 +103,8 @@ public sealed class AgentTaskBoundaryTests
             ct.ThrowIfCancellationRequested();
             var attempt = Path.Combine(root, "attempt");
             return System.Threading.Tasks.Task.FromResult(new TaskWorkspace(claim.GraphId, claim.GraphFingerprint, claim.Task.TaskId,
-                claim.AttemptId, binding.BaseCommit, Path.Combine(attempt, "workspace"), attempt) { InputDigest = claim.Inputs?.Digest });
+                claim.AttemptId, binding.BaseCommit, Path.Combine(attempt, "workspace"), attempt)
+            { InputDigest = claim.Inputs?.Digest });
         }
         public Task<TaskWorkspace> OpenOrCreateAsync(TaskGraphAgentBinding binding, TaskGraphClaim claim, CancellationToken ct)
         {
@@ -111,7 +113,8 @@ public sealed class AgentTaskBoundaryTests
             var path = Path.Combine(attempt, "workspace");
             Directory.CreateDirectory(path);
             return System.Threading.Tasks.Task.FromResult(new TaskWorkspace(claim.GraphId, claim.GraphFingerprint, claim.Task.TaskId,
-                claim.AttemptId, binding.BaseCommit, path, attempt) { InputDigest = claim.Inputs?.Digest });
+                claim.AttemptId, binding.BaseCommit, path, attempt)
+            { InputDigest = claim.Inputs?.Digest });
         }
         public Task<TaskWorkspace> PrepareAsync(TaskGraphAgentBinding binding, TaskGraphClaim claim,
             ImmutableArray<TaskDependencyInput> dependencies, CancellationToken ct) => OpenOrCreateAsync(binding, claim, ct);

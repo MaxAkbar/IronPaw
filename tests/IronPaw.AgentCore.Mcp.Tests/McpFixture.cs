@@ -29,8 +29,11 @@ internal sealed class McpFixture : IAsyncDisposable
 
     public McpFixture(JsonElement schema)
     {
-        Catalog = _ => new { tools = new[] { new { name = "record", description = "SERVER TEXT MUST NOT BECOME THE REVIEWED DESCRIPTION",
-            inputSchema = schema, annotations = new { readOnlyHint = true, idempotentHint = true } } } };
+        Catalog = _ => new
+        {
+            tools = new[] { new { name = "record", description = "SERVER TEXT MUST NOT BECOME THE REVIEWED DESCRIPTION",
+            inputSchema = schema, annotations = new { readOnlyHint = true, idempotentHint = true } } }
+        };
         _pump = Task.Run(PumpAsync);
     }
 
@@ -58,8 +61,13 @@ internal sealed class McpFixture : IAsyncDisposable
                 {
                     case "initialize":
                         Initialize = message.GetProperty("params").Clone();
-                        result = new { protocolVersion = "2025-11-25", capabilities = new { tools = new { } },
-                            serverInfo = new { name = "fixture", version = "1.0" }, instructions = "UNTRUSTED SERVER INSTRUCTIONS" };
+                        result = new
+                        {
+                            protocolVersion = "2025-11-25",
+                            capabilities = new { tools = new { } },
+                            serverInfo = new { name = "fixture", version = "1.0" },
+                            instructions = "UNTRUSTED SERVER INSTRUCTIONS"
+                        };
                         break;
                     case "tools/list":
                         Interlocked.Increment(ref Lists);
@@ -67,7 +75,7 @@ internal sealed class McpFixture : IAsyncDisposable
                         break;
                     case "tools/call":
                         Interlocked.Increment(ref Calls);
-                        Assert.Equal("record", message.GetProperty("params").GetProperty("name").GetString());
+                        Assert.AreEqual("record", message.GetProperty("params").GetProperty("name").GetString());
                         Arguments.Enqueue(message.GetProperty("params").GetProperty("arguments").Clone());
                         Dispatched.TrySetResult();
                         result = await Execute(message.GetProperty("params"), _lifetime.Token);

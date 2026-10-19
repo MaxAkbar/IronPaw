@@ -6,13 +6,14 @@ using IronPaw.AgentCore.Persistence.CSharpDb;
 
 namespace IronPaw.AgentCore.Persistence.CSharpDb.Tests;
 
-public sealed class WorkflowBudgetTests : IDisposable
+[TestClass]
+public sealed class WorkflowBudgetTests
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "IronPaw-Budgets-" + Guid.NewGuid().ToString("N"));
     private string DatabasePath => Path.Combine(_directory, "workflows.cdb");
     private static readonly CancellationToken Ct = CancellationToken.None;
 
-    [Fact]
+    [TestMethod]
     public async Task ChildrenCompeteForOneSharedTokenReservationWithoutChangingRootRevision()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -26,15 +27,15 @@ public sealed class WorkflowBudgetTests : IDisposable
             try { await store.SaveAsync(StartAttempt(checkpoint, 60), 0, "model_started", Ct); return true; }
             catch (WorkflowBudgetExceededException) { return false; }
         }
-        Assert.Single(await Task.WhenAll(Reserve(first), Reserve(second)), x => x);
+        Assert.ContainsSingle(x => x, await Task.WhenAll(Reserve(first), Reserve(second)));
         var snapshot = await store.GetBudgetAsync(new RunId("root"), Ct);
-        Assert.Equal(0, snapshot.ChargedTokens);
-        Assert.Equal(60, snapshot.ReservedTokens);
-        Assert.Equal(40, snapshot.RemainingTokens);
-        Assert.Equal(0, (await store.GetAsync(new RunId("root"), Ct))!.Revision);
+        Assert.AreEqual(0, snapshot.ChargedTokens);
+        Assert.AreEqual(60, snapshot.ReservedTokens);
+        Assert.AreEqual(40, snapshot.RemainingTokens);
+        Assert.AreEqual(0, (await store.GetAsync(new RunId("root"), Ct))!.Revision);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task UsageReceiptReleasesRemainderAndActualOvershootStillCommits()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -43,22 +44,22 @@ public sealed class WorkflowBudgetTests : IDisposable
         root = await store.SaveAsync(StartAttempt(root, 100), 0, "model_started", Ct);
         root = await store.SaveAsync(Receipt(root, 30, WorkflowReservationState.Settled), root.Revision, "model_completed", Ct);
         var settled = await store.GetBudgetAsync(new RunId("root"), Ct);
-        Assert.Equal(30, settled.ChargedTokens);
-        Assert.Equal(0, settled.ReservedTokens);
-        Assert.Equal(70, settled.RemainingTokens);
+        Assert.AreEqual(30, settled.ChargedTokens);
+        Assert.AreEqual(0, settled.ReservedTokens);
+        Assert.AreEqual(70, settled.RemainingTokens);
         root = await store.SaveAsync(StartAttempt(root, 70), root.Revision, "model_started", Ct);
         root = await store.SaveAsync(Receipt(root, 100, WorkflowReservationState.Settled), root.Revision, "actual_overshoot", Ct);
         var overshoot = await store.GetBudgetAsync(new RunId("root"), Ct);
-        Assert.Equal(130, overshoot.ChargedTokens);
-        Assert.Equal(0, overshoot.ReservedTokens);
-        Assert.Equal(0, overshoot.RemainingTokens);
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(StartAttempt(root, 1), root.Revision, "rejected", Ct));
-        Assert.Equal(130, (await store.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
+        Assert.AreEqual(130, overshoot.ChargedTokens);
+        Assert.AreEqual(0, overshoot.ReservedTokens);
+        Assert.AreEqual(0, overshoot.RemainingTokens);
+        await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(StartAttempt(root, 1), root.Revision, "rejected", Ct));
+        Assert.AreEqual(130, (await store.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
     }
 
-    [Theory]
-    [InlineData(WorkflowReservationState.Unknown)]
-    [InlineData(WorkflowReservationState.Settled)]
+    [TestMethod]
+    [DataRow(WorkflowReservationState.Unknown)]
+    [DataRow(WorkflowReservationState.Settled)]
     public async Task MissingUsageChargesWholeReservation(WorkflowReservationState state)
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -68,12 +69,12 @@ public sealed class WorkflowBudgetTests : IDisposable
         var call = root.ModelCalls![0];
         root = await store.SaveAsync(root with { ModelCalls = [call with { Attempts = [call.Attempts![0] with { State = state }] }] }, root.Revision, "model_unreported", Ct);
         var snapshot = await store.GetBudgetAsync(new RunId("root"), Ct);
-        Assert.Equal(40, snapshot.ChargedTokens);
-        Assert.Equal(0, snapshot.ReservedTokens);
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(StartAttempt(root, 11), root.Revision, "retry", Ct));
+        Assert.AreEqual(40, snapshot.ChargedTokens);
+        Assert.AreEqual(0, snapshot.ReservedTokens);
+        await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(StartAttempt(root, 11), root.Revision, "retry", Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task RecoveryChargesAbandonedReservationAndUncleanTimeOnlyOnce()
     {
         var time = new ManualTimeProvider();
@@ -83,28 +84,28 @@ public sealed class WorkflowBudgetTests : IDisposable
             await store.CreateAsync(root, Ct);
             root = await store.SaveAsync(StartAttempt(root, 70), 0, "model_started", Ct);
             time.Advance(TimeSpan.FromSeconds(4));
-            Assert.Equal(TimeSpan.FromSeconds(4), (await store.GetBudgetAsync(new RunId("root"), Ct)).ExecutionTime);
+            Assert.AreEqual(TimeSpan.FromSeconds(4), (await store.GetBudgetAsync(new RunId("root"), Ct)).ExecutionTime);
         }
         time.Advance(TimeSpan.FromSeconds(10));
         await using (var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath, timeProvider: time))
         {
             var snapshot = await reopened.GetBudgetAsync(new RunId("root"), Ct);
-            Assert.Equal(70, snapshot.ChargedTokens);
-            Assert.Equal(0, snapshot.ReservedTokens);
-            Assert.Equal(TimeSpan.FromSeconds(14), snapshot.ExecutionTime);
-            Assert.Equal(TimeSpan.FromSeconds(6), snapshot.RemainingExecutionTime);
+            Assert.AreEqual(70, snapshot.ChargedTokens);
+            Assert.AreEqual(0, snapshot.ReservedTokens);
+            Assert.AreEqual(TimeSpan.FromSeconds(14), snapshot.ExecutionTime);
+            Assert.AreEqual(TimeSpan.FromSeconds(6), snapshot.RemainingExecutionTime);
             var recovered = (await reopened.GetAsync(new RunId("root"), Ct))!;
-            Assert.Null(recovered.LeaseOwner);
-            Assert.Equal(WorkflowReservationState.Unknown, recovered.ModelCalls![0].Attempts![0].State);
-            Assert.Equal(WorkflowStatus.Interrupted, recovered.Status);
+            Assert.IsNull(recovered.LeaseOwner);
+            Assert.AreEqual(WorkflowReservationState.Unknown, recovered.ModelCalls![0].Attempts![0].State);
+            Assert.AreEqual(WorkflowStatus.Interrupted, recovered.Status);
         }
         time.Advance(TimeSpan.FromHours(1));
         await using var again = await CSharpDbWorkflowStore.OpenAsync(DatabasePath, timeProvider: time);
-        Assert.Equal(TimeSpan.FromSeconds(14), (await again.GetBudgetAsync(new RunId("root"), Ct)).ExecutionTime);
-        Assert.Equal(70, (await again.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
+        Assert.AreEqual(TimeSpan.FromSeconds(14), (await again.GetBudgetAsync(new RunId("root"), Ct)).ExecutionTime);
+        Assert.AreEqual(70, (await again.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SubtreeExecutionClockCountsOverlapOnceAndExcludesSettledHumanWaits()
     {
         var time = new ManualTimeProvider();
@@ -118,17 +119,17 @@ public sealed class WorkflowBudgetTests : IDisposable
         root = await store.SaveAsync(root with { LeaseOwner = null, Status = WorkflowStatus.AwaitingInput }, 0, "root_waiting", Ct);
         time.Advance(TimeSpan.FromSeconds(2));
         child = await store.SaveAsync(child with { LeaseOwner = null, Status = WorkflowStatus.AwaitingInput }, 0, "child_waiting", Ct);
-        Assert.Equal(TimeSpan.FromSeconds(9), (await store.GetBudgetAsync(new RunId("root"), Ct)).ExecutionTime);
+        Assert.AreEqual(TimeSpan.FromSeconds(9), (await store.GetBudgetAsync(new RunId("root"), Ct)).ExecutionTime);
         time.Advance(TimeSpan.FromHours(5));
-        Assert.Equal(TimeSpan.FromSeconds(9), (await store.GetBudgetAsync(new RunId("root"), Ct)).ExecutionTime);
+        Assert.AreEqual(TimeSpan.FromSeconds(9), (await store.GetBudgetAsync(new RunId("root"), Ct)).ExecutionTime);
         child = await store.SaveAsync(child with { LeaseOwner = "child-again", Status = WorkflowStatus.Running }, child.Revision, "resumed", Ct);
         time.Advance(TimeSpan.FromSeconds(1));
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(child with { Usage = new WorkflowUsage(ToolCalls: 1) }, child.Revision, "tool_started", Ct));
-        Assert.Equal(TimeSpan.Zero, (await store.GetBudgetAsync(new RunId("root"), Ct)).RemainingExecutionTime);
-        Assert.Equal(0, (await store.GetAsync(new RunId("child"), Ct))!.Usage?.ToolCalls ?? 0);
+        await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(child with { Usage = new WorkflowUsage(ToolCalls: 1) }, child.Revision, "tool_started", Ct));
+        Assert.AreEqual(TimeSpan.Zero, (await store.GetBudgetAsync(new RunId("root"), Ct)).RemainingExecutionTime);
+        Assert.AreEqual(0, (await store.GetAsync(new RunId("child"), Ct))!.Usage?.ToolCalls ?? 0);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task TimeLimitDoesNotRejectReturnedModelUsageReceipt()
     {
         var time = new ManualTimeProvider();
@@ -139,12 +140,12 @@ public sealed class WorkflowBudgetTests : IDisposable
         time.Advance(TimeSpan.FromSeconds(3));
         root = await store.SaveAsync(Receipt(root, 60, WorkflowReservationState.Settled) with { LeaseOwner = null, Status = WorkflowStatus.Interrupted }, root.Revision, "receipt", Ct);
         var snapshot = await store.GetBudgetAsync(new RunId("root"), Ct);
-        Assert.Equal(60, snapshot.ChargedTokens);
-        Assert.Equal(TimeSpan.FromSeconds(3), snapshot.ExecutionTime);
-        Assert.Equal(TimeSpan.Zero, snapshot.RemainingExecutionTime);
+        Assert.AreEqual(60, snapshot.ChargedTokens);
+        Assert.AreEqual(TimeSpan.FromSeconds(3), snapshot.ExecutionTime);
+        Assert.AreEqual(TimeSpan.Zero, snapshot.RemainingExecutionTime);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SuccessfulResultCommitChecksLatestClockAndSharedReceiptsAtomically()
     {
         var time = new ManualTimeProvider();
@@ -156,18 +157,18 @@ public sealed class WorkflowBudgetTests : IDisposable
         child = await store.SaveAsync(StartAttempt(child, 50), 0, "model_started", Ct);
         var result = new AgentRunResult(new RunId("root"), root.Request.SessionKey, "done", [], new Dictionary<string, object?>());
         child = await store.SaveAsync(Receipt(child, 101, WorkflowReservationState.Settled), child.Revision, "overshoot", Ct);
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(root with { Status = WorkflowStatus.Succeeded, Result = result, LeaseOwner = null }, 0, "run_finished", Ct));
-        Assert.Null((await store.GetAsync(new RunId("root"), Ct))!.Result);
-        Assert.Equal(101, (await store.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
+        await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(root with { Status = WorkflowStatus.Succeeded, Result = result, LeaseOwner = null }, 0, "run_finished", Ct));
+        Assert.IsNull((await store.GetAsync(new RunId("root"), Ct))!.Result);
+        Assert.AreEqual(101, (await store.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
         var other = Checkpoint("other", time) with { Budget = new(MaxExecutionTime: TimeSpan.FromSeconds(5)), LeaseOwner = "owner", Status = WorkflowStatus.Running };
         await store.CreateAsync(other, Ct);
         time.Advance(TimeSpan.FromSeconds(5));
         var otherResult = result with { RunId = new RunId("other"), SessionKey = other.Request.SessionKey };
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(other with { Status = WorkflowStatus.Succeeded, Result = otherResult, LeaseOwner = null }, 0, "run_finished", Ct));
-        Assert.Null((await store.GetAsync(new RunId("other"), Ct))!.Result);
+        await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(other with { Status = WorkflowStatus.Succeeded, Result = otherResult, LeaseOwner = null }, 0, "run_finished", Ct));
+        Assert.IsNull((await store.GetAsync(new RunId("other"), Ct))!.Result);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ExactTokenCapAllowsSuccessButUnknownEffectsStillReserveSession()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -177,19 +178,23 @@ public sealed class WorkflowBudgetTests : IDisposable
         root = await store.SaveAsync(Receipt(root, 50, WorkflowReservationState.Settled), root.Revision, "receipt", Ct);
         var result = new AgentRunResult(new RunId("root"), root.Request.SessionKey, "done", [], new Dictionary<string, object?>());
         root = await store.SaveAsync(root with { Status = WorkflowStatus.Succeeded, Result = result }, root.Revision, "success", Ct);
-        Assert.Equal(WorkflowStatus.Succeeded, root.Status);
-        var unknown = Checkpoint("unknown") with { ToolExecutions = [new("effect", new ToolCall("call", "mutate", JsonSerializer.SerializeToElement(new { })))],
-            Control = WorkflowControl.Cancel, Status = WorkflowStatus.Cancelled,
-            Result = result with { RunId = new RunId("unknown"), SessionKey = new SessionKey("session-unknown"), Status = AgentRunStatus.Cancelled } };
+        Assert.AreEqual(WorkflowStatus.Succeeded, root.Status);
+        var unknown = Checkpoint("unknown") with
+        {
+            ToolExecutions = [new("effect", new ToolCall("call", "mutate", JsonSerializer.SerializeToElement(new { })))],
+            Control = WorkflowControl.Cancel,
+            Status = WorkflowStatus.Cancelled,
+            Result = result with { RunId = new RunId("unknown"), SessionKey = new SessionKey("session-unknown"), Status = AgentRunStatus.Cancelled }
+        };
         // Seed a recorded uncertain effect before cancellation; the control write
         // must not free the conversation while its external outcome is unknown.
         var accepted = unknown with { Control = WorkflowControl.None, Result = null, Status = WorkflowStatus.NeedsReconciliation };
         await store.CreateAsync(accepted, Ct);
         unknown = await store.SaveAsync(unknown, 0, "cancelled", Ct);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.CreateAsync(Checkpoint("fresh") with { Request = unknown.Request }, Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.CreateAsync(Checkpoint("fresh") with { Request = unknown.Request }, Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task PartialOrAllNullUsageCannotRefundSettledReservation()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -197,19 +202,22 @@ public sealed class WorkflowBudgetTests : IDisposable
         await store.CreateAsync(root, Ct);
         root = await store.SaveAsync(StartAttempt(root, 50), 0, "model_started", Ct);
         var call = root.ModelCalls![0];
-        root = await store.SaveAsync(root with { ModelCalls = [call with {
+        root = await store.SaveAsync(root with
+        {
+            ModelCalls = [call with {
             Attempts = [call.Attempts![0] with { ReportedTokens = 10, UsageReported = true, State = WorkflowReservationState.Settled }] }],
-            Usage = root.Usage! with { InputTokens = 10 } }, root.Revision, "partial_receipt", Ct);
-        Assert.Equal(50, (await store.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
+            Usage = root.Usage! with { InputTokens = 10 }
+        }, root.Revision, "partial_receipt", Ct);
+        Assert.AreEqual(50, (await store.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
         root = await store.SaveAsync(StartAttempt(root, 50), root.Revision, "model_started", Ct);
         var calls = root.ModelCalls!.ToArray();
         calls[^1] = calls[^1] with { Attempts = [calls[^1].Attempts![0] with { UsageReported = true, State = WorkflowReservationState.Settled }] };
         root = await store.SaveAsync(root with { ModelCalls = calls }, root.Revision, "null_receipt", Ct);
-        Assert.Equal(100, (await store.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
-        await Assert.ThrowsAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(root with { Usage = root.Usage! with { ToolCalls = 1 } }, root.Revision, "tool_started", Ct));
+        Assert.AreEqual(100, (await store.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
+        await Assert.ThrowsExactlyAsync<WorkflowBudgetExceededException>(() => store.SaveAsync(root with { Usage = root.Usage! with { ToolCalls = 1 } }, root.Revision, "tool_started", Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AbandonedUnleasedAttemptStillBecomesUnknownOnReopen()
     {
         await using (var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath))
@@ -220,30 +228,30 @@ public sealed class WorkflowBudgetTests : IDisposable
         }
         await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var recovered = (await reopened.GetAsync(new RunId("root"), Ct))!;
-        Assert.Equal(WorkflowStatus.Paused, recovered.Status);
-        Assert.Equal(WorkflowReservationState.Unknown, recovered.ModelCalls![0].Attempts![0].State);
-        Assert.Equal(60, (await reopened.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
+        Assert.AreEqual(WorkflowStatus.Paused, recovered.Status);
+        Assert.AreEqual(WorkflowReservationState.Unknown, recovered.ModelCalls![0].Attempts![0].State);
+        Assert.AreEqual(60, (await reopened.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AdmissionRejectsOverlappingOrAlreadyReportedNewAttempts()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var root = Checkpoint("root");
         await store.CreateAsync(root, Ct);
         root = await store.SaveAsync(StartAttempt(root, 30), 0, "model_started", Ct);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(StartAttempt(root, 30), root.Revision, "overlap", Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.SaveAsync(StartAttempt(root, 30), root.Revision, "overlap", Ct));
         var call = root.ModelCalls![0];
         root = await store.SaveAsync(root with { ModelCalls = [call with { Attempts = [call.Attempts![0] with { State = WorkflowReservationState.Unknown }] }] }, root.Revision, "interrupted", Ct);
         var proposed = StartAttempt(root, 30);
         var calls = proposed.ModelCalls!.ToArray();
         calls[^1] = calls[^1] with { Attempts = [calls[^1].Attempts![0] with { UsageReported = true }] };
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(proposed with { ModelCalls = calls }, root.Revision, "fake_receipt", Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.SaveAsync(proposed with { ModelCalls = calls }, root.Revision, "fake_receipt", Ct));
         root = await store.SaveAsync(proposed, root.Revision, "valid_retry", Ct);
-        Assert.Equal(2, root.Usage!.ModelCalls);
+        Assert.AreEqual(2, root.Usage!.ModelCalls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task AttemptIdentityReservationAndReceiptsCannotBeRewrittenOrDropped()
     {
         await using var store = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
@@ -252,19 +260,19 @@ public sealed class WorkflowBudgetTests : IDisposable
         root = await store.SaveAsync(StartAttempt(root, 50), 0, "model_started", Ct);
         var call = root.ModelCalls![0];
         var attempt = call.Attempts![0];
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(root with { ModelCalls = [call with { Attempts = [] }] }, root.Revision, "drop", Ct));
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(root with { ModelCalls = [call with { Attempts = [attempt with { ReservedTokens = 0 }] }] }, root.Revision, "rewrite", Ct));
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(root with { ModelCalls = [call with { Attempts = [attempt with { ReportedTokens = 10, UsageReported = true }] }] }, root.Revision, "receipt_without_usage", Ct));
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(root with { Usage = new WorkflowUsage(1, InputTokens: 10) }, root.Revision, "usage_without_receipt", Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.SaveAsync(root with { ModelCalls = [call with { Attempts = [] }] }, root.Revision, "drop", Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.SaveAsync(root with { ModelCalls = [call with { Attempts = [attempt with { ReservedTokens = 0 }] }] }, root.Revision, "rewrite", Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.SaveAsync(root with { ModelCalls = [call with { Attempts = [attempt with { ReportedTokens = 10, UsageReported = true }] }] }, root.Revision, "receipt_without_usage", Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.SaveAsync(root with { Usage = new WorkflowUsage(1, InputTokens: 10) }, root.Revision, "usage_without_receipt", Ct));
         root = await store.SaveAsync(Receipt(root, 20, WorkflowReservationState.Settled), root.Revision, "receipt", Ct);
         call = root.ModelCalls![0];
         attempt = call.Attempts![0];
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => store.SaveAsync(root with { ModelCalls = [call with { Attempts = [attempt with { State = WorkflowReservationState.Running }] }] }, root.Revision, "reopen", Ct));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => store.SaveAsync(root with { ModelCalls = [call with { Attempts = [attempt with { State = WorkflowReservationState.Running }] }] }, root.Revision, "reopen", Ct));
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
+    [TestMethod]
+    [DataRow(1)]
+    [DataRow(2)]
     public async Task LegacyMigrationPreservesHumanReceiptsAndCompletedReplay(int schemaVersion)
     {
         var response = new WorkflowHumanResponse("chosen", null, "owner", DateTimeOffset.UtcNow);
@@ -282,7 +290,7 @@ public sealed class WorkflowBudgetTests : IDisposable
             string json;
             await using (var query = await raw.ExecuteAsync("SELECT payload FROM workflows WHERE run_id = 'root'"))
             {
-                Assert.True(await query.MoveNextAsync());
+                Assert.IsTrue(await query.MoveNextAsync());
                 var node = JsonNode.Parse(query.Current[0].AsText)!;
                 node["SchemaVersion"] = schemaVersion;
                 json = node.ToJsonString();
@@ -291,13 +299,13 @@ public sealed class WorkflowBudgetTests : IDisposable
         }
         await using var reopened = await CSharpDbWorkflowStore.OpenAsync(DatabasePath);
         var migrated = (await reopened.GetAsync(new RunId("root"), Ct))!;
-        Assert.Equal(3, migrated.SchemaVersion);
-        Assert.Equal(response, migrated.HumanRequests!.Single(x => x.RequestId == "request").Response);
-        Assert.Equal("saved response", migrated.ModelCalls![0].Response![0].Text);
-        Assert.Null(migrated.ModelCalls[0].Attempts);
-        Assert.Equal(WorkflowReservationState.Unknown, Assert.Single(migrated.ModelCalls[1].Attempts!).State);
-        Assert.True((await reopened.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens > 0);
-        Assert.Equal(new[] { "accepted", "migrated_v3" }, (await reopened.ReadJournalAsync(new RunId("root"), Ct)).Select(x => x.EventType));
+        Assert.AreEqual(3, migrated.SchemaVersion);
+        Assert.AreEqual(response, migrated.HumanRequests!.Single(x => x.RequestId == "request").Response);
+        Assert.AreEqual("saved response", migrated.ModelCalls![0].Response![0].Text);
+        Assert.IsNull(migrated.ModelCalls[0].Attempts);
+        Assert.AreEqual(WorkflowReservationState.Unknown, Assert.ContainsSingle(migrated.ModelCalls[1].Attempts!).State);
+        Assert.IsTrue((await reopened.GetBudgetAsync(new RunId("root"), Ct)).ChargedTokens > 0);
+        Assert.AreSequenceEqual(new[] { "accepted", "migrated_v3" }, (await reopened.ReadJournalAsync(new RunId("root"), Ct)).Select(x => x.EventType));
     }
 
     private static WorkflowCheckpoint Checkpoint(string id, ManualTimeProvider? time = null)
@@ -328,5 +336,6 @@ public sealed class WorkflowBudgetTests : IDisposable
         public override DateTimeOffset GetUtcNow() => _now;
         public void Advance(TimeSpan duration) => _now += duration;
     }
-    public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
+    [TestCleanup]
+    public void Cleanup() { if (Directory.Exists(_directory)) Directory.Delete(_directory, true); }
 }

@@ -17,9 +17,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace IronPaw.Desktop.Tests;
 
+[TestClass]
 public sealed class TaskGraphDesktopTests
 {
-    [Fact]
+    [TestMethod]
     public Task TimelineRefreshesPersistedProgressWithoutExecutingWorkOrReplacingUserInput() => RunInSta(() =>
     {
         var manager = new PreflightWorkspaces();
@@ -32,9 +33,9 @@ public sealed class TaskGraphDesktopTests
         var grid = (DataGrid)window.FindName("TimelineTasksGrid");
         WaitFor(() => grid.Items.Count == 2);
         var rows = grid.Items.Cast<ExecutionTimelineTask>().ToArray();
-        Assert.Equal("Ready", rows[0].Status);
-        Assert.Equal("Waiting", rows[1].Status);
-        Assert.Equal("producer", rows[1].WaitingFor);
+        Assert.AreEqual("Ready", rows[0].Status);
+        Assert.AreEqual("Waiting", rows[1].Status);
+        Assert.AreEqual("producer", rows[1].WaitingFor);
         grid.SelectedItem = rows[1];
         var claim = Background(() => scope.Store.ClaimTaskAsync(graph.Graph.GraphId, CallerIdentity.LocalOwner(), default))!;
         var candidate = new WorkflowTaskResult(graph.Graph.GraphId, graph.DefinitionFingerprint, "producer",
@@ -43,12 +44,12 @@ public sealed class TaskGraphDesktopTests
         Background(() => scope.Store.RecordTaskAcceptanceAsync(claim, new(TaskAcceptanceOutcome.Accepted, "timeline-test-host", "Artifact checks passed"), default));
         WaitFor(() => grid.Items.Cast<ExecutionTimelineTask>().FirstOrDefault()?.Accepted == true);
         rows = grid.Items.Cast<ExecutionTimelineTask>().ToArray();
-        Assert.Equal("Ready", rows[1].Status);
-        Assert.Equal("consumer", ((ExecutionTimelineTask)grid.SelectedItem).Id);
-        Assert.Equal(1, ((ProgressBar)window.FindName("TimelineProgressBar")).Value);
+        Assert.AreEqual("Ready", rows[1].Status);
+        Assert.AreEqual("consumer", ((ExecutionTimelineTask)grid.SelectedItem).Id);
+        Assert.AreEqual(1, ((ProgressBar)window.FindName("TimelineProgressBar")).Value);
         Assert.Contains("1 of 2 tasks accepted", ((TextBlock)window.FindName("TimelineSummaryTextBlock")).Text);
         Assert.Contains("no build/test check configured", rows[0].Checks);
-        Assert.Contains(((ListBox)window.FindName("TimelineEventsListBox")).Items.Cast<ExecutionTimelineEntry>(), entry => entry.EventType == "task_acceptance");
+        Assert.Contains(entry => entry.EventType == "task_acceptance", ((ListBox)window.FindName("TimelineEventsListBox")).Items.Cast<ExecutionTimelineEntry>());
         var revision = Background(() => scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, default))!.Revision;
         // A no-change refresh retains the same collection and selection, avoiding scroll resets.
         var existingItems = grid.ItemsSource;
@@ -56,21 +57,21 @@ public sealed class TaskGraphDesktopTests
         ((TabControl)window.FindName("ActivityTabControl")).SelectedIndex = 0;
         ((TabControl)window.FindName("ActivityTabControl")).SelectedIndex = 3;
         WaitFor(() => ((TextBlock)window.FindName("TimelineStatusTextBlock")).Text.StartsWith("Read at", StringComparison.Ordinal));
-        Assert.Same(existingItems, grid.ItemsSource);
-        Assert.Equal(revision, Background(() => scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, default))!.Revision);
-        Assert.Equal("Keep my evidence draft", ((TextBox)window.FindName("GraphReconcileNoteTextBox")).Text);
+        Assert.AreSame<object>(existingItems, grid.ItemsSource);
+        Assert.AreEqual(revision, Background(() => scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, default))!.Revision);
+        Assert.AreEqual("Keep my evidence draft", ((TextBox)window.FindName("GraphReconcileNoteTextBox")).Text);
         ((CheckBox)window.FindName("GraphLocalVerificationCheckBox")).IsChecked = true;
         ((Button)window.FindName("TimelineOpenControlsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         WaitFor(() => ((TabControl)window.FindName("ActivityTabControl")).SelectedIndex == 2
             && ((TextBlock)window.FindName("GraphSummaryTextBlock")).Text.Contains(graph.Graph.GraphId));
-        Assert.False(((CheckBox)window.FindName("GraphLocalVerificationCheckBox")).IsChecked);
-        Assert.Equal(0, scope.Client.Calls);
-        Assert.Equal(0, manager.ExecutionCalls);
-        Assert.Equal(0, manager.ReadOnlyCalls);
-        Assert.Equal(0, manager.ResolveCalls);
+        Assert.IsFalse(((CheckBox)window.FindName("GraphLocalVerificationCheckBox")).IsChecked);
+        Assert.AreEqual(0, scope.Client.Calls);
+        Assert.AreEqual(0, manager.ExecutionCalls);
+        Assert.AreEqual(0, manager.ReadOnlyCalls);
+        Assert.AreEqual(0, manager.ResolveCalls);
     });
 
-    [Fact]
+    [TestMethod]
     public Task TimelineRendersUncertainCommandAndSavedEvidenceWithoutClaimingSuccess() => RunInSta(() =>
     {
         using var scope = new Scope();
@@ -86,14 +87,14 @@ public sealed class TaskGraphDesktopTests
         var grid = (DataGrid)window.FindName("TimelineTasksGrid");
         WaitFor(() => grid.Items.Count == 2);
         var row = grid.Items.Cast<ExecutionTimelineTask>().First();
-        Assert.Equal("Needs review", row.Status);
-        Assert.True(row.NeedsAttention);
-        Assert.False(row.Accepted);
-        Assert.Equal("Build: outcome unknown", row.Checks);
-        Assert.Equal("Verification outcome unknown", row.Activity);
+        Assert.AreEqual("Needs review", row.Status);
+        Assert.IsTrue(row.NeedsAttention);
+        Assert.IsFalse(row.Accepted);
+        Assert.AreEqual("Build: outcome unknown", row.Checks);
+        Assert.AreEqual("Verification outcome unknown", row.Activity);
         Assert.Contains("do not retry automatically", ((TextBox)window.FindName("TimelineTaskDetailsTextBox")).Text);
-        Assert.Equal(0, ((ProgressBar)window.FindName("TimelineProgressBar")).Value);
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(0, ((ProgressBar)window.FindName("TimelineProgressBar")).Value);
+        Assert.AreEqual(0, scope.Client.Calls);
         window.UpdateLayout();
         var content = (FrameworkElement)window.Content;
         var bitmap = new RenderTargetBitmap((int)content.ActualWidth, (int)content.ActualHeight, 96, 96, PixelFormats.Pbgra32);
@@ -105,7 +106,7 @@ public sealed class TaskGraphDesktopTests
         Console.WriteLine("Desktop timeline render: " + screenshotPath);
     });
 
-    [Fact]
+    [TestMethod]
     public Task GraphWindowRendersDependenciesArtifactsReceiptsBudgetAndChildIdentity() => RunInSta(() =>
     {
         using var scope = new Scope();
@@ -114,7 +115,8 @@ public sealed class TaskGraphDesktopTests
         var artifact = new WorkflowTaskArtifact("output", "producer", TaskArtifactKind.File,
             Path.Combine(scope.Root, "sealed", "result.txt"), "sha256:" + new string('b', 64), "revision-render");
         var candidate = new WorkflowTaskResult(graph.Graph.GraphId, graph.DefinitionFingerprint, "producer",
-            WorkflowTaskStatus.AwaitingVerification, "revision-render", "Captured generated result") { Artifacts = [artifact] };
+            WorkflowTaskStatus.AwaitingVerification, "revision-render", "Captured generated result")
+        { Artifacts = [artifact] };
         Background(() => scope.Store.RecordTaskResultAsync(claim, candidate, default));
         var admitted = Background(() => scope.Store.BeginTaskVerificationAsync(claim, "build", default));
         var output = "bounded build output";
@@ -133,14 +135,14 @@ public sealed class TaskGraphDesktopTests
         Assert.Contains("verification_receipt", detail);
         Assert.Contains(AgentTaskIdentity.ChildRunId(graph.DefinitionFingerprint, "producer", claim.AttemptId).Value, detail);
         Assert.Contains("Tokens charged: 0", ((TextBlock)window.FindName("GraphSummaryTextBlock")).Text);
-        Assert.False(((CheckBox)window.FindName("GraphLocalVerificationCheckBox")).IsChecked);
-        Assert.True(((Button)window.FindName("ResumeGraphButton")).IsEnabled);
-        Assert.Empty(((ComboBox)window.FindName("WorkflowsComboBox")).Items);
+        Assert.IsFalse(((CheckBox)window.FindName("GraphLocalVerificationCheckBox")).IsChecked);
+        Assert.IsTrue(((Button)window.FindName("ResumeGraphButton")).IsEnabled);
+        Assert.IsEmpty(((ComboBox)window.FindName("WorkflowsComboBox")).Items);
         window.UpdateLayout();
         var content = (FrameworkElement)window.Content;
         var bitmap = new RenderTargetBitmap((int)content.ActualWidth, (int)content.ActualHeight, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(content);
-        Assert.True(bitmap.PixelWidth >= 980);
+        Assert.IsTrue(bitmap.PixelWidth >= 980);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         var screenshotPath = Path.Combine(Path.GetTempPath(), "IronPaw-desktop-task-graphs-smoke.png");
@@ -148,7 +150,7 @@ public sealed class TaskGraphDesktopTests
         Console.WriteLine("Desktop graph render: " + screenshotPath);
     });
 
-    [Fact]
+    [TestMethod]
     public Task ActiveGraphPauseCannotBeRedirectedBySelectingAnotherGraph() => RunInSta(() =>
     {
         var manager = new BlockingWorkspaces();
@@ -160,24 +162,24 @@ public sealed class TaskGraphDesktopTests
         SelectGraph(window, "active-graph");
         ((Button)window.FindName("ResumeGraphButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         WaitFor(() => manager.Started.Task.IsCompleted);
-        Assert.False(((Button)window.FindName("RunButton")).IsEnabled);
+        Assert.IsFalse(((Button)window.FindName("RunButton")).IsEnabled);
         SelectGraph(window, "idle-graph");
-        Assert.False(((Button)window.FindName("PauseGraphButton")).IsEnabled);
+        Assert.IsFalse(((Button)window.FindName("PauseGraphButton")).IsEnabled);
         // Raised routed events exercise the handler guard as well as button state.
         ((Button)window.FindName("PauseGraphButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Assert.Equal(WorkflowControl.None, Background(() => scope.Store.GetTaskGraphAsync("idle-graph", default))!.Control);
+        Assert.AreEqual(WorkflowControl.None, Background(() => scope.Store.GetTaskGraphAsync("idle-graph", default))!.Control);
         SelectGraph(window, "active-graph");
-        Assert.True(((Button)window.FindName("PauseGraphButton")).IsEnabled);
+        Assert.IsTrue(((Button)window.FindName("PauseGraphButton")).IsEnabled);
         ((Button)window.FindName("PauseGraphButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         WaitFor(() => manager.Cancelled && ((Button)window.FindName("RunButton")).IsEnabled);
         var paused = Background(() => scope.Store.GetTaskGraphAsync("active-graph", default))!;
-        Assert.Equal(WorkflowControl.Pause, paused.Control);
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, paused.Tasks[0].Status);
-        Assert.Null(paused.Tasks[0].LeaseToken);
-        Assert.Equal(WorkflowControl.None, Background(() => scope.Store.GetTaskGraphAsync("idle-graph", default))!.Control);
+        Assert.AreEqual(WorkflowControl.Pause, paused.Control);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, paused.Tasks[0].Status);
+        Assert.IsNull(paused.Tasks[0].LeaseToken);
+        Assert.AreEqual(WorkflowControl.None, Background(() => scope.Store.GetTaskGraphAsync("idle-graph", default))!.Control);
     });
 
-    [Fact]
+    [TestMethod]
     public Task ClosingDesktopPausesActiveGraphAndSettlesItsOriginalClaim() => RunInSta(() =>
     {
         var manager = new BlockingWorkspaces();
@@ -197,14 +199,14 @@ public sealed class TaskGraphDesktopTests
         try
         {
             var graph = Background(() => reopened.GetTaskGraphAsync("close-graph", default))!;
-            Assert.Equal(WorkflowControl.Pause, graph.Control);
-            Assert.Null(graph.Tasks[0].LeaseToken);
-            Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, graph.Tasks[0].Status);
+            Assert.AreEqual(WorkflowControl.Pause, graph.Control);
+            Assert.IsNull(graph.Tasks[0].LeaseToken);
+            Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, graph.Tasks[0].Status);
         }
         finally { Task.Run(reopened.Dispose).GetAwaiter().GetResult(); }
     });
 
-    [Fact]
+    [TestMethod]
     public async Task WorkflowRecoveryCannotExposeOrControlGraphLedgerAnchors()
     {
         using var scope = new Scope();
@@ -213,46 +215,46 @@ public sealed class TaskGraphDesktopTests
         await scope.Store.CreateAsync(normal, default);
         var orchestrator = new StoreBrowser(scope.Store);
         var recovery = new WorkflowRecoveryController(orchestrator, scope.Store);
-        Assert.Equal("ordinary", Assert.Single(await recovery.ListRootsAsync(default)).RunId);
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => recovery.PauseAsync(new(graph.AgentBinding!.RootRunId), default));
-        await Assert.ThrowsAsync<WorkflowConflictException>(() => recovery.CancelAsync(new(graph.AgentBinding!.RootRunId), default));
-        Assert.Equal(WorkflowControl.None, (await scope.Store.GetTaskGraphAsync("graph-root", default))!.Control);
+        Assert.AreEqual("ordinary", Assert.ContainsSingle(await recovery.ListRootsAsync(default)).RunId);
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => recovery.PauseAsync(new(graph.AgentBinding!.RootRunId), default));
+        await Assert.ThrowsExactlyAsync<WorkflowConflictException>(() => recovery.CancelAsync(new(graph.AgentBinding!.RootRunId), default));
+        Assert.AreEqual(WorkflowControl.None, (await scope.Store.GetTaskGraphAsync("graph-root", default))!.Control);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task DesktopProviderFactoryIsNotReadUntilModelWorkActuallyStarts()
     {
         var calls = 0;
         var deferred = new DeferredDesktopLlmClient(() => { calls++; throw new ArgumentException("Invalid provider environment"); });
         using var scope = new Scope(client: deferred);
         scope.Accept("readonly-graph");
-        Assert.Single(await scope.Controller.ListAsync(CallerIdentity.LocalOwner(), default));
+        Assert.ContainsSingle(await scope.Controller.ListAsync(CallerIdentity.LocalOwner(), default));
         await scope.Controller.InspectAsync("readonly-graph", CallerIdentity.LocalOwner(), default);
         await scope.Controller.PauseAsync("readonly-graph", CallerIdentity.LocalOwner(), default);
         await scope.Controller.CancelAsync("readonly-graph", CallerIdentity.LocalOwner(), default);
-        Assert.Equal(0, calls);
-        Assert.Throws<ArgumentException>(() => deferred.StreamAsync(ProviderRequest("LOCAL"), default));
-        Assert.Equal(1, calls);
+        Assert.AreEqual(0, calls);
+        Assert.ThrowsExactly<ArgumentException>(() => deferred.StreamAsync(ProviderRequest("LOCAL"), default));
+        Assert.AreEqual(1, calls);
     }
 
-    [Theory]
-    [InlineData("opneai")]
-    [InlineData("")]
-    [InlineData(null)]
+    [TestMethod]
+    [DataRow("opneai")]
+    [DataRow("")]
+    [DataRow(null)]
     public void UnknownProviderAtModelDispatchCannotConstructFactoryOrFallBack(string? provider)
     {
         var calls = 0;
         var deferred = new DeferredDesktopLlmClient(() => { calls++; return new UnusedClient(); });
 
-        Assert.Throws<ArgumentException>(() => deferred.StreamAsync(ProviderRequest(provider!), default));
+        Assert.ThrowsExactly<ArgumentException>(() => deferred.StreamAsync(ProviderRequest(provider!), default));
 
-        Assert.Equal(0, calls);
+        Assert.AreEqual(0, calls);
     }
 
     private static LlmRequest ProviderRequest(string provider) => new(new("desktop-provider-probe"), new("desktop-provider-probe"),
         provider, "rule-based-v1", "Inspect saved graph routing", [], [], TimeSpan.FromSeconds(1));
 
-    [Fact]
+    [TestMethod]
     public async Task MisspelledProviderCannotAdmitGraphOrCallGitOrProvider()
     {
         var workspaces = new PreflightWorkspaces();
@@ -261,19 +263,19 @@ public sealed class TaskGraphDesktopTests
             new(scope.Controller.WorkspaceRoot, scope.Controller.WorkspaceStoreRoot, "HEAD", "opneai", "some-model",
                 new(ToolProfile.Coding), new()));
 
-        var error = await Assert.ThrowsAsync<ArgumentException>(() => DesktopGraphCommands.StartAsync(scope.Controller,
+        var error = await Assert.ThrowsExactlyAsync<ArgumentException>(() => DesktopGraphCommands.StartAsync(scope.Controller,
             document, CallerIdentity.LocalOwner(), false, default));
 
         Assert.Contains("opneai", error.Message);
-        Assert.Empty(await scope.Store.ListTaskGraphsAsync(default));
-        Assert.Equal(0, scope.Client.Calls);
-        Assert.Equal(0, workspaces.ResolveCalls);
-        Assert.Equal(0, workspaces.ExecutionCalls);
+        Assert.IsEmpty(await scope.Store.ListTaskGraphsAsync(default));
+        Assert.AreEqual(0, scope.Client.Calls);
+        Assert.AreEqual(0, workspaces.ResolveCalls);
+        Assert.AreEqual(0, workspaces.ExecutionCalls);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task UnknownSavedProviderCannotResumeOrRecoverModelWork(bool recover)
     {
         var workspaces = new PreflightWorkspaces();
@@ -286,21 +288,21 @@ public sealed class TaskGraphDesktopTests
             await scope.Store.AbandonTaskClaimAsync(claim!, "Explicit recovery needed", default);
         }
 
-        await Assert.ThrowsAsync<ArgumentException>(() => recover
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => recover
             ? DesktopGraphCommands.RecoverTaskAsync(scope.Controller, graph.Graph.GraphId, "producer", CallerIdentity.LocalOwner(), false, default)
             : DesktopGraphCommands.ResumeAsync(scope.Controller, graph.Graph.GraphId, CallerIdentity.LocalOwner(), false, default));
 
         var saved = (await scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, default))!;
-        Assert.Null(saved.Tasks[0].LeaseToken);
-        Assert.Equal(recover ? TaskGraphTaskStatus.NeedsReconciliation : TaskGraphTaskStatus.Pending, saved.Tasks[0].Status);
-        Assert.Equal(claim?.AttemptId, saved.Tasks[0].AttemptId);
-        Assert.Equal(0, workspaces.ExecutionCalls);
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.IsNull(saved.Tasks[0].LeaseToken);
+        Assert.AreEqual(recover ? TaskGraphTaskStatus.NeedsReconciliation : TaskGraphTaskStatus.Pending, saved.Tasks[0].Status);
+        Assert.AreEqual(claim?.AttemptId, saved.Tasks[0].AttemptId);
+        Assert.AreEqual(0, workspaces.ExecutionCalls);
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task UnknownSavedProviderDoesNotBlockCandidateOnlyResumeOrGrantCommandAuthority(bool command)
     {
         var workspaces = new PreflightWorkspaces();
@@ -313,15 +315,15 @@ public sealed class TaskGraphDesktopTests
 
         var resumed = await DesktopGraphCommands.ResumeAsync(scope.Controller, graph.Graph.GraphId, CallerIdentity.LocalOwner(), false, default);
 
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, resumed.Tasks[0].Status);
-        Assert.Equal(TaskAcceptanceOutcome.Inconclusive, resumed.Tasks[0].Acceptance!.Outcome);
-        Assert.Empty(resumed.Tasks[0].Verifications);
-        Assert.Equal(0, workspaces.ExecutionCalls);
-        Assert.Equal(0, scope.Client.Calls);
-        Assert.Equal(1, workspaces.ReadOnlyCalls);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, resumed.Tasks[0].Status);
+        Assert.AreEqual(TaskAcceptanceOutcome.Inconclusive, resumed.Tasks[0].Acceptance!.Outcome);
+        Assert.IsEmpty(resumed.Tasks[0].Verifications);
+        Assert.AreEqual(0, workspaces.ExecutionCalls);
+        Assert.AreEqual(0, scope.Client.Calls);
+        Assert.AreEqual(1, workspaces.ReadOnlyCalls);
     }
 
-    [Fact]
+    [TestMethod]
     public Task VerificationReconciliationRecordsEvidenceWithoutResumingOrCallingProvider() => RunInSta(() =>
     {
         using var scope = new Scope();
@@ -334,21 +336,21 @@ public sealed class TaskGraphDesktopTests
         var window = scope.ShowWindow();
         WaitFor(() => ((ComboBox)window.FindName("GraphTasksComboBox")).Items.Count == 2);
         ((ComboBox)window.FindName("GraphReconciliationKindComboBox")).SelectedIndex = 1;
-        Assert.True(((Button)window.FindName("ReconcileGraphButton")).IsEnabled);
+        Assert.IsTrue(((Button)window.FindName("ReconcileGraphButton")).IsEnabled);
         ((TextBox)window.FindName("GraphReconcileResultTextBox")).Text = TaskGraphDocumentJson.Serialize(new TaskVerificationCompletion(
             TaskCommandOutcome.Failed, "independent-review", "Observed exit code 7", 7, EmptyLog(), EmptyLog()));
         ((TextBox)window.FindName("GraphReconcileNoteTextBox")).Text = "Checked the captured process exit and command logs";
         ((Button)window.FindName("ReconcileGraphButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         WaitFor(() => ((TextBlock)window.FindName("GraphStatusTextBlock")).Text.Contains("Established outcome recorded"));
         var updated = Background(() => scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, default))!;
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, updated.Tasks[0].Status);
-        Assert.Null(updated.Tasks[0].LeaseToken);
-        var receipt = Assert.Single(updated.Tasks[0].Verifications);
-        Assert.Equal(command.Invocation.InvocationId, receipt.InvocationId);
-        Assert.Equal(TaskVerificationInvocationState.Completed, receipt.State);
-        Assert.Equal(TaskCommandOutcome.Failed, receipt.Completion!.Outcome);
-        Assert.Equal("Checked the captured process exit and command logs", receipt.ReconciliationNote);
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, updated.Tasks[0].Status);
+        Assert.IsNull(updated.Tasks[0].LeaseToken);
+        var receipt = Assert.ContainsSingle(updated.Tasks[0].Verifications);
+        Assert.AreEqual(command.Invocation.InvocationId, receipt.InvocationId);
+        Assert.AreEqual(TaskVerificationInvocationState.Completed, receipt.State);
+        Assert.AreEqual(TaskCommandOutcome.Failed, receipt.Completion!.Outcome);
+        Assert.AreEqual("Checked the captured process exit and command logs", receipt.ReconciliationNote);
+        Assert.AreEqual(0, scope.Client.Calls);
     });
 
     private static TaskVerificationLog EmptyLog() => new("", TaskVerificationIdentity.EmptyLogDigest, 0, false);
@@ -390,7 +392,8 @@ public sealed class TaskGraphDesktopTests
             if (!includeConsumer) graph = graph with { Tasks = [graph.Tasks[0]] };
             var binding = new TaskGraphAgentBinding(AgentTaskIdentity.RootRunId(id).Value, Controller.WorkspaceRoot,
                 new string('0', 40), Controller.WorkspaceStoreRoot, provider, "rule-based-v1", new(ToolProfile.Coding),
-                new(MaxTotalTokens: 20000, MaxExecutionTime: TimeSpan.FromSeconds(120))) {
+                new(MaxTotalTokens: 20000, MaxExecutionTime: TimeSpan.FromSeconds(120)))
+            {
                 DependencyMode = TaskDependencyMode.AcceptedChanges,
                 VerificationAuthority = command ? TaskVerificationAuthority.TrustedLocalProcess : TaskVerificationAuthority.None,
                 VerificationProfiles = command ? [new("build", Path.GetFullPath(Environment.ProcessPath!), "sha256:" + new string('a', 64), [], TimeSpan.FromSeconds(10))] : [],
@@ -403,8 +406,14 @@ public sealed class TaskGraphDesktopTests
             var services = new ServiceCollection().AddSingleton<IResumableAgentOrchestrator>(new StoreBrowser(Store))
                 .AddSingleton<IWorkflowStore>(_ => Store).AddSingleton(Controller).AddSingleton(new SkillAddinLoadResult([], [], [])).BuildServiceProvider();
             _bootstrap = new(services);
-            var window = new MainWindow(_bootstrap) { WindowStartupLocation = WindowStartupLocation.Manual,
-                Left = -10000, Top = -10000, ShowInTaskbar = false, ShowActivated = false };
+            var window = new MainWindow(_bootstrap)
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -10000,
+                Top = -10000,
+                ShowInTaskbar = false,
+                ShowActivated = false
+            };
             _window = window;
             window.Show();
             return window;
@@ -518,6 +527,6 @@ public sealed class TaskGraphDesktopTests
         timer.Start();
         Dispatcher.PushFrame(frame);
         timer.Stop();
-        Assert.True(condition(), "The WPF graph state did not settle before the probe deadline.");
+        Assert.IsTrue(condition(), "The WPF graph state did not settle before the probe deadline.");
     }
 }

@@ -5,9 +5,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class RunOutcomeTests
 {
-    [Fact]
+    [TestMethod]
     public async Task RoundLimit_DoesNotReturnPreviousTurnOrEmitSuccess()
     {
         using var scope = new TestScope(new ScriptedClient([
@@ -15,40 +16,41 @@ public sealed class RunOutcomeTests
         await scope.Transcripts.ReplaceAsync(scope.Key,
             [new ChatMessage(ChatRole.User, "old question"), new ChatMessage(ChatRole.Assistant, "old answer")], CancellationToken.None);
         var result = await scope.RunAsync(maxRounds: 1);
-        Assert.Equal(AgentRunStatus.RoundLimitReached, result.Status);
+        Assert.AreEqual(AgentRunStatus.RoundLimitReached, result.Status);
         Assert.DoesNotContain("old answer", result.FinalAssistantMessage);
-        Assert.Contains(scope.Sink.Events, evt => evt.Type == "run_round_limit_reached");
-        Assert.DoesNotContain(scope.Sink.Events, evt => evt.Type == "run_completed");
-        Assert.Equal(AgentRunStatus.RoundLimitReached, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
-        Assert.Contains(await scope.Transcripts.LoadAsync(scope.Key, CancellationToken.None), message => message.Role == ChatRole.Tool);
+        Assert.Contains(evt => evt.Type == "run_round_limit_reached", scope.Sink.Events);
+        Assert.DoesNotContain(evt => evt.Type == "run_completed", scope.Sink.Events);
+        Assert.AreEqual(AgentRunStatus.RoundLimitReached, Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
+        Assert.Contains(message => message.Role == ChatRole.Tool, await scope.Transcripts.LoadAsync(scope.Key, CancellationToken.None));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ProviderFailure_RecordsHistoryAndInterruptedOutput()
     {
         using var scope = new TestScope(new ScriptedClient([new AssistantTextDelta("partial output"), new LlmErrorDelta("simulated failure")]));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.RunAsync());
-        var summary = Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None));
-        Assert.Equal(AgentRunStatus.Failed, summary.Status);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => scope.RunAsync());
+        var summary = Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None));
+        Assert.AreEqual(AgentRunStatus.Failed, summary.Status);
+        Assert.IsNotNull(summary.Error);
         Assert.Contains("simulated failure", summary.Error);
-        Assert.Contains(scope.Sink.Events, evt => evt.Type == "run_failed" && evt.RunId.Value == summary.RunId);
-        Assert.DoesNotContain(scope.Sink.Events, evt => evt.Type == "run_completed");
-        Assert.Contains(await scope.Transcripts.LoadAsync(scope.Key, CancellationToken.None), message => message.Content.Contains("partial output"));
+        Assert.Contains(evt => evt.Type == "run_failed" && evt.RunId.Value == summary.RunId, scope.Sink.Events);
+        Assert.DoesNotContain(evt => evt.Type == "run_completed", scope.Sink.Events);
+        Assert.Contains(message => message.Content.Contains("partial output"), await scope.Transcripts.LoadAsync(scope.Key, CancellationToken.None));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Cancellation_RecordsHistoryUsingIndependentToken()
     {
         using var cancellation = new CancellationTokenSource();
         using var scope = new TestScope(new ScriptedClient([new AssistantTextDelta("partial")], () => cancellation.Cancel()));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => scope.RunAsync(ct: cancellation.Token));
-        var summary = Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None));
-        Assert.Equal(AgentRunStatus.Cancelled, summary.Status);
-        Assert.Contains(scope.Sink.Events, evt => evt.Type == "run_cancelled");
-        Assert.NotEmpty(await scope.Transcripts.LoadAsync(scope.Key, CancellationToken.None));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => scope.RunAsync(ct: cancellation.Token));
+        var summary = Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None));
+        Assert.AreEqual(AgentRunStatus.Cancelled, summary.Status);
+        Assert.Contains(evt => evt.Type == "run_cancelled", scope.Sink.Events);
+        Assert.IsNotEmpty(await scope.Transcripts.LoadAsync(scope.Key, CancellationToken.None));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task QueuedCancellation_IsRecordedWithoutOverwritingActiveTranscript()
     {
         using var scope = new TestScope(new ScriptedClient([new AssistantTextDelta("done"), new CompletedDelta()]));
@@ -59,93 +61,97 @@ public sealed class RunOutcomeTests
         cancellation.Cancel();
         try
         {
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued);
-            Assert.Equal(AgentRunStatus.Cancelled, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
-            Assert.Empty(await scope.Transcripts.LoadAsync(scope.Key, CancellationToken.None));
+            await Assert.ThrowsAsync<OperationCanceledException>(() => queued);
+            Assert.AreEqual(AgentRunStatus.Cancelled, Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
+            Assert.IsEmpty(await scope.Transcripts.LoadAsync(scope.Key, CancellationToken.None));
         }
         finally { release.SetResult(1); await occupied; }
-        Assert.Equal(0, scope.Scheduler.ActiveLaneCount);
+        Assert.AreEqual(0, scope.Scheduler.ActiveLaneCount);
     }
 
-    [Theory]
-    [InlineData(1)]
-    [InlineData(6)]
+    [TestMethod]
+    [DataRow(1)]
+    [DataRow(6)]
     public async Task EmptyProviderOutput_IsRecordedAsFailure(int maxRounds)
     {
         using var scope = new TestScope(new ScriptedClient([new CompletedDelta()]));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.RunAsync(maxRounds: maxRounds));
-        Assert.Equal(AgentRunStatus.Failed, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => scope.RunAsync(maxRounds: maxRounds));
+        Assert.AreEqual(AgentRunStatus.Failed, Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task SuccessfulRun_HasOneSuccessfulHistoryEntry()
     {
         using var scope = new TestScope(new ScriptedClient([new AssistantTextDelta("done"), new CompletedDelta()]));
         var result = await scope.RunAsync();
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Equal("done", result.FinalAssistantMessage);
-        Assert.Equal(AgentRunStatus.Succeeded, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
-        Assert.Single(scope.Sink.Events, evt => evt.Type == "run_completed");
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        Assert.AreEqual("done", result.FinalAssistantMessage);
+        Assert.AreEqual(AgentRunStatus.Succeeded, Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
+        Assert.ContainsSingle(evt => evt.Type == "run_completed", scope.Sink.Events);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task TerminalObserverFailure_DoesNotRewriteSuccessfulOutcome()
     {
         using var scope = new TestScope(new ScriptedClient([new AssistantTextDelta("done"), new CompletedDelta()]));
         scope.Sink.ThrowOnCompleted = true;
         var result = await scope.RunAsync();
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Contains("observer failed", result.Metadata["eventDeliveryError"]!.ToString());
-        Assert.Equal(AgentRunStatus.Succeeded, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        var deliveryError = result.Metadata["eventDeliveryError"]!.ToString();
+        Assert.IsNotNull(deliveryError);
+        Assert.Contains("observer failed", deliveryError);
+        Assert.AreEqual(AgentRunStatus.Succeeded, Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
     }
 
-    [Theory]
-    [InlineData("run_started")]
-    [InlineData("assistant_delta")]
+    [TestMethod]
+    [DataRow("run_started")]
+    [DataRow("assistant_delta")]
     public async Task NonDurableIntermediateObserverFailureCannotReplaceTheActualOutcome(string eventType)
     {
         using var scope = new TestScope(new ScriptedClient([new AssistantTextDelta("done"), new CompletedDelta()]));
         scope.Sink.ThrowOnType = eventType;
         var result = await scope.RunAsync();
-        Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-        Assert.Equal("done", result.FinalAssistantMessage);
-        Assert.Contains("observer failed", result.Metadata["eventDeliveryError"]!.ToString());
-        Assert.Equal(AgentRunStatus.Succeeded, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
+        Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+        Assert.AreEqual("done", result.FinalAssistantMessage);
+        var deliveryError = result.Metadata["eventDeliveryError"]!.ToString();
+        Assert.IsNotNull(deliveryError);
+        Assert.Contains("observer failed", deliveryError);
+        Assert.AreEqual(AgentRunStatus.Succeeded, Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task InterruptedStream_DoesNotExecutePendingToolCalls()
     {
         using var scope = new TestScope(new ScriptedClient([
             new ToolCallDelta("time-1", "current_time", JsonSerializer.SerializeToElement(new { }))]));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scope.RunAsync());
-        Assert.Equal(AgentRunStatus.Failed, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
-        Assert.DoesNotContain(scope.Sink.Events, evt => evt.Type == "tool_result");
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => scope.RunAsync());
+        Assert.AreEqual(AgentRunStatus.Failed, Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
+        Assert.DoesNotContain(evt => evt.Type == "tool_result", scope.Sink.Events);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CorruptTranscript_IsPreservedWhenLoadingFails()
     {
         using var scope = new TestScope(new ScriptedClient([new AssistantTextDelta("done"), new CompletedDelta()]));
         var path = Path.Combine(scope.TranscriptsDirectory, "outcome-test.jsonl");
         await File.WriteAllTextAsync(path, "corrupt transcript");
-        await Assert.ThrowsAsync<JsonException>(() => scope.RunAsync());
-        Assert.Equal("corrupt transcript", await File.ReadAllTextAsync(path));
-        Assert.Equal(AgentRunStatus.Failed, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
+        await Assert.ThrowsExactlyAsync<JsonException>(() => scope.RunAsync());
+        Assert.AreEqual("corrupt transcript", await File.ReadAllTextAsync(path));
+        Assert.AreEqual(AgentRunStatus.Failed, Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Clarification_IsAwaitingInputRatherThanCompleted()
     {
         using var scope = new TestScope(new ScriptedClient([
             new AssistantTextDelta("""{"needs_clarification":true,"clarification_questions":["Which project?"],"delegations":[]}"""),
             new CompletedDelta()]), includeAgents: true);
         var result = await scope.RunAsync();
-        Assert.Equal(AgentRunStatus.AwaitingInput, result.Status);
+        Assert.AreEqual(AgentRunStatus.AwaitingInput, result.Status);
         Assert.Contains("Which project?", result.FinalAssistantMessage);
-        Assert.Contains(scope.Sink.Events, evt => evt.Type == "run_awaiting_input");
-        Assert.DoesNotContain(scope.Sink.Events, evt => evt.Type == "run_completed");
-        Assert.Equal(AgentRunStatus.AwaitingInput, Assert.Single(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
+        Assert.Contains(evt => evt.Type == "run_awaiting_input", scope.Sink.Events);
+        Assert.DoesNotContain(evt => evt.Type == "run_completed", scope.Sink.Events);
+        Assert.AreEqual(AgentRunStatus.AwaitingInput, Assert.ContainsSingle(await scope.History.LoadAllAsync(CancellationToken.None)).Status);
     }
 
     private sealed class TestScope : IDisposable

@@ -3,9 +3,10 @@ using IronPaw.AgentCore.Persistence;
 
 namespace IronPaw.AgentCore.Persistence.Tests;
 
+[TestClass]
 public sealed class PersistenceTests
 {
-    [Fact]
+    [TestMethod]
     public async Task FileSessionStore_UpsertAndGet_RoundTripsData()
     {
         var root = CreateTempDirectory();
@@ -27,10 +28,10 @@ public sealed class PersistenceTests
                 CancellationToken.None);
 
             var entry = await store.GetAsync(key, CancellationToken.None);
-            Assert.NotNull(entry);
-            Assert.Equal("local", entry!.ProviderOverride);
-            Assert.Equal("rule-based-v1", entry.ModelOverride);
-            Assert.Equal("initial", entry.Diagnostics!["phase"]);
+            Assert.IsNotNull(entry);
+            Assert.AreEqual("local", entry!.ProviderOverride);
+            Assert.AreEqual("rule-based-v1", entry.ModelOverride);
+            Assert.AreEqual("initial", entry.Diagnostics!["phase"]);
         }
         finally
         {
@@ -38,7 +39,7 @@ public sealed class PersistenceTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task FileSessionStore_ReturnsClonedEntries()
     {
         var root = CreateTempDirectory();
@@ -58,11 +59,11 @@ public sealed class PersistenceTests
                 CancellationToken.None);
 
             var first = await store.GetAsync(key, CancellationToken.None);
-            var mutable = Assert.IsType<Dictionary<string, object?>>(first!.Diagnostics);
+            var mutable = Assert.IsExactInstanceOfType<Dictionary<string, object?>>(first!.Diagnostics);
             mutable["value"] = "mutated";
 
             var second = await store.GetAsync(key, CancellationToken.None);
-            Assert.Equal("original", second!.Diagnostics!["value"]);
+            Assert.AreEqual("original", second!.Diagnostics!["value"]);
         }
         finally
         {
@@ -70,7 +71,7 @@ public sealed class PersistenceTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task JsonTranscriptStore_AppendLoadAndReplace_Works()
     {
         var root = CreateTempDirectory();
@@ -88,9 +89,9 @@ public sealed class PersistenceTests
                 CancellationToken.None);
 
             var loaded = await store.LoadAsync(key, CancellationToken.None);
-            Assert.Equal(2, loaded.Count);
-            Assert.Equal(ChatRole.User, loaded[0].Role);
-            Assert.Equal("hello", loaded[0].Content);
+            Assert.AreEqual(2, loaded.Count);
+            Assert.AreEqual(ChatRole.User, loaded[0].Role);
+            Assert.AreEqual("hello", loaded[0].Content);
 
             await store.ReplaceAsync(
                 key,
@@ -98,8 +99,8 @@ public sealed class PersistenceTests
                 CancellationToken.None);
 
             var replaced = await store.LoadAsync(key, CancellationToken.None);
-            Assert.Single(replaced);
-            Assert.Equal("replaced", replaced[0].Content);
+            Assert.ContainsSingle(replaced);
+            Assert.AreEqual("replaced", replaced[0].Content);
         }
         finally
         {
@@ -107,11 +108,11 @@ public sealed class PersistenceTests
         }
     }
 
-    [Theory]
-    [InlineData("a:b", "ab")]
-    [InlineData("Default", "default")]
-    [InlineData("abc/../../def", "abcdef")]
-    [InlineData("***", "con")]
+    [TestMethod]
+    [DataRow("a:b", "ab")]
+    [DataRow("Default", "default")]
+    [DataRow("abc/../../def", "abcdef")]
+    [DataRow("***", "con")]
     public async Task JsonTranscriptStore_DistinctOpaqueKeysRemainIsolated(string first, string second)
     {
         var root = CreateTempDirectory();
@@ -120,14 +121,14 @@ public sealed class PersistenceTests
             var store = new JsonTranscriptStore(root);
             await store.AppendAsync(new SessionKey(first), [new ChatMessage(ChatRole.User, "first")], CancellationToken.None);
             await store.ReplaceAsync(new SessionKey(second), [new ChatMessage(ChatRole.User, "second")], CancellationToken.None);
-            Assert.Equal("first", Assert.Single(await store.LoadAsync(new SessionKey(first), CancellationToken.None)).Content);
-            Assert.Equal("second", Assert.Single(await store.LoadAsync(new SessionKey(second), CancellationToken.None)).Content);
-            Assert.Equal(2, Directory.GetFiles(root, "*.jsonl").Length);
+            Assert.AreEqual("first", Assert.ContainsSingle(await store.LoadAsync(new SessionKey(first), CancellationToken.None)).Content);
+            Assert.AreEqual("second", Assert.ContainsSingle(await store.LoadAsync(new SessionKey(second), CancellationToken.None)).Content);
+            Assert.AreEqual(2, Directory.GetFiles(root, "*.jsonl").Length);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task JsonTranscriptStore_PreservesConventionalLegacyFile()
     {
         var root = CreateTempDirectory();
@@ -136,16 +137,16 @@ public sealed class PersistenceTests
             await File.WriteAllTextAsync(Path.Combine(root, "default.jsonl"),
                 "{\"Role\":\"User\",\"Content\":\"legacy\"}\n");
             var store = new JsonTranscriptStore(root);
-            Assert.Equal("legacy", Assert.Single(await store.LoadAsync(new SessionKey("default"), CancellationToken.None)).Content);
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Assert.AreEqual("legacy", Assert.ContainsSingle(await store.LoadAsync(new SessionKey("default"), CancellationToken.None)).Content);
+            var error = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
                 store.LoadAsync(new SessionKey("de:fault"), CancellationToken.None));
             Assert.Contains("ambiguous legacy", error.Message);
-            Assert.Equal("legacy", Assert.Single(await store.LoadAsync(new SessionKey("default"), CancellationToken.None)).Content);
+            Assert.AreEqual("legacy", Assert.ContainsSingle(await store.LoadAsync(new SessionKey("default"), CancellationToken.None)).Content);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task FileSessionStore_IndependentCachedInstancesPreserveUpdates()
     {
         var root = CreateTempDirectory();
@@ -159,12 +160,12 @@ public sealed class PersistenceTests
             await first.UpsertAsync(new SessionKey("b"), _ => new SessionEntry("b", DateTimeOffset.UtcNow), CancellationToken.None);
             await second.UpsertAsync(new SessionKey("c"), _ => new SessionEntry("c", DateTimeOffset.UtcNow), CancellationToken.None);
             var fresh = new FileSessionStore(options with { CacheTtl = TimeSpan.Zero });
-            Assert.Equal(3, (await fresh.LoadAllAsync(CancellationToken.None)).Count);
+            Assert.AreEqual(3, (await fresh.LoadAllAsync(CancellationToken.None)).Count);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task FileSessionStore_ConcurrentIndependentWritersPreserveAllUpdates()
     {
         var root = CreateTempDirectory();
@@ -177,7 +178,7 @@ public sealed class PersistenceTests
                 var store = new FileSessionStore(options);
                 await store.UpsertAsync(key, _ => new SessionEntry(key.Value, DateTimeOffset.UtcNow), CancellationToken.None);
             }));
-            Assert.Equal(20, (await new FileSessionStore(options).LoadAllAsync(CancellationToken.None)).Count);
+            Assert.AreEqual(20, (await new FileSessionStore(options).LoadAllAsync(CancellationToken.None)).Count);
         }
         finally { Directory.Delete(root, recursive: true); }
     }

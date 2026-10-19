@@ -5,22 +5,23 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
-public sealed class GitTaskWorkingStateTests : IDisposable
+[TestClass]
+public sealed class GitTaskWorkingStateTests
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "IronPawTaskStateTests", Guid.NewGuid().ToString("n"));
     private readonly GitTaskWorkspaceManager manager = new();
 
-    [Fact]
+    [TestMethod]
     public async Task PristinePreparedWorkspacePassesButUnreceiptedEditCannotBeAdmitted()
     {
         var workspace = await PrepareAsync();
         await manager.ValidateWorkingStateAsync(workspace, [], CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "base.txt"), "unreceipted edit");
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace, [], CancellationToken.None));
-        Assert.Equal("unreceipted edit", await File.ReadAllTextAsync(Path.Combine(workspace.WorkspacePath, "base.txt")));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace, [], CancellationToken.None));
+        Assert.AreEqual("unreceipted edit", await File.ReadAllTextAsync(Path.Combine(workspace.WorkspacePath, "base.txt")));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ConfirmedWritesMatchExactUtf8BytesAndOrderWithoutReapplying()
     {
         var workspace = await PrepareAsync();
@@ -32,12 +33,12 @@ public sealed class GitTaskWorkingStateTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "nested", "output.txt"), "new output");
         var before = Snapshot(workspace.AttemptPath);
         await manager.ValidateWorkingStateAsync(workspace, [first, second, third], CancellationToken.None);
-        Assert.Equal(before, Snapshot(workspace.AttemptPath));
+        Assert.AreSequenceEqual(before, Snapshot(workspace.AttemptPath));
         await File.AppendAllTextAsync(Path.Combine(workspace.WorkspacePath, "nested", "output.txt"), "tampered");
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace, [first, second, third], CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace, [first, second, third], CancellationToken.None));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task PendingPlannedCallsAndReadOnlyReceiptsDoNotChangeExpectedFiles()
     {
         var workspace = await PrepareAsync();
@@ -47,10 +48,10 @@ public sealed class GitTaskWorkingStateTests : IDisposable
         var denied = Write("denied", "base.txt", "not written") with { Result = ToolResult.Error("Denied") };
         var before = Snapshot(workspace.AttemptPath);
         await manager.ValidateWorkingStateAsync(workspace, [planned, read, list, denied], CancellationToken.None);
-        Assert.Equal(before, Snapshot(workspace.AttemptPath));
+        Assert.AreSequenceEqual(before, Snapshot(workspace.AttemptPath));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task WindowsReceiptsRespectExistingFileDirectoryAndEstablishedNewDirectoryCasing()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -68,58 +69,59 @@ public sealed class GitTaskWorkingStateTests : IDisposable
         }
         await manager.ValidateWorkingStateAsync(workspace, writes, CancellationToken.None);
         var capture = await manager.CaptureAsync(workspace, [new("base", "base output", TaskArtifactKind.File, "base.txt")], CancellationToken.None);
-        Assert.Single(capture.Artifacts);
+        Assert.ContainsSingle(capture.Artifacts);
         Assert.EndsWith("base.txt", capture.Artifacts[0].Location, StringComparison.Ordinal);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task WindowsArtifactAliasUsesActualSealedEntryCasing()
     {
         if (!OperatingSystem.IsWindows()) return;
         var requirements = ImmutableArray.Create(new TaskArtifactRequirement("base", "base output", TaskArtifactKind.File, "BASE.TXT"));
         var workspace = await PrepareAsync(artifacts: requirements);
         var capture = await manager.CaptureAsync(workspace, requirements, CancellationToken.None);
-        Assert.Empty(capture.MissingRequiredArtifacts);
-        Assert.EndsWith("base.txt", Assert.Single(capture.Artifacts).Location, StringComparison.Ordinal);
+        Assert.IsEmpty(capture.MissingRequiredArtifacts);
+        Assert.EndsWith("base.txt", Assert.ContainsSingle(capture.Artifacts).Location, StringComparison.Ordinal);
         var result = new WorkflowTaskResult(workspace.GraphId, workspace.GraphFingerprint, workspace.TaskId,
-            WorkflowTaskStatus.AwaitingVerification, capture.Revision, "candidate") { Artifacts = capture.Artifacts };
-        Assert.True(await manager.VerifyAsync(workspace, result, CancellationToken.None));
+            WorkflowTaskStatus.AwaitingVerification, capture.Revision, "candidate")
+        { Artifacts = capture.Artifacts };
+        Assert.IsTrue(await manager.VerifyAsync(workspace, result, CancellationToken.None));
     }
 
-    [Theory]
-    [InlineData(WorkflowToolState.Started)]
-    [InlineData(WorkflowToolState.WaitingForChild)]
-    [InlineData(WorkflowToolState.Completed)]
+    [TestMethod]
+    [DataRow(WorkflowToolState.Started)]
+    [DataRow(WorkflowToolState.WaitingForChild)]
+    [DataRow(WorkflowToolState.Completed)]
     public async Task UncertainToolEffectsAreRejected(WorkflowToolState state)
     {
         var workspace = await PrepareAsync();
         var uncertain = Write("uncertain", "base.txt", "unknown") with { State = state, Result = null };
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace, [uncertain], CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace, [uncertain], CancellationToken.None));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task UnknownSuccessfulToolsAndWritesOutsideScopeCannotEstablishState()
     {
         var workspace = await PrepareAsync(["allowed.txt"]);
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace,
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace,
             [Execution("unknown", "run_process", new { command = "anything" })], CancellationToken.None));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace,
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace,
             [Write("outside", "base.txt", "outside scope")], CancellationToken.None));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace,
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace,
             [Write("escape", "../outside.txt", "outside root")], CancellationToken.None));
     }
 
-    [Theory]
-    [InlineData("extra-file")]
-    [InlineData("missing-file")]
-    [InlineData("extra-directory")]
+    [TestMethod]
+    [DataRow("extra-file")]
+    [DataRow("missing-file")]
+    [DataRow("extra-directory")]
     public async Task CompleteFileAndDirectoryShapeIsValidated(string alteration)
     {
         var workspace = await PrepareAsync();
         if (alteration == "extra-file") await File.WriteAllTextAsync(Path.Combine(workspace.WorkspacePath, "extra.txt"), "extra");
         if (alteration == "missing-file") File.Delete(Path.Combine(workspace.WorkspacePath, "base.txt"));
         if (alteration == "extra-directory") Directory.CreateDirectory(Path.Combine(workspace.WorkspacePath, "empty"));
-        await Assert.ThrowsAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace, [], CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<TaskInputConflictException>(() => manager.ValidateWorkingStateAsync(workspace, [], CancellationToken.None));
     }
 
     private static WorkflowToolExecution Write(string id, string path, string content) =>
@@ -160,10 +162,11 @@ public sealed class GitTaskWorkingStateTests : IDisposable
         using var process = Process.Start(info)!;
         var output = process.StandardOutput.ReadToEndAsync(); var error = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync(); await output;
-        Assert.True(process.ExitCode == 0, await error);
+        Assert.IsTrue(process.ExitCode == 0, await error);
     }
 
-    public void Dispose()
+    [TestCleanup]
+    public void Cleanup()
     {
         if (!Directory.Exists(root)) return;
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);

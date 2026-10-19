@@ -6,13 +6,17 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.4" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
-    <Using Include="Xunit" />
+    <PackageReference Include="coverlet.collector" Version="10.1.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Mcp\IronPaw.AgentCore.Mcp.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore\IronPaw.AgentCore.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Persistence.CSharpDb\IronPaw.AgentCore.Persistence.CSharpDb.csproj" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.5.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.5.1" />
+    <PackageReference Include="MSTest.Analyzers" Version="4.5.1" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\TestAssemblyConfiguration.cs" Link="TestAssemblyConfiguration.cs" />
   </ItemGroup>
 </Project>

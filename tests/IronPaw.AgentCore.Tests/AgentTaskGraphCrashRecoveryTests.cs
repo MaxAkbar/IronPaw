@@ -8,9 +8,10 @@ using IronPaw.Workflow.CrashHarness;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class AgentTaskGraphCrashRecoveryTests
 {
-    [Fact]
+    [TestMethod]
     public async Task KilledAfterDurableChildSuccess_ExplicitRecoveryCapturesWithoutProviderOrToolReplay()
     {
         using var scope = new CrashScope();
@@ -19,44 +20,44 @@ public sealed class AgentTaskGraphCrashRecoveryTests
         var ct = timeout.Token;
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), ct);
         var recovered = (await store.GetTaskGraphAsync(graphId, ct))!;
-        var unknown = Assert.Single(recovered.Tasks);
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, unknown.Status);
-        Assert.Null(unknown.LeaseToken);
-        Assert.Null(unknown.Result);
-        var child = Assert.Single(await store.ListAsync(ct), run => run.ParentRunId is not null);
-        Assert.Equal(AgentRunStatus.Succeeded, child.Result!.Status);
-        Assert.Null(child.LeaseOwner);
-        Assert.False(WorkflowIdentity.HasUnknownEffects(child));
-        var write = Assert.Single(child.ToolExecutions!);
-        Assert.Equal(WorkflowToolState.Completed, write.State);
-        Assert.False(write.Result!.IsError);
+        var unknown = Assert.ContainsSingle(recovered.Tasks);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, unknown.Status);
+        Assert.IsNull(unknown.LeaseToken);
+        Assert.IsNull(unknown.Result);
+        var child = Assert.ContainsSingle(run => run.ParentRunId is not null, await store.ListAsync(ct));
+        Assert.AreEqual(AgentRunStatus.Succeeded, child.Result!.Status);
+        Assert.IsNull(child.LeaseOwner);
+        Assert.IsFalse(WorkflowIdentity.HasUnknownEffects(child));
+        var write = Assert.ContainsSingle(child.ToolExecutions!);
+        Assert.AreEqual(WorkflowToolState.Completed, write.State);
+        Assert.IsFalse(write.Result!.IsError);
         var workspace = await scope.WorkspaceAsync(ct);
         var workingOutput = Path.Combine(workspace.WorkspacePath, AgentTaskGraphCrashFixture.OutputName);
         var writeTime = File.GetLastWriteTimeUtc(workingOutput);
         var model = new MustNotCallProvider();
         var runner = new AgentTaskGraphRunner(store, store, new GitTaskWorkspaceManager(), model);
         var callsBefore = await File.ReadAllLinesAsync(AgentTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct);
-        Assert.Equal(2, callsBefore.Length);
+        Assert.AreEqual(2, callsBefore.Length);
 
         var blocked = await runner.ResumeAsync(graphId, AgentTaskGraphCrashFixture.Caller, ct);
-        Assert.Equal(TaskGraphTaskStatus.NeedsReconciliation, Assert.Single(blocked.Tasks).Status);
+        Assert.AreEqual(TaskGraphTaskStatus.NeedsReconciliation, Assert.ContainsSingle(blocked.Tasks).Status);
         var completed = await runner.RecoverTaskAsync(graphId, AgentTaskGraphCrashFixture.TaskId, AgentTaskGraphCrashFixture.Caller, ct);
 
         AssertAccepted(completed, unknown.AttemptId!);
-        Assert.Equal(0, model.Calls);
-        Assert.Equal(AgentTaskGraphCrashFixture.OutputContent, await File.ReadAllTextAsync(workingOutput, ct));
-        Assert.Equal(writeTime, File.GetLastWriteTimeUtc(workingOutput));
-        Assert.Equal(AgentTaskGraphCrashFixture.OutputContent, await File.ReadAllTextAsync(Assert.Single(completed.Tasks[0].Result!.Artifacts).Location, ct));
+        Assert.AreEqual(0, model.Calls);
+        Assert.AreEqual(AgentTaskGraphCrashFixture.OutputContent, await File.ReadAllTextAsync(workingOutput, ct));
+        Assert.AreEqual(writeTime, File.GetLastWriteTimeUtc(workingOutput));
+        Assert.AreEqual(AgentTaskGraphCrashFixture.OutputContent, await File.ReadAllTextAsync(Assert.ContainsSingle(completed.Tasks[0].Result!.Artifacts).Location, ct));
         var reused = (await store.GetAsync(new RunId(child.RunId), ct))!;
-        Assert.Equal(child.Request.SessionKey, reused.Request.SessionKey);
-        Assert.Equal(write.ExecutionId, Assert.Single(reused.ToolExecutions!).ExecutionId);
-        Assert.Equal(1, reused.Usage!.ToolCalls);
-        Assert.Equal(2, reused.Usage.ModelCalls);
-        Assert.Equal(callsBefore, await File.ReadAllLinesAsync(AgentTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct));
-        Assert.Equal(workspace, await scope.WorkspaceAsync(ct));
+        Assert.AreEqual(child.Request.SessionKey, reused.Request.SessionKey);
+        Assert.AreEqual(write.ExecutionId, Assert.ContainsSingle(reused.ToolExecutions!).ExecutionId);
+        Assert.AreEqual(1, reused.Usage!.ToolCalls);
+        Assert.AreEqual(2, reused.Usage.ModelCalls);
+        Assert.AreSequenceEqual(callsBefore, await File.ReadAllLinesAsync(AgentTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct));
+        Assert.AreEqual(workspace, await scope.WorkspaceAsync(ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task KilledAfterSavedCandidate_ResumesReadOnlyVerificationWithoutReplayingAgent()
     {
         using var scope = new CrashScope();
@@ -65,12 +66,12 @@ public sealed class AgentTaskGraphCrashRecoveryTests
         var ct = timeout.Token;
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), ct);
         var recovered = (await store.GetTaskGraphAsync(graphId, ct))!;
-        var candidate = Assert.Single(recovered.Tasks);
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, candidate.Status);
-        Assert.Null(candidate.LeaseToken);
-        Assert.Null(candidate.Acceptance);
-        Assert.Equal(WorkflowTaskStatus.AwaitingVerification, candidate.Result!.Status);
-        var child = Assert.Single(await store.ListAsync(ct), run => run.ParentRunId is not null);
+        var candidate = Assert.ContainsSingle(recovered.Tasks);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, candidate.Status);
+        Assert.IsNull(candidate.LeaseToken);
+        Assert.IsNull(candidate.Acceptance);
+        Assert.AreEqual(WorkflowTaskStatus.AwaitingVerification, candidate.Result!.Status);
+        var child = Assert.ContainsSingle(run => run.ParentRunId is not null, await store.ListAsync(ct));
         var childBefore = JsonSerializer.Serialize(child);
         var budgetBefore = await store.GetBudgetAsync(new RunId(recovered.AgentBinding!.RootRunId), ct);
         var callsBefore = await File.ReadAllLinesAsync(AgentTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct);
@@ -81,26 +82,25 @@ public sealed class AgentTaskGraphCrashRecoveryTests
             .ResumeAsync(graphId, AgentTaskGraphCrashFixture.Caller, ct);
 
         AssertAccepted(completed, candidate.AttemptId!);
-        Assert.Equal(0, model.Calls);
-        Assert.Equal(0, verifier.CaptureCalls);
-        Assert.Equal(1, verifier.VerificationCalls);
-        Assert.Equal(JsonSerializer.Serialize(candidate.Result), JsonSerializer.Serialize(completed.Tasks[0].Result));
-        Assert.Equal(childBefore, JsonSerializer.Serialize(await store.GetAsync(new RunId(child.RunId), ct)));
-        Assert.Equal(callsBefore, await File.ReadAllLinesAsync(AgentTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct));
-        Assert.Equal(budgetBefore.ChargedTokens, (await store.GetBudgetAsync(new RunId(recovered.AgentBinding.RootRunId), ct)).ChargedTokens);
-        Assert.Equal(AgentTaskGraphCrashFixture.OutputContent,
-            await File.ReadAllTextAsync(Assert.Single(completed.Tasks[0].Result!.Artifacts).Location, ct));
+        Assert.AreEqual(0, model.Calls);
+        Assert.AreEqual(0, verifier.CaptureCalls);
+        Assert.AreEqual(1, verifier.VerificationCalls);
+        Assert.AreEqual(JsonSerializer.Serialize(candidate.Result), JsonSerializer.Serialize(completed.Tasks[0].Result));
+        Assert.AreEqual(childBefore, JsonSerializer.Serialize(await store.GetAsync(new RunId(child.RunId), ct)));
+        Assert.AreSequenceEqual(callsBefore, await File.ReadAllLinesAsync(AgentTaskGraphCrashFixture.ProviderCallsPath(scope.Root), ct));
+        Assert.AreEqual(budgetBefore.ChargedTokens, (await store.GetBudgetAsync(new RunId(recovered.AgentBinding.RootRunId), ct)).ChargedTokens);
+        Assert.AreEqual(AgentTaskGraphCrashFixture.OutputContent, await File.ReadAllTextAsync(Assert.ContainsSingle(completed.Tasks[0].Result!.Artifacts).Location, ct));
     }
 
     private static void AssertAccepted(TaskGraphCheckpoint graph, string attemptId)
     {
-        Assert.Equal(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(graph).Status);
-        var task = Assert.Single(graph.Tasks);
-        Assert.Equal(attemptId, task.AttemptId);
-        Assert.Equal(TaskGraphTaskStatus.Succeeded, task.Status);
-        Assert.Equal(TaskAcceptanceOutcome.Accepted, task.Acceptance!.Outcome);
-        Assert.Equal(graph.DefinitionFingerprint, task.Acceptance.GraphFingerprint);
-        Assert.Equal(task.Result!.Revision, task.Acceptance.Revision);
+        Assert.AreEqual(TaskGraphRunStatus.Succeeded, TaskGraphProgress.Inspect(graph).Status);
+        var task = Assert.ContainsSingle(graph.Tasks);
+        Assert.AreEqual(attemptId, task.AttemptId);
+        Assert.AreEqual(TaskGraphTaskStatus.Succeeded, task.Status);
+        Assert.AreEqual(TaskAcceptanceOutcome.Accepted, task.Acceptance!.Outcome);
+        Assert.AreEqual(graph.DefinitionFingerprint, task.Acceptance.GraphFingerprint);
+        Assert.AreEqual(task.Result!.Revision, task.Acceptance.Revision);
     }
 
     private sealed class MustNotCallProvider : ILlmClient
@@ -147,13 +147,18 @@ public sealed class AgentTaskGraphCrashRecoveryTests
         public CrashScope() => Directory.CreateDirectory(Root);
 
         public async Task<TaskWorkspace> WorkspaceAsync(CancellationToken ct) => JsonSerializer.Deserialize<TaskWorkspace>(
-            await File.ReadAllTextAsync(Assert.Single(Directory.EnumerateFiles(AgentTaskGraphCrashFixture.WorkspacesPath(Root), "workspace.json", SearchOption.AllDirectories)), ct))!;
+            await File.ReadAllTextAsync(Assert.ContainsSingle(Directory.EnumerateFiles(AgentTaskGraphCrashFixture.WorkspacesPath(Root), "workspace.json", SearchOption.AllDirectories)), ct))!;
 
         public async Task<string> StartAndKillAsync(CrashPoint point)
         {
             var assembly = typeof(AgentTaskGraphCrashRecoveryTests).Assembly.Location;
-            var start = new ProcessStartInfo("dotnet") { CreateNoWindow = true, UseShellExecute = false,
-                RedirectStandardError = true, RedirectStandardOutput = true };
+            var start = new ProcessStartInfo("dotnet")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
+            };
             foreach (var argument in new[] { "exec", "--runtimeconfig", Path.ChangeExtension(assembly, ".runtimeconfig.json"),
                 "--depsfile", Path.ChangeExtension(assembly, ".deps.json"), typeof(CrashFixture).Assembly.Location, Root, point.ToString() })
                 start.ArgumentList.Add(argument);
@@ -175,10 +180,10 @@ public sealed class AgentTaskGraphCrashRecoveryTests
                     }
                     if (graphId is null) await Task.Delay(25, timeout.Token);
                 }
-                Assert.False(string.IsNullOrWhiteSpace(graphId));
+                Assert.IsFalse(string.IsNullOrWhiteSpace(graphId));
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(timeout.Token);
-                Assert.True(process.HasExited);
+                Assert.IsTrue(process.HasExited);
                 await Task.WhenAll(stdout, stderr).WaitAsync(timeout.Token);
                 // Process exit and exclusive file availability are separate observations on
                 // Windows. Wait only for a sharing violation, without opening the database

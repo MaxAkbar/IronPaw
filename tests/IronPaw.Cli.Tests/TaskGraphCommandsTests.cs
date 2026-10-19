@@ -10,25 +10,26 @@ using Spectre.Console;
 
 namespace IronPaw.Cli.Tests;
 
+[TestClass]
 public sealed class TaskGraphCommandsTests
 {
     private static readonly CallerIdentity Owner = CallerIdentity.LocalOwner();
     private static readonly CancellationToken Ct = CancellationToken.None;
     private static (bool, bool) NoProvider(string _) => throw new InvalidOperationException("Provider configuration was requested.");
 
-    [Fact]
+    [TestMethod]
     public async Task List_EmptyStoreShowsConfiguredRoots_WithoutProviderWork()
     {
         await using var scope = await Scope.OpenAsync();
         var result = await scope.ExecuteAsync(["--list-graphs"], NoProvider);
-        Assert.Equal(0, result.ExitCode);
+        Assert.AreEqual(0, result.ExitCode);
         Assert.Contains(scope.Source, result.Text.Replace("\r", "").Replace("\n", ""));
         Assert.Contains(scope.Managed, result.Text.Replace("\r", "").Replace("\n", ""));
         Assert.Contains("No saved task graphs", result.Text);
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task List_OmitsGraphsOwnedByAnotherCaller()
     {
         await using var scope = await Scope.OpenAsync();
@@ -40,53 +41,53 @@ public sealed class TaskGraphCommandsTests
         { ArtifactVerificationRules = options.ArtifactVerificationRules, DependencyMode = options.DependencyMode };
         await scope.Store.AcceptAgentTaskGraphAsync(graph, caller, 1, binding, Ct);
         var result = await scope.ExecuteAsync(["--list-graphs"], NoProvider);
-        Assert.Equal(0, result.ExitCode);
+        Assert.AreEqual(0, result.ExitCode);
         Assert.Contains("No saved task graphs", result.Text);
         Assert.DoesNotContain(graph.GraphId, result.Text);
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Show_ListsDependencyBlockersAndJournal_WithoutInterpretingMarkup()
     {
         await using var scope = await Scope.OpenAsync();
         var graph = scope.Graph() with { Objective = "Inspect [red]literal[/] objective", Tasks = [scope.Task(), scope.Task("dependent") with { Dependencies = ["task"] }] };
         await scope.AcceptAsync(graph);
         var result = await scope.ExecuteAsync(["--show-graph", graph.GraphId], NoProvider);
-        Assert.Equal(0, result.ExitCode);
+        Assert.AreEqual(0, result.ExitCode);
         Assert.Contains("Inspect [red]literal[/] objective", result.Text);
         Assert.Contains("Blocked by task: Pending", result.Text);
         Assert.Contains("Graph journal", result.Text);
         Assert.Contains("accepted", result.Text);
         Assert.Contains("model: accepted-model", result.Text);
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Theory]
-    [InlineData("--pause-graph", WorkflowControl.Pause)]
-    [InlineData("--cancel-graph", WorkflowControl.Cancel)]
+    [TestMethod]
+    [DataRow("--pause-graph", WorkflowControl.Pause)]
+    [DataRow("--cancel-graph", WorkflowControl.Cancel)]
     public async Task Controls_PersistGraphAndRootControlsWithoutProvider(string command, WorkflowControl control)
     {
         await using var scope = await Scope.OpenAsync();
         var graph = scope.Graph();
         await scope.AcceptAsync(graph);
-        Assert.Equal(0, (await scope.ExecuteAsync([command, graph.GraphId], NoProvider)).ExitCode);
+        Assert.AreEqual(0, (await scope.ExecuteAsync([command, graph.GraphId], NoProvider)).ExitCode);
         var saved = (await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct))!;
-        Assert.Equal(control, saved.Control);
-        Assert.Equal(control, (await scope.Store.GetAsync(new(saved.AgentBinding!.RootRunId), Ct))!.Control);
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(control, saved.Control);
+        Assert.AreEqual(control, (await scope.Store.GetAsync(new(saved.AgentBinding!.RootRunId), Ct))!.Control);
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task MissingGraph_IsRejectedBeforeProviderOrReconciliationFileAccess()
     {
         await using var scope = await Scope.OpenAsync();
-        await Assert.ThrowsAsync<ArgumentException>(() => scope.ExecuteAsync(["--reconcile-graph-task", "missing", "--task", "task",
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => scope.ExecuteAsync(["--reconcile-graph-task", "missing", "--task", "task",
             "--result-file", "missing.json", "--reconcile-note", "Verified"], NoProvider));
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Start_UsesManifestAndDurableReceipts_CompletedResumeDoesNotConfigureProvider()
     {
         await using var scope = await Scope.OpenAsync();
@@ -94,25 +95,25 @@ public sealed class TaskGraphCommandsTests
         var path = await scope.WriteAsync(document);
         string? provider = null;
         var started = await scope.ExecuteAsync(["--start-graph", path], name => { provider = name; return (true, false); });
-        Assert.Equal(0, started.ExitCode);
-        Assert.Equal("accepted-provider", provider);
+        Assert.AreEqual(0, started.ExitCode);
+        Assert.AreEqual("accepted-provider", provider);
         Assert.Contains("Succeeded", started.Text);
         Assert.Contains("Artifact output:", started.Text);
         Assert.Contains("Child ", started.Text);
-        Assert.Equal(2, scope.Client.Calls);
+        Assert.AreEqual(2, scope.Client.Calls);
         var graph = (await scope.Store.GetTaskGraphAsync(document.Graph.GraphId, Ct))!;
-        var artifact = Assert.Single(graph.Tasks[0].Result!.Artifacts);
-        Assert.Equal("candidate from controlled CLI test", await File.ReadAllTextAsync(artifact.Location));
-        Assert.False(File.Exists(Path.Combine(scope.Source, "result.txt")));
+        var artifact = Assert.ContainsSingle(graph.Tasks[0].Result!.Artifacts);
+        Assert.AreEqual("candidate from controlled CLI test", await File.ReadAllTextAsync(artifact.Location));
+        Assert.IsFalse(File.Exists(Path.Combine(scope.Source, "result.txt")));
 
         await scope.ReopenAsync();
         var replay = await scope.ExecuteAsync(["--resume-graph", document.Graph.GraphId], NoProvider);
-        Assert.Equal(0, replay.ExitCode);
+        Assert.AreEqual(0, replay.ExitCode);
         Assert.Contains("Succeeded", replay.Text);
-        Assert.Equal(2, scope.Client.Calls);
+        Assert.AreEqual(2, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Resume_QueuedGraphChecksOnlySavedProviderAndHonorsDeclinedConfiguration()
     {
         await using var scope = await Scope.OpenAsync();
@@ -120,13 +121,13 @@ public sealed class TaskGraphCommandsTests
         await scope.AcceptAsync(graph);
         string? provider = null;
         var result = await scope.ExecuteAsync(["--resume-graph", graph.GraphId], name => { provider = name; return (false, false); });
-        Assert.Equal(2, result.ExitCode);
-        Assert.Equal("accepted-provider", provider);
-        Assert.Equal(0, scope.Client.Calls);
-        Assert.Equal(TaskGraphTaskStatus.Pending, (await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks[0].Status);
+        Assert.AreEqual(2, result.ExitCode);
+        Assert.AreEqual("accepted-provider", provider);
+        Assert.AreEqual(0, scope.Client.Calls);
+        Assert.AreEqual(TaskGraphTaskStatus.Pending, (await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks[0].Status);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Resume_AwaitingAcceptanceNeedsNoProviderAndDoesNotReplayModel()
     {
         await using var scope = await Scope.OpenAsync();
@@ -134,35 +135,35 @@ public sealed class TaskGraphCommandsTests
         var path = await scope.WriteAsync(document);
         var started = await scope.ExecuteAsync(["--start-graph", path], _ => (true, false));
         Assert.Contains("AwaitingAcceptance", started.Text);
-        Assert.Equal(2, scope.Client.Calls);
+        Assert.AreEqual(2, scope.Client.Calls);
         var result = await scope.ExecuteAsync(["--resume-graph", document.Graph.GraphId], NoProvider);
-        Assert.Equal(0, result.ExitCode);
+        Assert.AreEqual(0, result.ExitCode);
         Assert.Contains("AwaitingAcceptance", result.Text);
-        Assert.Equal(2, scope.Client.Calls);
+        Assert.AreEqual(2, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Start_RejectsForeignWorkspaceBeforeProviderConfigurationOrAcceptance()
     {
         await using var scope = await Scope.OpenAsync();
         var document = scope.Document() with { Options = scope.Options() with { SourceWorkspaceRoot = Path.Combine(scope.Root, "other") } };
         var path = await scope.WriteAsync(document);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => scope.ExecuteAsync(["--start-graph", path], NoProvider));
-        Assert.Empty(await scope.Store.ListTaskGraphsAsync(Ct));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => scope.ExecuteAsync(["--start-graph", path], NoProvider));
+        Assert.IsEmpty(await scope.Store.ListTaskGraphsAsync(Ct));
     }
 
-    [Fact]
+    [TestMethod]
     public async Task Start_CommandManifestCannotGrantItselfLocalExecutionAuthority()
     {
         await using var scope = await Scope.OpenAsync();
         var document = scope.Document(commands: true);
         var path = await scope.WriteAsync(document);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => scope.ExecuteAsync(["--start-graph", path], NoProvider));
-        Assert.Empty(await scope.Store.ListTaskGraphsAsync(Ct));
-        Assert.Equal(0, scope.Client.Calls);
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => scope.ExecuteAsync(["--start-graph", path], NoProvider));
+        Assert.IsEmpty(await scope.Store.ListTaskGraphsAsync(Ct));
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReconcileTask_StoresKnownOutcomeWithoutResumingOrCallingProvider()
     {
         await using var scope = await Scope.OpenAsync();
@@ -175,15 +176,15 @@ public sealed class TaskGraphCommandsTests
         var path = await scope.WriteAsync(result);
         var command = await scope.ExecuteAsync(["--reconcile-graph-task", graph.GraphId, "--task", "task", "--result-file", path,
             "--reconcile-note", "Inspected preserved attempt"], NoProvider);
-        Assert.Equal(0, command.ExitCode);
+        Assert.AreEqual(0, command.ExitCode);
         var task = (await scope.Store.GetTaskGraphAsync(graph.GraphId, Ct))!.Tasks[0];
-        Assert.Equal(TaskGraphTaskStatus.Failed, task.Status);
-        Assert.Equal("Inspected preserved attempt", task.ReconciliationNote);
+        Assert.AreEqual(TaskGraphTaskStatus.Failed, task.Status);
+        Assert.AreEqual("Inspected preserved attempt", task.ReconciliationNote);
         Assert.Contains("Externally established failure", command.Text);
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task ReconcileCommand_StoresKnownReceiptWithoutExecutingOrAcceptingCandidate()
     {
         await using var scope = await Scope.OpenAsync();
@@ -200,20 +201,20 @@ public sealed class TaskGraphCommandsTests
         var path = await scope.WriteAsync(Completion(TaskCommandOutcome.Passed, 0));
         var command = await scope.ExecuteAsync(["--reconcile-graph-command", document.Graph.GraphId, "--task", "task", "--invocation",
             admission.Invocation.InvocationId, "--result-file", path, "--reconcile-note", "Inspected exit and command output"], NoProvider);
-        Assert.Equal(0, command.ExitCode);
+        Assert.AreEqual(0, command.ExitCode);
         var task = (await scope.Store.GetTaskGraphAsync(document.Graph.GraphId, Ct))!.Tasks[0];
-        Assert.Equal(TaskGraphTaskStatus.AwaitingAcceptance, task.Status);
-        Assert.Null(task.Acceptance);
-        Assert.Equal(TaskCommandOutcome.Passed, Assert.Single(task.Verifications).Completion!.Outcome);
+        Assert.AreEqual(TaskGraphTaskStatus.AwaitingAcceptance, task.Status);
+        Assert.IsNull(task.Acceptance);
+        Assert.AreEqual(TaskCommandOutcome.Passed, Assert.ContainsSingle(task.Verifications).Completion!.Outcome);
         Assert.Contains("worker=cli-reconciliation/v1", command.Text);
         Assert.Contains("stdout: bytes=0", command.Text);
-        Assert.Equal(0, scope.Client.Calls);
+        Assert.AreEqual(0, scope.Client.Calls);
     }
 
-    [Theory]
-    [InlineData("--resume")]
-    [InlineData("--pause")]
-    [InlineData("--cancel")]
+    [TestMethod]
+    [DataRow("--resume")]
+    [DataRow("--pause")]
+    [DataRow("--cancel")]
     public async Task LegacyWorkflowControls_RejectGraphAnchorsBeforeProvider(string command)
     {
         await using var scope = await Scope.OpenAsync();
@@ -222,13 +223,13 @@ public sealed class TaskGraphCommandsTests
         var console = AnsiConsole.Create(new AnsiConsoleSettings { Out = new AnsiConsoleOutput(output), Ansi = AnsiSupport.No });
         var code = await WorkflowCommands.ExecuteAsync(CliOptions.Parse([command, graph.AgentBinding!.RootRunId]), scope.Store,
             null!, NullAgentEventSink.Instance, NoProvider, Ct, console);
-        Assert.Equal(2, code);
+        Assert.AreEqual(2, code);
         Assert.Contains("belongs to task graph", output.ToString());
         Assert.Contains("--show-graph", output.ToString());
-        Assert.Equal(WorkflowControl.None, (await scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, Ct))!.Control);
+        Assert.AreEqual(WorkflowControl.None, (await scope.Store.GetTaskGraphAsync(graph.Graph.GraphId, Ct))!.Control);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LegacyWorkflowList_DoesNotExposeBoundGraphAnchor()
     {
         await using var scope = await Scope.OpenAsync();
@@ -237,20 +238,20 @@ public sealed class TaskGraphCommandsTests
         var console = AnsiConsole.Create(new AnsiConsoleSettings { Out = new AnsiConsoleOutput(output), Ansi = AnsiSupport.No });
         var code = await WorkflowCommands.ExecuteAsync(CliOptions.Parse(["--list-workflows"]), scope.Store,
             null!, NullAgentEventSink.Instance, NoProvider, Ct, console);
-        Assert.Equal(0, code);
+        Assert.AreEqual(0, code);
         Assert.Contains("No saved workflows", output.ToString());
         Assert.DoesNotContain(graph.AgentBinding!.RootRunId, output.ToString());
     }
 
-    [Fact]
+    [TestMethod]
     public void LazyLlmClient_DoesNotLoadProviderConfigurationUntilModelWork()
     {
         var calls = 0;
         var client = new LazyLlmClient(() => { calls++; throw new InvalidOperationException("Invalid provider environment"); });
-        Assert.Equal(0, calls);
+        Assert.AreEqual(0, calls);
         var request = new LlmRequest(RunId.New(), new SessionKey("test"), "local", "local", "test", [], [], TimeSpan.FromSeconds(5));
-        Assert.Throws<InvalidOperationException>(() => client.StreamAsync(request, Ct));
-        Assert.Equal(1, calls);
+        Assert.ThrowsExactly<InvalidOperationException>(() => client.StreamAsync(request, Ct));
+        Assert.AreEqual(1, calls);
     }
 
     private static TaskVerificationCompletion Completion(TaskCommandOutcome outcome, int? exitCode) =>
@@ -306,7 +307,8 @@ public sealed class TaskGraphCommandsTests
         }
         public WorkflowTaskDefinition Task(string id = "task") => new(id, "Produce controlled CLI output")
         {
-            ToolPolicy = new(ToolProfile.Coding), Resources = new() { ReadPaths = ["."], WritePaths = ["result.txt"] },
+            ToolPolicy = new(ToolProfile.Coding),
+            Resources = new() { ReadPaths = ["."], WritePaths = ["result.txt"] },
             ExpectedArtifacts = [new("output", "Controlled result", TaskArtifactKind.File, "result.txt")],
             AcceptanceCriteria = [new("integrity", "Output integrity") { ArtifactIds = ["output"] }]
         };
@@ -321,9 +323,13 @@ public sealed class TaskGraphCommandsTests
             if (commands)
             {
                 graph = graph with { Tasks = [Task() with { ExpectedArtifacts = [], AcceptanceCriteria = [new("build", "Build passes")] }] };
-                options = options with { ArtifactVerificationRules = [], VerificationAuthority = TaskVerificationAuthority.TrustedLocalProcess,
+                options = options with
+                {
+                    ArtifactVerificationRules = [],
+                    VerificationAuthority = TaskVerificationAuthority.TrustedLocalProcess,
                     VerificationProfiles = [new("build", Path.GetFullPath(Environment.ProcessPath!), "sha256:" + new string('a', 64), [], TimeSpan.FromSeconds(5))],
-                    CommandVerificationRules = [new("task", "build", "build")] };
+                    CommandVerificationRules = [new("task", "build", "build")]
+                };
             }
             return new(graph, options, 1);
         }
@@ -332,9 +338,13 @@ public sealed class TaskGraphCommandsTests
             options ??= Options();
             var binding = new TaskGraphAgentBinding(AgentTaskIdentity.RootRunId(graph.GraphId).Value, Source, Commit, Managed,
                 options.Provider, options.Model, options.RootToolPolicy, options.SharedBudget)
-            { ArtifactVerificationRules = options.ArtifactVerificationRules, DependencyMode = options.DependencyMode,
-                VerificationAuthority = options.VerificationAuthority, VerificationProfiles = options.VerificationProfiles,
-                CommandVerificationRules = options.CommandVerificationRules };
+            {
+                ArtifactVerificationRules = options.ArtifactVerificationRules,
+                DependencyMode = options.DependencyMode,
+                VerificationAuthority = options.VerificationAuthority,
+                VerificationProfiles = options.VerificationProfiles,
+                CommandVerificationRules = options.CommandVerificationRules
+            };
             return Store.AcceptAgentTaskGraphAsync(graph, Owner, 1, binding, Ct);
         }
         public async Task<string> WriteAsync<T>(T value)
@@ -360,7 +370,7 @@ public sealed class TaskGraphCommandsTests
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
-            Assert.True(process.ExitCode == 0, await error);
+            Assert.IsTrue(process.ExitCode == 0, await error);
             return await output;
         }
         public async ValueTask DisposeAsync()

@@ -3,9 +3,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class InMemoryAgentRegistryTests
 {
-    [Fact]
+    [TestMethod]
     public void Register_And_Get_ReturnsSameDefinition()
     {
         var registry = new InMemoryAgentRegistry();
@@ -14,30 +15,30 @@ public sealed class InMemoryAgentRegistryTests
         registry.Register(agent);
 
         var retrieved = registry.Get("coder");
-        Assert.NotNull(retrieved);
-        Assert.Equal("coder", retrieved.AgentId);
-        Assert.Equal(agent.DisplayName, retrieved.DisplayName);
+        Assert.IsNotNull(retrieved);
+        Assert.AreEqual("coder", retrieved.AgentId);
+        Assert.AreEqual(agent.DisplayName, retrieved.DisplayName);
     }
 
-    [Fact]
+    [TestMethod]
     public void Get_UnknownId_ReturnsNull()
     {
         var registry = new InMemoryAgentRegistry();
 
-        Assert.Null(registry.Get("nonexistent"));
+        Assert.IsNull(registry.Get("nonexistent"));
     }
 
-    [Fact]
+    [TestMethod]
     public void Get_IsCaseInsensitive()
     {
         var registry = new InMemoryAgentRegistry();
         registry.Register(CreateAgent("Coder"));
 
-        Assert.NotNull(registry.Get("coder"));
-        Assert.NotNull(registry.Get("CODER"));
+        Assert.IsNotNull(registry.Get("coder"));
+        Assert.IsNotNull(registry.Get("CODER"));
     }
 
-    [Fact]
+    [TestMethod]
     public void GetAll_ReturnsAllRegistered()
     {
         var registry = new InMemoryAgentRegistry();
@@ -45,10 +46,10 @@ public sealed class InMemoryAgentRegistryTests
         registry.Register(CreateAgent("reviewer"));
 
         var all = registry.GetAll();
-        Assert.Equal(2, all.Count);
+        Assert.AreEqual(2, all.Count);
     }
 
-    [Fact]
+    [TestMethod]
     public void Register_SameId_OverwritesPrevious()
     {
         var registry = new InMemoryAgentRegistry();
@@ -56,8 +57,8 @@ public sealed class InMemoryAgentRegistryTests
         registry.Register(CreateAgent("coder", displayName: "Coder v2"));
 
         var all = registry.GetAll();
-        Assert.Single(all);
-        Assert.Equal("Coder v2", all[0].DisplayName);
+        Assert.ContainsSingle(all);
+        Assert.AreEqual("Coder v2", all[0].DisplayName);
     }
 
     private static AgentDefinition CreateAgent(string id, string displayName = "Test Agent")

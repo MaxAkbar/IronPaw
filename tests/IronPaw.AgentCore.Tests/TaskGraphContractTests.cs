@@ -4,9 +4,10 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class TaskGraphContractTests
 {
-    [Fact]
+    [TestMethod]
     public void GraphJsonRoundTrip_PreservesPolicyResourcesBudgetsAndAcceptanceRequirements()
     {
         var graph = new WorkflowTaskGraph("feature-42", "Implement and verify the feature",
@@ -52,46 +53,46 @@ public sealed class TaskGraphContractTests
 
         var restored = RoundTrip(graph);
 
-        Assert.Equal(graph.GraphId, restored.GraphId);
-        Assert.Equal(graph.Objective, restored.Objective);
-        Assert.Equal(1, restored.SchemaVersion);
-        Assert.Equal(new[] { "implement", "verify" }, restored.Tasks.Select(task => task.TaskId));
+        Assert.AreEqual(graph.GraphId, restored.GraphId);
+        Assert.AreEqual(graph.Objective, restored.Objective);
+        Assert.AreEqual(1, restored.SchemaVersion);
+        Assert.AreSequenceEqual(new[] { "implement", "verify" }, restored.Tasks.Select(task => task.TaskId));
         var task = restored.Tasks[0];
-        Assert.Equal("Produce the implementation", task.Objective);
-        Assert.Equal("coding-agent", task.AgentId);
-        Assert.Equal(ToolProfile.Coding, task.ToolPolicy.Profile);
-        Assert.True(task.ToolPolicy.SenderIsOwner);
-        Assert.Equal(new[] { "read_file", "apply_patch", "run_command" }, task.ToolPolicy.AllowList);
-        Assert.Equal(new[] { "send_message" }, task.ToolPolicy.DenyList);
-        Assert.Equal(new[] { "group:files", "group:system" }, task.ToolPolicy.AllowedGroups);
-        Assert.Equal(2, task.ToolPolicy.SubagentDepth);
-        var inherited = Assert.IsType<ToolSelectionPolicy>(task.ToolPolicy.InheritedPolicy);
-        Assert.Equal(ToolProfile.Minimal, inherited.Profile);
-        Assert.False(inherited.SenderIsOwner);
-        Assert.Equal(new[] { "read_file", "apply_patch" }, inherited.AllowList);
-        Assert.Equal(new[] { "delete_file" }, inherited.DenyList);
-        Assert.Equal(new[] { "group:files" }, inherited.AllowedGroups);
-        Assert.Equal(1, inherited.SubagentDepth);
-        Assert.Null(inherited.InheritedPolicy);
-        Assert.Equal(new[] { "src", "tests" }, task.Resources.ReadPaths);
-        Assert.Equal(new[] { "src/Feature.cs", "tests/FeatureTests.cs" }, task.Resources.WritePaths);
-        Assert.Equal(new[] { "packages.example.test" }, task.Resources.NetworkHosts);
-        Assert.True(task.Resources.AllowProcessExecution);
-        Assert.False(task.Resources.AllowCredentialAccess);
-        Assert.True(task.Resources.AllowExternalMutations);
-        Assert.Equal(graph.Tasks[0].Budget, task.Budget);
-        Assert.Equal(graph.Tasks[0].ExpectedArtifacts.ToArray(), task.ExpectedArtifacts.ToArray());
-        Assert.Equal(new[] { "tests-pass", "notes-reviewed" }, task.AcceptanceCriteria.Select(item => item.CriterionId));
-        Assert.Equal("Feature tests pass", task.AcceptanceCriteria[0].Description);
-        Assert.True(task.AcceptanceCriteria[0].Required);
-        Assert.Equal(new[] { "implementation" }, task.AcceptanceCriteria[0].ArtifactIds);
-        Assert.False(task.AcceptanceCriteria[1].Required);
-        Assert.Empty(task.AcceptanceCriteria[1].ArtifactIds);
-        Assert.Equal(new[] { "implement" }, restored.Tasks[1].Dependencies);
-        Assert.Empty(task.Dependencies);
+        Assert.AreEqual("Produce the implementation", task.Objective);
+        Assert.AreEqual("coding-agent", task.AgentId);
+        Assert.AreEqual(ToolProfile.Coding, task.ToolPolicy.Profile);
+        Assert.IsTrue(task.ToolPolicy.SenderIsOwner);
+        Assert.AreSequenceEqual(new[] { "read_file", "apply_patch", "run_command" }, task.ToolPolicy.AllowList);
+        Assert.AreSequenceEqual(new[] { "send_message" }, task.ToolPolicy.DenyList);
+        Assert.AreSequenceEqual(new[] { "group:files", "group:system" }, task.ToolPolicy.AllowedGroups);
+        Assert.AreEqual(2, task.ToolPolicy.SubagentDepth);
+        var inherited = Assert.IsExactInstanceOfType<ToolSelectionPolicy>(task.ToolPolicy.InheritedPolicy);
+        Assert.AreEqual(ToolProfile.Minimal, inherited.Profile);
+        Assert.IsFalse(inherited.SenderIsOwner);
+        Assert.AreSequenceEqual(new[] { "read_file", "apply_patch" }, inherited.AllowList);
+        Assert.AreSequenceEqual(new[] { "delete_file" }, inherited.DenyList);
+        Assert.AreSequenceEqual(new[] { "group:files" }, inherited.AllowedGroups);
+        Assert.AreEqual(1, inherited.SubagentDepth);
+        Assert.IsNull(inherited.InheritedPolicy);
+        Assert.AreSequenceEqual(new[] { "src", "tests" }, task.Resources.ReadPaths);
+        Assert.AreSequenceEqual(new[] { "src/Feature.cs", "tests/FeatureTests.cs" }, task.Resources.WritePaths);
+        Assert.AreSequenceEqual(new[] { "packages.example.test" }, task.Resources.NetworkHosts);
+        Assert.IsTrue(task.Resources.AllowProcessExecution);
+        Assert.IsFalse(task.Resources.AllowCredentialAccess);
+        Assert.IsTrue(task.Resources.AllowExternalMutations);
+        Assert.AreEqual(graph.Tasks[0].Budget, task.Budget);
+        Assert.AreSequenceEqual(graph.Tasks[0].ExpectedArtifacts.ToArray(), task.ExpectedArtifacts.ToArray());
+        Assert.AreSequenceEqual(new[] { "tests-pass", "notes-reviewed" }, task.AcceptanceCriteria.Select(item => item.CriterionId));
+        Assert.AreEqual("Feature tests pass", task.AcceptanceCriteria[0].Description);
+        Assert.IsTrue(task.AcceptanceCriteria[0].Required);
+        Assert.AreSequenceEqual(new[] { "implementation" }, task.AcceptanceCriteria[0].ArtifactIds);
+        Assert.IsFalse(task.AcceptanceCriteria[1].Required);
+        Assert.IsEmpty(task.AcceptanceCriteria[1].ArtifactIds);
+        Assert.AreSequenceEqual(new[] { "implement" }, restored.Tasks[1].Dependencies);
+        Assert.IsEmpty(task.Dependencies);
     }
 
-    [Fact]
+    [TestMethod]
     public void ResultJsonRoundTrip_PreservesExactRevisionsEvidenceAndUnresolvedIssues()
     {
         var result = new WorkflowTaskResult("feature-42", "sha256:accepted-graph-content", "implement", WorkflowTaskStatus.Failed,
@@ -121,95 +122,95 @@ public sealed class TaskGraphContractTests
 
         var restored = RoundTrip(result);
 
-        Assert.Equal(result.GraphId, restored.GraphId);
-        Assert.Equal(result.GraphFingerprint, restored.GraphFingerprint);
-        Assert.Equal(result.TaskId, restored.TaskId);
-        Assert.Equal(result.Status, restored.Status);
-        Assert.Equal(result.Revision, restored.Revision);
-        Assert.Equal(result.Explanation, restored.Explanation);
-        Assert.Equal(result.Artifacts.ToArray(), restored.Artifacts.ToArray());
+        Assert.AreEqual(result.GraphId, restored.GraphId);
+        Assert.AreEqual(result.GraphFingerprint, restored.GraphFingerprint);
+        Assert.AreEqual(result.TaskId, restored.TaskId);
+        Assert.AreEqual(result.Status, restored.Status);
+        Assert.AreEqual(result.Revision, restored.Revision);
+        Assert.AreEqual(result.Explanation, restored.Explanation);
+        Assert.AreSequenceEqual(result.Artifacts.ToArray(), restored.Artifacts.ToArray());
         var evidence = restored.VerificationEvidence[0];
-        Assert.Equal("test-run-42", evidence.EvidenceId);
-        Assert.Equal("tests-pass", evidence.CriterionId);
-        Assert.Equal("revision-abc123", evidence.Revision);
-        Assert.Equal(TaskVerificationOutcome.Failed, evidence.Outcome);
-        Assert.Equal("One feature test failed", evidence.Summary);
-        Assert.Equal(new[] { "implementation", "test-report" }, evidence.ArtifactIds);
-        Assert.Equal("dotnet test --no-restore", evidence.Command);
-        Assert.Equal(1, evidence.ExitCode);
+        Assert.AreEqual("test-run-42", evidence.EvidenceId);
+        Assert.AreEqual("tests-pass", evidence.CriterionId);
+        Assert.AreEqual("revision-abc123", evidence.Revision);
+        Assert.AreEqual(TaskVerificationOutcome.Failed, evidence.Outcome);
+        Assert.AreEqual("One feature test failed", evidence.Summary);
+        Assert.AreSequenceEqual(new[] { "implementation", "test-report" }, evidence.ArtifactIds);
+        Assert.AreEqual("dotnet test --no-restore", evidence.Command);
+        Assert.AreEqual(1, evidence.ExitCode);
         var inconclusive = restored.VerificationEvidence[1];
-        Assert.Equal("review-43", inconclusive.EvidenceId);
-        Assert.Equal(TaskVerificationOutcome.Inconclusive, inconclusive.Outcome);
-        Assert.Empty(inconclusive.ArtifactIds);
-        Assert.Null(inconclusive.Command);
-        Assert.Null(inconclusive.ExitCode);
-        Assert.Equal(result.UnresolvedIssues.ToArray(), restored.UnresolvedIssues.ToArray());
+        Assert.AreEqual("review-43", inconclusive.EvidenceId);
+        Assert.AreEqual(TaskVerificationOutcome.Inconclusive, inconclusive.Outcome);
+        Assert.IsEmpty(inconclusive.ArtifactIds);
+        Assert.IsNull(inconclusive.Command);
+        Assert.IsNull(inconclusive.ExitCode);
+        Assert.AreSequenceEqual(result.UnresolvedIssues.ToArray(), restored.UnresolvedIssues.ToArray());
     }
 
-    [Fact]
+    [TestMethod]
     public void MinimalTaskJson_UsesEmptyCollectionsAndRestrictiveDefaults()
     {
         var task = JsonSerializer.Deserialize<WorkflowTaskDefinition>(
             """{"TaskId":"task-1","Objective":"Inspect the code"}""")!;
 
-        Assert.False(task.Dependencies.IsDefault);
-        Assert.Empty(task.Dependencies);
-        Assert.False(task.ExpectedArtifacts.IsDefault);
-        Assert.Empty(task.ExpectedArtifacts);
-        Assert.False(task.AcceptanceCriteria.IsDefault);
-        Assert.Empty(task.AcceptanceCriteria);
-        Assert.Null(task.AgentId);
-        Assert.Null(task.Budget);
-        Assert.Equal(ToolProfile.Minimal, task.ToolPolicy.Profile);
-        Assert.False(task.ToolPolicy.SenderIsOwner);
-        Assert.Null(task.ToolPolicy.AllowList);
-        Assert.Null(task.ToolPolicy.DenyList);
-        Assert.Null(task.ToolPolicy.AllowedGroups);
-        Assert.Null(task.ToolPolicy.InheritedPolicy);
-        Assert.False(task.Resources.ReadPaths.IsDefault);
-        Assert.Empty(task.Resources.ReadPaths);
-        Assert.False(task.Resources.WritePaths.IsDefault);
-        Assert.Empty(task.Resources.WritePaths);
-        Assert.False(task.Resources.NetworkHosts.IsDefault);
-        Assert.Empty(task.Resources.NetworkHosts);
-        Assert.False(task.Resources.AllowProcessExecution);
-        Assert.False(task.Resources.AllowCredentialAccess);
-        Assert.False(task.Resources.AllowExternalMutations);
+        Assert.IsFalse(task.Dependencies.IsDefault);
+        Assert.IsEmpty(task.Dependencies);
+        Assert.IsFalse(task.ExpectedArtifacts.IsDefault);
+        Assert.IsEmpty(task.ExpectedArtifacts);
+        Assert.IsFalse(task.AcceptanceCriteria.IsDefault);
+        Assert.IsEmpty(task.AcceptanceCriteria);
+        Assert.IsNull(task.AgentId);
+        Assert.IsNull(task.Budget);
+        Assert.AreEqual(ToolProfile.Minimal, task.ToolPolicy.Profile);
+        Assert.IsFalse(task.ToolPolicy.SenderIsOwner);
+        Assert.IsNull(task.ToolPolicy.AllowList);
+        Assert.IsNull(task.ToolPolicy.DenyList);
+        Assert.IsNull(task.ToolPolicy.AllowedGroups);
+        Assert.IsNull(task.ToolPolicy.InheritedPolicy);
+        Assert.IsFalse(task.Resources.ReadPaths.IsDefault);
+        Assert.IsEmpty(task.Resources.ReadPaths);
+        Assert.IsFalse(task.Resources.WritePaths.IsDefault);
+        Assert.IsEmpty(task.Resources.WritePaths);
+        Assert.IsFalse(task.Resources.NetworkHosts.IsDefault);
+        Assert.IsEmpty(task.Resources.NetworkHosts);
+        Assert.IsFalse(task.Resources.AllowProcessExecution);
+        Assert.IsFalse(task.Resources.AllowCredentialAccess);
+        Assert.IsFalse(task.Resources.AllowExternalMutations);
 
         var restored = RoundTrip(task);
-        Assert.Empty(restored.Dependencies);
-        Assert.Empty(restored.ExpectedArtifacts);
-        Assert.Empty(restored.AcceptanceCriteria);
-        Assert.Null(restored.AgentId);
-        Assert.Null(restored.Budget);
-        Assert.Null(restored.ToolPolicy.AllowList);
+        Assert.IsEmpty(restored.Dependencies);
+        Assert.IsEmpty(restored.ExpectedArtifacts);
+        Assert.IsEmpty(restored.AcceptanceCriteria);
+        Assert.IsNull(restored.AgentId);
+        Assert.IsNull(restored.Budget);
+        Assert.IsNull(restored.ToolPolicy.AllowList);
     }
 
-    [Fact]
+    [TestMethod]
     public void MinimalResultJson_UsesEmptyArtifactsEvidenceAndIssues()
     {
         var result = JsonSerializer.Deserialize<WorkflowTaskResult>(
             """{"GraphId":"graph-1","GraphFingerprint":"sha256:accepted-graph-content","TaskId":"task-1","Status":0,"Revision":"revision-1","Explanation":"Waiting for a dependency"}""")!;
 
-        Assert.Equal("graph-1", result.GraphId);
-        Assert.Equal("sha256:accepted-graph-content", result.GraphFingerprint);
-        Assert.Equal(WorkflowTaskStatus.Blocked, result.Status);
-        Assert.False(result.Artifacts.IsDefault);
-        Assert.Empty(result.Artifacts);
-        Assert.False(result.VerificationEvidence.IsDefault);
-        Assert.Empty(result.VerificationEvidence);
-        Assert.False(result.UnresolvedIssues.IsDefault);
-        Assert.Empty(result.UnresolvedIssues);
+        Assert.AreEqual("graph-1", result.GraphId);
+        Assert.AreEqual("sha256:accepted-graph-content", result.GraphFingerprint);
+        Assert.AreEqual(WorkflowTaskStatus.Blocked, result.Status);
+        Assert.IsFalse(result.Artifacts.IsDefault);
+        Assert.IsEmpty(result.Artifacts);
+        Assert.IsFalse(result.VerificationEvidence.IsDefault);
+        Assert.IsEmpty(result.VerificationEvidence);
+        Assert.IsFalse(result.UnresolvedIssues.IsDefault);
+        Assert.IsEmpty(result.UnresolvedIssues);
 
         var restored = RoundTrip(result);
-        Assert.Equal(result.GraphId, restored.GraphId);
-        Assert.Equal(result.GraphFingerprint, restored.GraphFingerprint);
-        Assert.Empty(restored.Artifacts);
-        Assert.Empty(restored.VerificationEvidence);
-        Assert.Empty(restored.UnresolvedIssues);
+        Assert.AreEqual(result.GraphId, restored.GraphId);
+        Assert.AreEqual(result.GraphFingerprint, restored.GraphFingerprint);
+        Assert.IsEmpty(restored.Artifacts);
+        Assert.IsEmpty(restored.VerificationEvidence);
+        Assert.IsEmpty(restored.UnresolvedIssues);
     }
 
-    [Fact]
+    [TestMethod]
     public void OptionalNullsRoundTrip_WithoutBecomingEmptyOrImplicitPermissions()
     {
         var task = new WorkflowTaskDefinition("task-1", "Read the code")
@@ -224,22 +225,22 @@ public sealed class TaskGraphContractTests
         var restoredTask = RoundTrip(task);
         var restoredEvidence = RoundTrip(evidence);
 
-        Assert.Null(restoredTask.AgentId);
-        Assert.Null(restoredTask.ToolPolicy.AllowList);
-        Assert.Null(restoredTask.ToolPolicy.DenyList);
-        Assert.Null(restoredTask.ToolPolicy.AllowedGroups);
-        Assert.Null(restoredTask.ToolPolicy.InheritedPolicy);
-        Assert.NotNull(restoredTask.Budget);
-        Assert.Null(restoredTask.Budget.MaxTotalTokens);
-        Assert.Null(restoredTask.Budget.MaxExecutionTime);
-        Assert.Null(Assert.Single(restoredTask.ExpectedArtifacts).RelativePath);
-        Assert.True(Assert.Single(restoredTask.ExpectedArtifacts).Required);
-        Assert.True(Assert.Single(restoredTask.AcceptanceCriteria).Required);
-        Assert.Null(restoredEvidence.Command);
-        Assert.Null(restoredEvidence.ExitCode);
+        Assert.IsNull(restoredTask.AgentId);
+        Assert.IsNull(restoredTask.ToolPolicy.AllowList);
+        Assert.IsNull(restoredTask.ToolPolicy.DenyList);
+        Assert.IsNull(restoredTask.ToolPolicy.AllowedGroups);
+        Assert.IsNull(restoredTask.ToolPolicy.InheritedPolicy);
+        Assert.IsNotNull(restoredTask.Budget);
+        Assert.IsNull(restoredTask.Budget.MaxTotalTokens);
+        Assert.IsNull(restoredTask.Budget.MaxExecutionTime);
+        Assert.IsNull(Assert.ContainsSingle(restoredTask.ExpectedArtifacts).RelativePath);
+        Assert.IsTrue(Assert.ContainsSingle(restoredTask.ExpectedArtifacts).Required);
+        Assert.IsTrue(Assert.ContainsSingle(restoredTask.AcceptanceCriteria).Required);
+        Assert.IsNull(restoredEvidence.Command);
+        Assert.IsNull(restoredEvidence.ExitCode);
     }
 
-    [Fact]
+    [TestMethod]
     public void ImmutableCollectionSnapshots_DoNotFollowMutationsOfSourceLists()
     {
         var dependencies = new List<string> { "prepare" };
@@ -276,16 +277,16 @@ public sealed class TaskGraphContractTests
         tasks.Clear();
         issues.Clear();
 
-        Assert.Single(graph.Tasks);
+        Assert.ContainsSingle(graph.Tasks);
         var saved = graph.Tasks[0];
-        Assert.Equal(new[] { "prepare" }, saved.Dependencies);
-        Assert.Equal(new[] { "src" }, saved.Resources.ReadPaths);
-        Assert.Equal("report", Assert.Single(saved.ExpectedArtifacts).ArtifactId);
-        Assert.Equal(new[] { "report" }, Assert.Single(saved.AcceptanceCriteria).ArtifactIds);
-        Assert.Equal(new[] { "Review pending" }, result.UnresolvedIssues);
+        Assert.AreSequenceEqual(new[] { "prepare" }, saved.Dependencies);
+        Assert.AreSequenceEqual(new[] { "src" }, saved.Resources.ReadPaths);
+        Assert.AreEqual("report", Assert.ContainsSingle(saved.ExpectedArtifacts).ArtifactId);
+        Assert.AreSequenceEqual(new[] { "report" }, Assert.ContainsSingle(saved.AcceptanceCriteria).ArtifactIds);
+        Assert.AreSequenceEqual(new[] { "Review pending" }, result.UnresolvedIssues);
     }
 
-    [Fact]
+    [TestMethod]
     public void ValidatedGraph_RecursivelySnapshotsMutablePolicyLists()
     {
         var allowed = new List<string> { "read_file" };
@@ -308,8 +309,8 @@ public sealed class TaskGraphContractTests
 
         var validation = TaskGraphValidator.Validate(proposed);
 
-        Assert.True(validation.IsValid);
-        var accepted = Assert.IsType<WorkflowTaskGraph>(validation.Graph);
+        Assert.IsTrue(validation.IsValid);
+        var accepted = Assert.IsExactInstanceOfType<WorkflowTaskGraph>(validation.Graph);
         allowed.Add("run_command");
         denied.Clear();
         groups[0] = "group:messaging";
@@ -317,14 +318,14 @@ public sealed class TaskGraphContractTests
         inheritedDenied.Clear();
         inheritedGroups.Add("group:messaging");
 
-        var policy = Assert.Single(accepted.Tasks).ToolPolicy;
-        Assert.Equal(new[] { "read_file" }, policy.AllowList);
-        Assert.Equal(new[] { "delete_file" }, policy.DenyList);
-        Assert.Equal(new[] { "group:files" }, policy.AllowedGroups);
-        var inherited = Assert.IsType<ToolSelectionPolicy>(policy.InheritedPolicy);
-        Assert.Equal(new[] { "read_file", "apply_patch" }, inherited.AllowList);
-        Assert.Equal(new[] { "send_message" }, inherited.DenyList);
-        Assert.Equal(new[] { "group:files", "group:system" }, inherited.AllowedGroups);
+        var policy = Assert.ContainsSingle(accepted.Tasks).ToolPolicy;
+        Assert.AreSequenceEqual(new[] { "read_file" }, policy.AllowList);
+        Assert.AreSequenceEqual(new[] { "delete_file" }, policy.DenyList);
+        Assert.AreSequenceEqual(new[] { "group:files" }, policy.AllowedGroups);
+        var inherited = Assert.IsExactInstanceOfType<ToolSelectionPolicy>(policy.InheritedPolicy);
+        Assert.AreSequenceEqual(new[] { "read_file", "apply_patch" }, inherited.AllowList);
+        Assert.AreSequenceEqual(new[] { "send_message" }, inherited.DenyList);
+        Assert.AreSequenceEqual(new[] { "group:files", "group:system" }, inherited.AllowedGroups);
         AssertCannotMutate(policy.AllowList!);
         AssertCannotMutate(policy.DenyList!);
         AssertCannotMutate(policy.AllowedGroups!);
@@ -337,8 +338,8 @@ public sealed class TaskGraphContractTests
     {
         if (collection is ICollection<string> mutableInterface)
         {
-            Assert.True(mutableInterface.IsReadOnly);
-            Assert.Throws<NotSupportedException>(() => mutableInterface.Add("injected-tool"));
+            Assert.IsTrue(mutableInterface.IsReadOnly);
+            Assert.ThrowsExactly<NotSupportedException>(() => mutableInterface.Add("injected-tool"));
         }
     }
 

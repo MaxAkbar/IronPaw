@@ -4,9 +4,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class ToolPolicyEvaluatorTests
 {
-    [Fact]
+    [TestMethod]
     public void Apply_DelegationPreservesRestrictionsFromEveryAncestor()
     {
         var root = new ToolSelectionPolicy(ToolProfile.Full, SenderIsOwner: true,
@@ -16,10 +17,10 @@ public sealed class ToolPolicyEvaluatorTests
         var child = new ToolSelectionPolicy(ToolProfile.Full, SenderIsOwner: true,
             SubagentDepth: 2, InheritedPolicy: parent);
         var tools = BuiltInToolFactory.CreateDefault(Path.GetTempPath());
-        Assert.Equal("current_time", Assert.Single(ToolPolicyEvaluator.Apply(tools, child)).Descriptor.Name);
+        Assert.AreEqual("current_time", Assert.ContainsSingle(ToolPolicyEvaluator.Apply(tools, child)).Descriptor.Name);
     }
 
-    [Fact]
+    [TestMethod]
     public void Apply_CodingProfile_AllowsFsSystemAndSkills()
     {
         var tools = new ITool[]
@@ -43,7 +44,7 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.DoesNotContain("web", names);
     }
 
-    [Fact]
+    [TestMethod]
     public void Apply_RespectsOwnerOnlyAllowDenyAndSubagentDepth()
     {
         var tools = new ITool[]
@@ -68,16 +69,16 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.DoesNotContain("fs_owner", names);
     }
 
-    [Fact]
+    [TestMethod]
     public void BuiltInToolFactory_AddsAdditionalTools()
     {
         var additional = new[] { new StubTool("custom", "group:skills") };
         var result = BuiltInToolFactory.CreateDefault(Path.GetTempPath(), additional);
 
-        Assert.Contains(result, tool => tool.Descriptor.Name == "custom");
+        Assert.Contains(tool => tool.Descriptor.Name == "custom", result);
     }
 
-    [Fact]
+    [TestMethod]
     public void Apply_NonOwner_ExcludesOwnerOnlyBuiltInTools()
     {
         var tools = BuiltInToolFactory.CreateDefault(Path.GetTempPath());
@@ -94,7 +95,7 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.Contains("current_time", names);
     }
 
-    [Fact]
+    [TestMethod]
     public void Apply_Owner_IncludesOwnerOnlyBuiltInTools()
     {
         var tools = BuiltInToolFactory.CreateDefault(Path.GetTempPath());
@@ -109,7 +110,7 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.Contains("read_file", names);
     }
 
-    [Fact]
+    [TestMethod]
     public void Apply_FullProfile_IncludesAgentGroup()
     {
         var tools = new ITool[]
@@ -127,7 +128,7 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.Contains("system", names);
     }
 
-    [Fact]
+    [TestMethod]
     public void Apply_FullProfile_IncludesWebGroup()
     {
         var tools = new ITool[]
@@ -143,7 +144,7 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.Contains("system", names);
     }
 
-    [Fact]
+    [TestMethod]
     public void Apply_WebProfile_IncludesWebMessagingAndSystemOnly()
     {
         var tools = new ITool[]
@@ -165,7 +166,7 @@ public sealed class ToolPolicyEvaluatorTests
         Assert.DoesNotContain("invoke_agent", names);
     }
 
-    [Fact]
+    [TestMethod]
     public void Apply_CodingProfile_IncludesAgentGroup()
     {
         var tools = new ITool[]

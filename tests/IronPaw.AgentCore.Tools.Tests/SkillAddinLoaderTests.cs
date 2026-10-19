@@ -4,9 +4,10 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tools.Tests;
 
+[TestClass]
 public sealed class SkillAddinLoaderTests
 {
-    [Fact]
+    [TestMethod]
     public async Task LoadFromDirectories_LoadsExampleAddinAndExecutesSkillTool()
     {
         var directory = CreateTempDirectory();
@@ -18,9 +19,9 @@ public sealed class SkillAddinLoaderTests
 
             var loadResult = SkillAddinLoader.LoadFromDirectories([directory]);
 
-            Assert.Equal(2, loadResult.SkillsLoaded);
-            Assert.Contains(loadResult.LoadedSkills, skill => skill.SkillName == "slugify");
-            Assert.Contains(loadResult.LoadedSkills, skill => skill.SkillName == "text_stats");
+            Assert.AreEqual(2, loadResult.SkillsLoaded);
+            Assert.Contains(skill => skill.SkillName == "slugify", loadResult.LoadedSkills);
+            Assert.Contains(skill => skill.SkillName == "text_stats", loadResult.LoadedSkills);
 
             var slugifyTool = loadResult.SkillTools.Single(tool => tool.Descriptor.Name == "skill_slugify");
             var toolCall = new ToolCall(
@@ -30,8 +31,8 @@ public sealed class SkillAddinLoaderTests
             var context = new ToolExecutionContext(new RunId("run-1"), new SessionKey("session-1"), "local", "rule", CallerIdentity.LocalOwner());
 
             var result = await slugifyTool.ExecuteAsync(toolCall, context, CancellationToken.None);
-            Assert.False(result.IsError);
-            Assert.Equal("hello-test-world", result.Content);
+            Assert.IsFalse(result.IsError);
+            Assert.AreEqual("hello-test-world", result.Content);
         }
         finally
         {
@@ -39,7 +40,7 @@ public sealed class SkillAddinLoaderTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public void LoadFromDirectories_MultipleAssembliesWithSameSkills_AssignsUniqueToolNames()
     {
         var directory = CreateTempDirectory();
@@ -52,8 +53,8 @@ public sealed class SkillAddinLoaderTests
             var loadResult = SkillAddinLoader.LoadFromDirectories([directory]);
             var toolNames = loadResult.LoadedSkills.Select(skill => skill.ToolName).ToArray();
 
-            Assert.Equal(4, loadResult.SkillsLoaded);
-            Assert.Equal(toolNames.Length, toolNames.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            Assert.AreEqual(4, loadResult.SkillsLoaded);
+            Assert.AreEqual(toolNames.Length, toolNames.Distinct(StringComparer.OrdinalIgnoreCase).Count());
             Assert.Contains("skill_slugify", toolNames);
             Assert.Contains("skill_slugify_2", toolNames);
             Assert.Contains("skill_text_stats", toolNames);

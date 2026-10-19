@@ -3,9 +3,10 @@ using IronPaw.AgentCore.Persistence;
 
 namespace IronPaw.AgentCore.Persistence.Tests;
 
+[TestClass]
 public sealed class JsonRunHistoryStoreTests
 {
-    [Fact]
+    [TestMethod]
     public async Task RecordAndLoadAll_RoundTrips()
     {
         var root = CreateTempDirectory();
@@ -17,9 +18,9 @@ public sealed class JsonRunHistoryStoreTests
             await store.RecordAsync(summary, CancellationToken.None);
 
             var loaded = await store.LoadAllAsync(CancellationToken.None);
-            Assert.Single(loaded);
-            Assert.Equal("run1", loaded[0].RunId);
-            Assert.Equal("Hello world", loaded[0].UserPrompt);
+            Assert.ContainsSingle(loaded);
+            Assert.AreEqual("run1", loaded[0].RunId);
+            Assert.AreEqual("Hello world", loaded[0].UserPrompt);
         }
         finally
         {
@@ -27,7 +28,7 @@ public sealed class JsonRunHistoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LoadBySession_FiltersCorrectly()
     {
         var root = CreateTempDirectory();
@@ -39,10 +40,10 @@ public sealed class JsonRunHistoryStoreTests
             await store.RecordAsync(CreateSummary("r3", "session-a", "Prompt C"), CancellationToken.None);
 
             var sessionA = await store.LoadBySessionAsync(new SessionKey("session-a"), CancellationToken.None);
-            Assert.Equal(2, sessionA.Count);
+            Assert.AreEqual(2, sessionA.Count);
 
             var sessionB = await store.LoadBySessionAsync(new SessionKey("session-b"), CancellationToken.None);
-            Assert.Single(sessionB);
+            Assert.ContainsSingle(sessionB);
         }
         finally
         {
@@ -50,7 +51,7 @@ public sealed class JsonRunHistoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task GetByRunId_ReturnsCorrectEntry()
     {
         var root = CreateTempDirectory();
@@ -61,8 +62,8 @@ public sealed class JsonRunHistoryStoreTests
             await store.RecordAsync(CreateSummary("run-def", "s1", "Second"), CancellationToken.None);
 
             var result = await store.GetAsync("run-def", CancellationToken.None);
-            Assert.NotNull(result);
-            Assert.Equal("Second", result!.UserPrompt);
+            Assert.IsNotNull(result);
+            Assert.AreEqual("Second", result!.UserPrompt);
         }
         finally
         {
@@ -70,7 +71,7 @@ public sealed class JsonRunHistoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task GetByRunId_ReturnsNullForMissing()
     {
         var root = CreateTempDirectory();
@@ -78,7 +79,7 @@ public sealed class JsonRunHistoryStoreTests
         {
             var store = new JsonRunHistoryStore(Path.Combine(root, "run-history.jsonl"));
             var result = await store.GetAsync("nonexistent", CancellationToken.None);
-            Assert.Null(result);
+            Assert.IsNull(result);
         }
         finally
         {
@@ -86,7 +87,7 @@ public sealed class JsonRunHistoryStoreTests
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task LoadAll_ReturnsEmptyForNewStore()
     {
         var root = CreateTempDirectory();
@@ -94,7 +95,7 @@ public sealed class JsonRunHistoryStoreTests
         {
             var store = new JsonRunHistoryStore(Path.Combine(root, "run-history.jsonl"));
             var loaded = await store.LoadAllAsync(CancellationToken.None);
-            Assert.Empty(loaded);
+            Assert.IsEmpty(loaded);
         }
         finally
         {

@@ -3,9 +3,10 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class SafetyTests
 {
-    [Fact]
+    [TestMethod]
     public void TranscriptSanitizer_RemovesOrphans_AndAddsSyntheticMissingResults()
     {
         var sanitizer = new TranscriptSanitizer();
@@ -21,16 +22,16 @@ public sealed class SafetyTests
 
         var repaired = sanitizer.Repair(transcript);
 
-        Assert.Equal(4, repaired.Count);
-        Assert.Contains(repaired, message => message.Role == ChatRole.Tool && message.ToolCallId == "c1");
-        Assert.DoesNotContain(repaired, message => message.Content == "duplicate");
-        Assert.DoesNotContain(repaired, message => message.Content == "orphan");
+        Assert.AreEqual(4, repaired.Count);
+        Assert.Contains(message => message.Role == ChatRole.Tool && message.ToolCallId == "c1", repaired);
+        Assert.DoesNotContain(message => message.Content == "duplicate", repaired);
+        Assert.DoesNotContain(message => message.Content == "orphan", repaired);
 
-        var synthetic = Assert.Single(repaired, message => message.Role == ChatRole.Tool && message.ToolCallId == "c2");
+        var synthetic = Assert.ContainsSingle(message => message.Role == ChatRole.Tool && message.ToolCallId == "c2", repaired);
         Assert.Contains("Synthetic tool error", synthetic.Content, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
+    [TestMethod]
     public void ToolResultTruncator_TruncatesOnlyToolMessages()
     {
         var truncator = new ToolResultTruncator(maxToolResultShare: 0.2);
@@ -45,7 +46,7 @@ public sealed class SafetyTests
         var user = result[0];
         var tool = result[1];
 
-        Assert.Equal("hello", user.Content);
+        Assert.AreEqual("hello", user.Content);
         Assert.StartsWith(new string('x', 256), tool.Content, StringComparison.Ordinal);
         Assert.Contains("[tool result truncated to 256 chars]", tool.Content, StringComparison.Ordinal);
     }

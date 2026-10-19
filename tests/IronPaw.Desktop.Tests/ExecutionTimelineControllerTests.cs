@@ -4,9 +4,10 @@ using IronPaw.Desktop;
 
 namespace IronPaw.Desktop.Tests;
 
+[TestClass]
 public sealed class ExecutionTimelineControllerTests
 {
-    [Fact]
+    [TestMethod]
     public async Task SelectionChangeCancelsOldReadAndRejectsItsLateSuccess()
     {
         using var reads = new TimelineReadCoordinator();
@@ -15,18 +16,18 @@ public sealed class ExecutionTimelineControllerTests
         CancellationToken oldToken = default;
         var displayed = new List<string>();
         var oldRead = reads.ReadAsync(ct => { oldToken = ct; return first.Task; }, value => displayed.Add(value.Id), Fail);
-        Assert.True(reads.IsReading);
+        Assert.IsTrue(reads.IsReading);
         var newRead = reads.ReadAsync(_ => second.Task, value => displayed.Add(value.Id), Fail);
-        Assert.True(oldToken.IsCancellationRequested);
+        Assert.IsTrue(oldToken.IsCancellationRequested);
         second.SetResult(Snapshot("second"));
         await newRead;
-        Assert.False(reads.IsReading);
+        Assert.IsFalse(reads.IsReading);
         first.SetResult(Snapshot("first"));
         await oldRead;
-        Assert.Equal(new[] { "second" }, displayed);
+        Assert.AreSequenceEqual(new[] { "second" }, displayed);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task StaleFailureCannotReplaceCurrentSelectionAndOldReadCannotClearNewReadState()
     {
         using var reads = new TimelineReadCoordinator();
@@ -37,16 +38,16 @@ public sealed class ExecutionTimelineControllerTests
         var newRead = reads.ReadAsync(_ => second.Task, _ => { }, error => errors.Add(error.Message));
         first.SetException(new InvalidOperationException("stale error"));
         await oldRead;
-        Assert.True(reads.IsReading);
-        Assert.Empty(errors);
+        Assert.IsTrue(reads.IsReading);
+        Assert.IsEmpty(errors);
         second.SetResult(Snapshot("current"));
         await newRead;
-        Assert.False(reads.IsReading);
+        Assert.IsFalse(reads.IsReading);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public async Task ClearingOrClosingTheViewRejectsLateResults(bool closing)
     {
         using var reads = new TimelineReadCoordinator();
@@ -55,33 +56,33 @@ public sealed class ExecutionTimelineControllerTests
         var applied = false;
         var read = reads.ReadAsync(ct => { token = ct; return source.Task; }, _ => applied = true, Fail);
         if (closing) reads.Dispose(); else reads.Invalidate();
-        Assert.True(token.IsCancellationRequested);
+        Assert.IsTrue(token.IsCancellationRequested);
         source.SetResult(Snapshot("late"));
         await read;
-        Assert.False(applied);
-        Assert.False(reads.IsReading);
+        Assert.IsFalse(applied);
+        Assert.IsFalse(reads.IsReading);
         if (closing)
         {
             var invoked = false;
             await reads.ReadAsync(_ => { invoked = true; return source.Task; }, _ => applied = true, Fail);
-            Assert.False(invoked);
+            Assert.IsFalse(invoked);
         }
     }
 
-    [Fact]
+    [TestMethod]
     public async Task CurrentFailureIsShownAndNextRefreshCanRecover()
     {
         using var reads = new TimelineReadCoordinator();
         Exception? shown = null;
         await reads.ReadAsync(_ => Task.FromException<ExecutionTimelineSnapshot>(new InvalidOperationException("store unavailable")), _ => { }, error => shown = error);
-        Assert.Equal("store unavailable", shown?.Message);
-        Assert.False(reads.IsReading);
+        Assert.AreEqual("store unavailable", shown?.Message);
+        Assert.IsFalse(reads.IsReading);
         string? id = null;
         await reads.ReadAsync(_ => Task.FromResult(Snapshot("recovered")), value => id = value.Id, Fail);
-        Assert.Equal("recovered", id);
+        Assert.AreEqual("recovered", id);
     }
 
-    [Fact]
+    [TestMethod]
     public async Task BrowsingOrdinaryWorkflowUsesSavedEvidenceWithoutInvokingCommands()
     {
         var store = new WorkflowRecoveryControllerTests.MemoryStore();
@@ -89,19 +90,19 @@ public sealed class ExecutionTimelineControllerTests
         store.Runs[root.RunId] = root;
         var agent = new WorkflowRecoveryControllerTests.FakeOrchestrator(store);
         var controller = new ExecutionTimelineController(new(agent, store), null);
-        var choice = Assert.Single(await controller.ListAsync(default));
+        var choice = Assert.ContainsSingle(await controller.ListAsync(default));
         var snapshot = await controller.InspectAsync(choice, default);
-        Assert.Equal(ExecutionTimelineKind.Workflow, choice.Kind);
-        Assert.Equal("Run finished", snapshot.Status);
-        Assert.Equal("root", snapshot.Id);
-        Assert.Equal("run/root/1", Assert.Single(snapshot.Events).Id);
-        Assert.Empty(agent.Calls);
-        Assert.Equal(root, store.Runs[root.RunId]);
+        Assert.AreEqual(ExecutionTimelineKind.Workflow, choice.Kind);
+        Assert.AreEqual("Run finished", snapshot.Status);
+        Assert.AreEqual("root", snapshot.Id);
+        Assert.AreEqual("run/root/1", Assert.ContainsSingle(snapshot.Events).Id);
+        Assert.IsEmpty(agent.Calls);
+        Assert.AreEqual(root, store.Runs[root.RunId]);
     }
 
-    [Theory]
-    [InlineData("other", true)]
-    [InlineData("local-owner", false)]
+    [TestMethod]
+    [DataRow("other", true)]
+    [DataRow("local-owner", false)]
     public async Task ForeignCallerCannotBrowseOrControlSavedWork(string callerId, bool isOwner)
     {
         var store = new WorkflowRecoveryControllerTests.MemoryStore();
@@ -115,13 +116,13 @@ public sealed class ExecutionTimelineControllerTests
         var agent = new WorkflowRecoveryControllerTests.FakeOrchestrator(store);
         var recovery = new WorkflowRecoveryController(agent, store);
         var controller = new ExecutionTimelineController(recovery, null);
-        Assert.Equal("root", Assert.Single(await controller.ListAsync(default)).Id);
+        Assert.AreEqual("root", Assert.ContainsSingle(await controller.ListAsync(default)).Id);
         var snapshot = await controller.InspectAsync(new(ExecutionTimelineKind.Workflow, "root", "title", root.UpdatedAt), default);
-        Assert.Equal("root", Assert.Single(snapshot.Tasks).Id);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => controller.InspectAsync(new(ExecutionTimelineKind.Workflow, "foreign", "title", foreign.UpdatedAt), default));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => recovery.CancelAsync(new("foreign"), default));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => recovery.PauseAsync(new("foreign"), default));
-        Assert.Empty(agent.Calls);
+        Assert.AreEqual("root", Assert.ContainsSingle(snapshot.Tasks).Id);
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => controller.InspectAsync(new(ExecutionTimelineKind.Workflow, "foreign", "title", foreign.UpdatedAt), default));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => recovery.CancelAsync(new("foreign"), default));
+        await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => recovery.PauseAsync(new("foreign"), default));
+        Assert.IsEmpty(agent.Calls);
     }
 
     private static ExecutionTimelineSnapshot Snapshot(string id) => new(id, id, "Ready", "summary", DateTimeOffset.UtcNow, [], [], 0);

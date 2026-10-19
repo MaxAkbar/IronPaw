@@ -7,11 +7,12 @@ using IronPaw.AgentCore.Tools;
 
 namespace IronPaw.AgentCore.Tests;
 
+[TestClass]
 public sealed class WorkflowDelegationTests
 {
-    [Theory]
-    [InlineData(7, true)]
-    [InlineData(6, false)]
+    [TestMethod]
+    [DataRow(7, true)]
+    [DataRow(6, false)]
     public async Task ThreeDelegationLevels_RetainRootAndImmediateParent_AndShareAdmissionBudget(int limit, bool succeeds)
     {
         var path = Path.Combine(Path.GetTempPath(), "IronPawDelegationTests", Guid.NewGuid().ToString("n"));
@@ -36,29 +37,32 @@ public sealed class WorkflowDelegationTests
             if (succeeds)
             {
                 var result = await runtime.RunAsync(request, NullAgentEventSink.Instance, CancellationToken.None);
-                Assert.Equal(AgentRunStatus.Succeeded, result.Status);
-                Assert.Equal(7, ((WorkflowUsage)result.Metadata["rootWorkflowUsage"]!).ModelCalls);
+                Assert.AreEqual(AgentRunStatus.Succeeded, result.Status);
+                Assert.AreEqual(7, ((WorkflowUsage)result.Metadata["rootWorkflowUsage"]!).ModelCalls);
             }
             else
-                Assert.Equal(AgentRunStatus.BudgetExhausted, (await runtime.RunAsync(request,
+                Assert.AreEqual(AgentRunStatus.BudgetExhausted, (await runtime.RunAsync(request,
                     NullAgentEventSink.Instance, CancellationToken.None)).Status);
 
             var checkpoints = await store.ListAsync(CancellationToken.None);
-            Assert.Equal(4, checkpoints.Count);
-            var root = Assert.Single(checkpoints, cp => cp.ParentRunId is null);
-            var level1 = Assert.Single(checkpoints, cp => cp.Request.UserInput == "level1");
-            var level2 = Assert.Single(checkpoints, cp => cp.Request.UserInput == "level2");
-            var level3 = Assert.Single(checkpoints, cp => cp.Request.UserInput == "level3");
-            Assert.All(checkpoints, cp => Assert.Equal(root.RunId, cp.RootRunId));
-            Assert.Equal(root.RunId, level1.ParentRunId);
-            Assert.Equal(level1.RunId, level2.ParentRunId);
-            Assert.Equal(level2.RunId, level3.ParentRunId);
-            Assert.Equal(limit, model.CallCount);
+            Assert.AreEqual(4, checkpoints.Count);
+            var root = Assert.ContainsSingle(cp => cp.ParentRunId is null, checkpoints);
+            var level1 = Assert.ContainsSingle(cp => cp.Request.UserInput == "level1", checkpoints);
+            var level2 = Assert.ContainsSingle(cp => cp.Request.UserInput == "level2", checkpoints);
+            var level3 = Assert.ContainsSingle(cp => cp.Request.UserInput == "level3", checkpoints);
+            foreach (var cp in checkpoints)
+            {
+                Assert.AreEqual(root.RunId, cp.RootRunId);
+            }
+            Assert.AreEqual(root.RunId, level1.ParentRunId);
+            Assert.AreEqual(level1.RunId, level2.ParentRunId);
+            Assert.AreEqual(level2.RunId, level3.ParentRunId);
+            Assert.AreEqual(limit, model.CallCount);
             var ledger = await ((IWorkflowStore)store).GetUsageAsync(new RunId(root.RunId), CancellationToken.None);
-            Assert.Equal(limit, ledger.ModelCalls);
-            Assert.Equal(4, ledger.ToolCalls);
-            Assert.Equal(succeeds ? WorkflowStatus.Succeeded : WorkflowStatus.BudgetExhausted, root.Status);
-            Assert.Null(root.LeaseOwner);
+            Assert.AreEqual(limit, ledger.ModelCalls);
+            Assert.AreEqual(4, ledger.ToolCalls);
+            Assert.AreEqual(succeeds ? WorkflowStatus.Succeeded : WorkflowStatus.BudgetExhausted, root.Status);
+            Assert.IsNull(root.LeaseOwner);
         }
         finally { Directory.Delete(path, recursive: true); }
     }
