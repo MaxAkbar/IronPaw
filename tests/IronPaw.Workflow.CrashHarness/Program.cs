@@ -119,6 +119,8 @@ internal static class Program
 {
     public static async Task Main(string[] args)
     {
+        if (args.FirstOrDefault() == "--mcp-fixture") { await McpProcessFixture.RunAsync(args.Skip(1).ToArray()); return; }
+        if (args.FirstOrDefault() == "--mcp-parent") { await McpProcessFixture.RunHostAsync(args[1], args[2]); return; }
         var root = args[0];
         var point = Enum.Parse<CrashPoint>(args[1]);
         await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(root));
@@ -142,8 +144,10 @@ internal static class Program
             ? [new CrashEffectTool(root, point), new CrashHumanInputTool()]
             : [new CrashEffectTool(root, point)];
         var orchestrator = CrashFixture.CreateOrchestrator(root, store, scheduler, new CrashModel(root, point), tools);
-        var request = point == CrashPoint.AfterReservedModelAttempt ? CrashFixture.Request with {
-            Budget = new(MaxTotalTokens: 2048, MaxExecutionTime: TimeSpan.FromSeconds(30)) } : CrashFixture.Request;
+        var request = point == CrashPoint.AfterReservedModelAttempt ? CrashFixture.Request with
+        {
+            Budget = new(MaxTotalTokens: 2048, MaxExecutionTime: TimeSpan.FromSeconds(30))
+        } : CrashFixture.Request;
         var result = await orchestrator.RunAsync(request, NullAgentEventSink.Instance, CancellationToken.None);
         if (point == CrashPoint.AfterHumanWait)
         {

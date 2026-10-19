@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\IronPaw.AgentCore.Browser\IronPaw.AgentCore.Browser.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.5.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.5.1" />
+    <PackageReference Include="MSTest.Analyzers" Version="4.5.1" PrivateAssets="all" />
+    <PackageReference Include="coverlet.collector" Version="10.1.0" />
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+    <Compile Include="..\TestAssemblyConfiguration.cs" Link="TestAssemblyConfiguration.cs" />
+    <Compile Include="..\LoopbackHttpServer.cs" Link="LoopbackHttpServer.cs" />
+  </ItemGroup>
+</Project>

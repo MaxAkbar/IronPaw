@@ -4,7 +4,7 @@ This guide walks you through building, running, and understanding your first Iro
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later
+- The [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) version pinned in `global.json`
 - A terminal (PowerShell, Bash, or Windows Terminal)
 - **Optional**: An API key for [OpenAI](https://platform.openai.com/), [Anthropic](https://console.anthropic.com/), or a local model runner ([Ollama](https://ollama.com/), [LM Studio](https://lmstudio.ai/))
 

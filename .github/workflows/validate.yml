@@ -17,7 +17,7 @@ jobs:
   windows:
     name: Windows Release
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         shell: pwsh
@@ -28,6 +28,8 @@ jobs:
       ANTHROPIC_API_KEY: ''
       OLLAMA_API_KEY: ''
       LMSTUDIO_API_KEY: ''
+      PLAYWRIGHT_SKIP_BROWSER_GC: '1'
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/ironpaw-browsers
     steps:
       - name: Check out source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -37,13 +39,38 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
-      - name: Validate application
+      - name: Install pinned browser
+        run: |
+          dotnet build src/IronPaw.Cli/IronPaw.Cli.csproj -c Release -warnaserror
+          if ($LASTEXITCODE -ne 0) { throw 'Browser installer host build failed.' }
+          ./src/IronPaw.Cli/bin/Release/net10.0/playwright.ps1 install chromium --only-shell
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned browser installation failed.' }
+      - name: Run full Release validation
         run: ./eng/Validate.ps1 -OutputDirectory "${{ runner.temp }}/ironpaw-validation"
+      - name: Audit dependency advisories
+        run: ./eng/Audit-Dependencies.ps1 -OutputDirectory "${{ runner.temp }}/ironpaw-dependencies"
+      - name: Package and test installed applications
+        run: ./eng/Package.ps1 -ValidationDirectory "${{ runner.temp }}/ironpaw-validation" -OutputDirectory "${{ runner.temp }}/ironpaw-package"
       - name: Retain test and build evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: windows-release-validation
-          path: ${{ runner.temp }}/ironpaw-validation
+          path: |
+            ${{ runner.temp }}/ironpaw-validation
+            ${{ runner.temp }}/ironpaw-dependencies
+            ${{ runner.temp }}/ironpaw-package/smoke
+            ${{ runner.temp }}/ironpaw-package/smoke.log
+            ${{ runner.temp }}/ironpaw-package/publish.log
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain qualified Windows bundle
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ironpaw-windows-x64
+          path: |
+            ${{ runner.temp }}/ironpaw-package/IronPaw-win-x64.zip
+            ${{ runner.temp }}/ironpaw-package/sha256sums.txt
+            ${{ runner.temp }}/ironpaw-package/release-manifest.json
           if-no-files-found: error
           retention-days: 14

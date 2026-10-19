@@ -1,6 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Compile Include="..\Shared\LocalReleaseSmoke.cs" Link="LocalReleaseSmoke.cs" />
+    <ProjectReference Include="..\IronPaw.AgentCore.Browser\IronPaw.AgentCore.Browser.csproj" />
+    <ProjectReference Include="..\IronPaw.AgentCore.Mcp\IronPaw.AgentCore.Mcp.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Abstractions\IronPaw.AgentCore.Abstractions.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore\IronPaw.AgentCore.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Tools\IronPaw.AgentCore.Tools.csproj" />

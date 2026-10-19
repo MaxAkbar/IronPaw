@@ -2,7 +2,17 @@ using IronPaw.AgentCore;
 using IronPaw.AgentCore.Abstractions;
 using IronPaw.AgentCore.Providers;
 using IronPaw.Cli;
+using IronPaw.AgentCore.Mcp;
+using IronPaw.AgentCore.Browser;
 using Spectre.Console;
+
+if (args.FirstOrDefault() == "--smoke-test")
+{
+    try { CliOptions.RejectRemovedOptions(args); }
+    catch (ArgumentException error) { Console.Error.WriteLine(error.Message); return 2; }
+    if (args.Length != 2) { Console.Error.WriteLine("--smoke-test requires only a new evidence directory."); return 2; }
+    return await ReleaseSmokeCommand.ExecuteAsync(args[1]);
+}
 
 CliOptions options;
 try
@@ -33,6 +43,20 @@ if (!options.TryValidate(out var validationError))
 
 if (options.ValidateEvaluationConfigFile is not null)
     return await EvaluationConfigurationCommands.ExecuteAsync(options, CancellationToken.None);
+
+if (options.InspectMcpConfigFile is not null)
+{
+    try { using var review = McpHost.Load(options.InspectMcpConfigFile); Console.WriteLine(review.Review); return 0; }
+    catch (Exception error) when (error is IOException or ArgumentException or System.Text.Json.JsonException or UnauthorizedAccessException)
+    { ConsoleUi.RenderError("Invalid connector configuration: " + error.Message); return 2; }
+}
+
+if (options.InspectBrowserConfigFile is not null)
+{
+    try { Console.WriteLine(BrowserConfiguration.Load(options.InspectBrowserConfigFile).Review); return 0; }
+    catch (Exception error) when (error is IOException or ArgumentException or System.Text.Json.JsonException or UnauthorizedAccessException)
+    { ConsoleUi.RenderError("Invalid browser configuration: " + error.Message); return 2; }
+}
 
 if (options.ValidateConfigFile is not null)
 {
@@ -88,7 +112,8 @@ Console.CancelKeyPress += (_, eventArgs) =>
 
 try
 {
-    using var bootstrap = AppBootstrapper.Build(options.MessageTtlDays, llmOptionOverrides, settings: settings, legacyEnvironment: savedCommand);
+    using var bootstrap = AppBootstrapper.Build(options.MessageTtlDays, llmOptionOverrides, settings: settings, legacyEnvironment: savedCommand, mcpConfigFile: options.McpConfigFile, browserConfigFile: options.BrowserConfigFile);
+    if (bootstrap.Connectors is { } connectors) Console.WriteLine(connectors.Review);
     ConsoleUi.RenderBanner();
     if (TaskGraphCommands.IsGraphCommand(options))
     {
@@ -178,6 +203,8 @@ try
             prompt,
             options.ApprovalRequiredTools,
             options.ResolveWorkflowBudget(),
+            bootstrap.Connectors,
+            bootstrap.Browser,
             cancellation.Token);
 
         return runExitCode;
@@ -241,6 +268,8 @@ try
             promptOrCommand,
             options.ApprovalRequiredTools,
             options.ResolveWorkflowBudget(),
+            bootstrap.Connectors,
+            bootstrap.Browser,
             cancellation.Token);
 
         if (runExitCode is 130)
@@ -318,8 +347,12 @@ static async Task<int> RunSingleAsync(
     string prompt,
     IReadOnlyCollection<string>? approvalRequiredTools,
     WorkflowBudget? workflowBudget,
+    McpHost? connectors,
+    BrowserRuntime browser,
     CancellationToken ct)
 {
+    var requestedRunId = RunId.New();
+    var retainBrowser = false;
     try
     {
         AnsiConsole.Write(new Rule("[grey]Event Stream[/]").LeftJustified());
@@ -329,13 +362,15 @@ static async Task<int> RunSingleAsync(
             UserInput: prompt,
             Provider: provider,
             Model: model,
-            ToolPolicy: new ToolSelectionPolicy(Profile: profile),
+            ToolPolicy: browser.Grant(connectors?.Grant(new(Profile: profile)) ?? new ToolSelectionPolicy(Profile: profile)),
             Caller: CallerIdentity.LocalOwner(),
+            RequestedRunId: requestedRunId,
             AutoCreateSkills: autoCreateSkills,
-            ApprovalRequiredTools: approvalRequiredTools,
+            ApprovalRequiredTools: browser.RequireApprovals(connectors?.RequireApprovals(approvalRequiredTools) ?? approvalRequiredTools),
             Budget: workflowBudget);
 
         var result = await orchestrator.RunAsync(request, eventSink, ct);
+        retainBrowser = result.Status is AgentRunStatus.AwaitingInput or AgentRunStatus.Paused;
         ConsoleUi.RenderFinal(result);
         return result.Status is AgentRunStatus.Succeeded or AgentRunStatus.AwaitingInput or AgentRunStatus.Paused ? 0 : 2;
     }
@@ -349,4 +384,5 @@ static async Task<int> RunSingleAsync(
         ConsoleUi.RenderError($"Run failed: {ex.Message}");
         return 1;
     }
+    finally { if (!retainBrowser) await browser.ReleaseRunAsync(requestedRunId); }
 }

@@ -65,12 +65,15 @@ internal sealed record CliOptions(
     string? EvaluationGraphId = null,
     string? ConfigFile = null,
     string? ValidateConfigFile = null,
-    IReadOnlyCollection<string>? ConfigurationOverrides = null)
+    IReadOnlyCollection<string>? ConfigurationOverrides = null,
+    string? McpConfigFile = null,
+    string? InspectMcpConfigFile = null,
+    string? BrowserConfigFile = null,
+    string? InspectBrowserConfigFile = null)
 {
     public static CliOptions Parse(string[] args)
     {
-        if (args.Any(arg => arg == "--store" || arg.StartsWith("--store=", StringComparison.Ordinal)))
-            throw new ArgumentException("--store has been removed. IronPaw now uses CSharpDB (application.cdb). JSON data imports automatically; SQLite files are preserved but are not imported. Remove --store and its value.");
+        RejectRemovedOptions(args);
         var provider = "local";
         string? model = null;
         var session = "default";
@@ -132,6 +135,10 @@ internal sealed record CliOptions(
         string? configFile = null;
         string? validateConfigFile = null;
         var configurationOverrides = new List<string>();
+        string? mcpConfigFile = null;
+        string? inspectMcpConfigFile = null;
+        string? browserConfigFile = null;
+        string? inspectBrowserConfigFile = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -152,6 +159,18 @@ internal sealed record CliOptions(
                 graphBindingOverrides.Add(arg);
             switch (arg)
             {
+                case "--browser-config":
+                    browserConfigFile = ReadValue(args, ref i, arg);
+                    break;
+                case "--inspect-browser-config":
+                    inspectBrowserConfigFile = ReadValue(args, ref i, arg);
+                    break;
+                case "--mcp-config":
+                    mcpConfigFile = ReadValue(args, ref i, arg);
+                    break;
+                case "--inspect-mcp-config":
+                    inspectMcpConfigFile = ReadValue(args, ref i, arg);
+                    break;
                 case "--config":
                     configFile = ReadValue(args, ref i, arg);
                     break;
@@ -431,11 +450,32 @@ internal sealed record CliOptions(
             runEvaluationFile, resumeEvaluationId, showEvaluationId, reconcileEvaluationId,
             evaluationOutputDirectory, evaluationRequestId, evaluationRuntimeOverrides,
             reconcileEvaluationCommandId, reconcileEvaluationTaskId, reconcileEvaluationToolId, evaluationGraphId,
-            configFile, validateConfigFile, configurationOverrides);
+            configFile, validateConfigFile, configurationOverrides, mcpConfigFile, inspectMcpConfigFile, browserConfigFile, inspectBrowserConfigFile);
     }
 
     public bool TryValidate(out string? error)
     {
+        if (InspectBrowserConfigFile is not null)
+        {
+            if (string.IsNullOrWhiteSpace(InspectBrowserConfigFile) || !string.IsNullOrWhiteSpace(Prompt) || ConfigurationOverrides?.Any(option => option != "--inspect-browser-config") == true)
+            { error = "--inspect-browser-config is a standalone, non-executing configuration review."; return false; }
+            error = null; return true;
+        }
+        if (BrowserConfigFile is not null && (string.IsNullOrWhiteSpace(BrowserConfigFile) || GraphCommandCount > 0 ||
+            EvaluationCommandCount > 0 || ValidateConfigFile is not null || ValidateEvaluationConfigFile is not null ||
+            ListWorkflows || PauseRunId is not null || CancelRunId is not null || ListSkills))
+        { error = "--browser-config applies only to ordinary new workflows or --resume. Saved browser grants cannot expand."; return false; }
+        if (InspectMcpConfigFile is not null)
+        {
+            if (string.IsNullOrWhiteSpace(InspectMcpConfigFile) || !string.IsNullOrWhiteSpace(Prompt) || ConfigurationOverrides?.Any(option => option != "--inspect-mcp-config") == true)
+            { error = "--inspect-mcp-config is a standalone, non-executing configuration review."; return false; }
+            error = null;
+            return true;
+        }
+        if (McpConfigFile is not null && (string.IsNullOrWhiteSpace(McpConfigFile) || GraphCommandCount > 0 ||
+            EvaluationCommandCount > 0 || ValidateConfigFile is not null || ValidateEvaluationConfigFile is not null ||
+            ListWorkflows || PauseRunId is not null || CancelRunId is not null || ListSkills))
+        { error = "--mcp-config applies only to ordinary new workflows or --resume. Inspection and task graphs do not enable connectors."; return false; }
         if (ValidateConfigFile is not null)
         {
             if (string.IsNullOrWhiteSpace(ValidateConfigFile) || ConfigFile is not null || ConfigurationOverrides?.Count > 0)
@@ -589,13 +629,16 @@ internal sealed record CliOptions(
     {
         settings = settings.RequireValid();
         var providerExplicit = GraphBindingOverrides?.Any(flag => flag is "--provider" or "-p") == true;
-        var llm = new RuntimeLlmSettings {
+        var llm = new RuntimeLlmSettings
+        {
             ContextWindowTokens = LlmContextWindowTokens ?? settings.Llm.ContextWindowTokens,
             SafetyMarginTokens = LlmSafetyMarginTokens ?? settings.Llm.SafetyMarginTokens,
             MinimumOutputTokensPerRequest = LlmMinOutputTokensPerRequest ?? settings.Llm.MinimumOutputTokensPerRequest,
-            MaxAutoContinuationPasses = LlmMaxAutoContinuationPasses ?? settings.Llm.MaxAutoContinuationPasses };
+            MaxAutoContinuationPasses = LlmMaxAutoContinuationPasses ?? settings.Llm.MaxAutoContinuationPasses
+        };
         (settings with { Llm = llm }).RequireValid();
-        return this with {
+        return this with
+        {
             Provider = providerExplicit ? Provider : settings.Provider,
             Model = Model ?? (providerExplicit && !Provider.Equals(settings.Provider, StringComparison.OrdinalIgnoreCase) ? null : settings.Model),
             MaxTotalTokens = MaxTotalTokens ?? settings.MaxTotalTokens,
@@ -796,6 +839,12 @@ internal sealed record CliOptions(
         : new WorkflowBudget(MaxTotalTokens: MaxTotalTokens,
             MaxExecutionTime: MaxExecutionSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null);
 
+    internal static void RejectRemovedOptions(IEnumerable<string> args)
+    {
+        if (args.Any(arg => arg == "--store" || arg.StartsWith("--store=", StringComparison.Ordinal)))
+            throw new ArgumentException("--store has been removed. IronPaw now uses CSharpDB (application.cdb). JSON data imports automatically; SQLite files are preserved but are not imported. Remove --store and its value.");
+    }
+
     public static void PrintHelp()
     {
         var table = new Table()
@@ -806,6 +855,10 @@ internal sealed record CliOptions(
         table.AddRow("-h, --help", "Show help");
         table.AddRow("--config <path>", "Use a reviewed settings file for a new run (otherwise IRONPAW_CONFIG or shared user settings)");
         table.AddRow("--validate-config <path>", "Validate application settings without opening application state or contacting a provider");
+        table.AddRow("--inspect-mcp-config <path>", "Review connector targets and exact tool grants without connecting or opening state");
+        table.AddRow("--mcp-config <path>", "Enable reviewed connectors for a workflow; every connector call requires approval");
+        table.AddRow("--inspect-browser-config <path>", "Review JavaScript browser sites and limits without starting Chromium");
+        table.AddRow("--browser-config <path>", "Use the JavaScript browser with explicit site and mutation grants");
         table.AddRow("-p, --provider <name>", "Provider: local | openai | ollama | lmstudio | anthropic (default: local)");
         table.AddRow("-m, --model <id>", "Model id (provider-specific default if omitted)");
         table.AddRow("-s, --session <key>", "Session key (default: default)");

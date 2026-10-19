@@ -35,6 +35,8 @@ It provides a Spectre.Console command-center UI on top of the same headless orch
 ## CLI options
 
 - `-h`, `--help`
+- `--inspect-mcp-config <file>` / `--mcp-config <file>` (review/enable exact connector grants; every operation requires approval)
+- `--inspect-browser-config <file>` / `--browser-config <file>` (review/enable JavaScript browser origin/mutation grants)
 - `-p`, `--provider <name>`
 - `-m`, `--model <id>`
 - `-s`, `--session <key>`

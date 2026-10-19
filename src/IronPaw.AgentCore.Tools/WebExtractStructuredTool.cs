@@ -3,8 +3,9 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tools;
 
-public sealed class WebExtractStructuredTool : ITool
+public sealed class WebExtractStructuredTool : IBrowserBoundTool
 {
+    public string? BrowserBinding => (_webBrowser as IBoundWebBrowserService)?.BrowserBinding;
     private readonly IWebBrowserService _webBrowser;
 
     public WebExtractStructuredTool(IWebBrowserService webBrowser)
@@ -70,6 +71,8 @@ public sealed class WebExtractStructuredTool : ITool
 
     public async Task<ToolResult> ExecuteAsync(ToolCall call, ToolExecutionContext context, CancellationToken ct)
     {
+        if (context.ToolPolicy is { } policy ? ToolPolicyEvaluator.Apply([this], policy).Count != 1 : BrowserBinding is not null)
+            return ToolResult.Error("The reviewed browser configuration is not granted by this workflow and all its ancestors.");
         if (!TryGetOptionalInt(call.Arguments, "max_items", out var maxItems, out var maxItemsError))
         {
             return ToolResult.Error(maxItemsError!);
@@ -91,6 +94,7 @@ public sealed class WebExtractStructuredTool : ITool
         }
 
         var sessionId = WebToolSessionId.ResolveOrCreate(TryGetOptionalString(call.Arguments, "session_id"), context);
+        (_webBrowser as IWebBrowserRunScope)?.BindSession(sessionId, context.ScopeRunId);
         var request = new WebStructuredDataRequest(
             SessionId: sessionId,
             IncludeMetadata: includeMetadata ?? true,

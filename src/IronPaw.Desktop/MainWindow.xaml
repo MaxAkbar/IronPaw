@@ -73,6 +73,7 @@
                                Text="Headless orchestration, tool policy pipeline, and provider routing"
                                FontSize="14"
                                Foreground="#D2E4FF" />
+                    <TextBlock x:Name="WorkspaceTextBlock" Foreground="#D2E4FF" Margin="0,6,0,0" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
             </Border>
 
@@ -131,24 +132,7 @@
                             <Button x:Name="CancelButton" Content="Cancel permanently" Click="CancelButton_OnClick" IsEnabled="False" Background="#B85A2A" BorderBrush="#91461F" />
                         </WrapPanel>
 
-                        <Expander Grid.Row="5" Header="New workflow limits and approvals" Margin="0,10,0,0">
-                            <StackPanel>
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
-                                    <StackPanel Margin="0,0,8,0">
-                                        <TextBlock Text="Token limit (optional)" FontSize="12" />
-                                        <TextBox x:Name="TokenLimitTextBox" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="1">
-                                        <TextBlock Text="Execution seconds (optional)" FontSize="12" />
-                                        <TextBox x:Name="ExecutionLimitTextBox" />
-                                    </StackPanel>
-                                </Grid>
-                                <TextBlock Text="Tools requiring approval (comma-separated names)" TextWrapping="Wrap" FontSize="12" />
-                                <TextBox x:Name="ApprovalToolsTextBox" />
-                                <TextBlock Text="Limits cover the root and its agents. Paused time and waiting for answers do not consume execution time." TextWrapping="Wrap" FontSize="12" />
-                            </StackPanel>
-                        </Expander>
+                        <Button Grid.Row="5" Content="Workflow settings…" Click="OpenSettings_OnClick" HorizontalAlignment="Left" Margin="0,10,0,0" />
 
                         <Grid Grid.Row="6" Margin="0,12,0,0">
                             <Grid.RowDefinitions>
@@ -199,6 +183,7 @@
                                 </ListBox>
                             </DockPanel>
                         </TabItem>
+
                         <TabItem Header="Workflow recovery">
                             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                 <StackPanel Margin="10">
@@ -358,6 +343,37 @@
                                     <TextBlock x:Name="TimelineStatusTextBlock" TextWrapping="Wrap" FontSize="12" Foreground="#526174" Margin="0,10,0,4" />
                                 </StackPanel>
                             </ScrollViewer>
+                        </TabItem>
+                        <TabItem x:Name="WorkflowSettingsTab" Header="Workflow settings">
+                            <Expander x:Name="AdvancedSettingsExpander" Header="New workflow limits and approvals" IsExpanded="True" Margin="10">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel>
+                                    <TextBlock Text="Tool access for new workflows" />
+                                    <ComboBox x:Name="ToolProfileComboBox" SelectedIndex="0">
+                                        <ComboBoxItem Content="Coding" Tag="Coding" /><ComboBoxItem Content="Web browsing" Tag="Web" /><ComboBoxItem Content="All available tools" Tag="Full" />
+                                    </ComboBox>
+                                    <Button x:Name="LoadBrowserButton" Content="Review JavaScript browser sites…" Click="LoadBrowser_OnClick" />
+                                    <TextBlock x:Name="BrowserStatusTextBlock" Text="Basic browsing. Choose web browsing or all available tools to use web tools." TextWrapping="Wrap" FontSize="12" Margin="0,8,0,4" />
+                                    <Button x:Name="LoadConnectorsButton" Content="Review connector configuration…" Click="LoadConnectors_OnClick" />
+                                    <CheckBox x:Name="EnableConnectorsCheckBox" Content="Enable the reviewed connectors for new workflows" Margin="0,8,0,8" IsEnabled="False" />
+                                    <TextBlock x:Name="ConnectorsStatusTextBlock" Text="Connectors are disabled. Each enabled operation requires approval." TextWrapping="Wrap" FontSize="12" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,8,0">
+                                            <TextBlock Text="Token limit (optional)" FontSize="12" />
+                                            <TextBox x:Name="TokenLimitTextBox" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="Execution seconds (optional)" FontSize="12" />
+                                            <TextBox x:Name="ExecutionLimitTextBox" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock Text="Tools requiring approval (comma-separated names)" TextWrapping="Wrap" FontSize="12" />
+                                    <TextBox x:Name="ApprovalToolsTextBox" />
+                                    <TextBlock Text="Limits cover the root and its agents. Paused time and waiting for answers do not consume execution time." TextWrapping="Wrap" FontSize="12" />
+                                </StackPanel>
+                                </ScrollViewer>
+                            </Expander>
                         </TabItem>
                     </TabControl>
                 </Border>

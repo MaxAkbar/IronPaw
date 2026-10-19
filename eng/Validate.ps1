@@ -51,7 +51,7 @@ try {
     $dirty = -not [string]::IsNullOrWhiteSpace((& git status --porcelain=v1 | Out-String))
     $sourceManifest = @(Get-ValidationSourceManifest) | ConvertTo-Json -Depth 4
     $sourceManifest | Set-Content -LiteralPath (Join-Path $output 'source-manifest.json') -Encoding utf8
-    Invoke-ValidationDotnet -Arguments @('restore', 'IronPaw.sln')
+    Invoke-ValidationDotnet -Arguments @('restore', 'IronPaw.sln', '-p:NuGetAuditMode=all', '-warnaserror')
     Invoke-ValidationDotnet -Arguments @('build', 'IronPaw.sln', '--configuration', 'Release', '--no-restore', '-warnaserror')
     Invoke-ValidationDotnet -Arguments @('test', 'IronPaw.sln', '--configuration', 'Release', '--no-build', '--no-restore', '--maxcpucount:1', '--logger', 'trx', '--results-directory', $testResults)
     $results = @(Get-ChildItem -LiteralPath $testResults -Filter '*.trx')
@@ -70,6 +70,8 @@ try {
     if ($failed -ne 0 -or $skipped -ne 0 -or $total -ne $passed) { throw 'All tests must pass; skipped tests do not satisfy the release check.' }
     Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net10.0/IronPaw.Cli.dll', '--validate-config', 'docs/examples/settings.example.json')
     Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net10.0/IronPaw.Cli.dll', '--validate-evaluation-config', 'docs/examples/live-evaluation.example.json')
+    Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net10.0/IronPaw.Cli.dll', '--inspect-mcp-config', 'docs/examples/mcp.example.json')
+    Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net10.0/IronPaw.Cli.dll', '--inspect-browser-config', 'docs/examples/browser.example.json')
     if ($sourceManifest -cne (@(Get-ValidationSourceManifest) | ConvertTo-Json -Depth 4)) {
         throw 'Source files changed during validation. Preserve this evidence and rerun against a stable source tree.'
     }

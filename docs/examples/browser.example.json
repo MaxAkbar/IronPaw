@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "allowedOrigins": ["https://example.com"],
+  "allowPrivateNetwork": false,
+  "allowMutations": false,
+  "maxSessions": 8,
+  "timeoutSeconds": 30,
+  "maxRequestsPerAction": 64,
+  "maxResponseBytes": 2097152,
+  "maxSessionBytes": 16777216
+}

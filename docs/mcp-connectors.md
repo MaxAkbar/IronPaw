@@ -1,15 +1,72 @@
 # MCP connector adapter
 
-The first MCP slice provides an embedding API in `IronPaw.AgentCore.Mcp`, using
+IronPaw provides an embedding API and reviewed CLI/Desktop host setup in `IronPaw.AgentCore.Mcp`, using
 [the official C# SDK](https://github.com/modelcontextprotocol/csharp-sdk/tree/v2.2.0).
 It turns explicitly reviewed server tools into ordinary `ITool` instances so the existing
 orchestrator owns tool hooks, approvals, durable intent/results, shared workflow budgets,
 execution events and diagnostic spans. Construction and registry discovery do no transport I/O.
 
-This is a foundation for host integration. The shipped CLI and Desktop do not yet load MCP
-configuration, launch connector processes, or connect to remote servers. Application settings
-continue to exclude process authority, connector grants and credentials. Isolated graph task
-registries continue to expose only their mediated filesystem tools.
+The CLI and Desktop can load explicit connector configurations, launch Windows stdio servers or
+connect to exact HTTP endpoints. Application settings continue to exclude process authority,
+connector grants and credentials. Isolated graph task registries continue to expose only their
+mediated filesystem tools. No server or configuration is discovered automatically from a repository.
+
+## CLI and Desktop setup
+
+`--inspect-mcp-config <file>` validates and displays targets, launch arguments, executable/input
+hashes, credential references/identities, schemas, tool identities and limits. It reads no secret
+values, opens no application state and performs no process/transport I/O. The HTTP
+[example document](examples/mcp.example.json) is a structural example, not an operational server.
+
+`--mcp-config <file>` selects the reviewed file for an ordinary workflow or `--resume`. Each new
+workflow explicitly grants those exact connector identities and requires per-operation approval.
+Use the existing saved-workflow approval controls to approve or deny the concrete operation.
+Inspection, graph and evaluation commands cannot enable connectors. A saved resume requires the
+same binding and retains its original permissions and approval decisions.
+
+In Desktop, open the workflow settings tab and choose **Review connector configuration**. Review
+the complete document summary before accepting it. A checkbox controls whether new workflows get
+the grants; saved workflows still retain their accepted grants. Restart to replace a reviewed
+configuration. Default specialists receive no connector grants, and parent grants cannot expand
+their policies.
+
+Hosted transports have explicit incoming line, total received-byte and frame/request limits before
+SDK decoding. Stderr is discarded in fixed-size buffers and charged against the same byte bound.
+The defaults are 1 MiB per line, 16 MiB per connection and 4,096 frames/requests. Session exhaustion
+poisons the connection; it does not trigger a reconnect or retry of an uncertain effect.
+
+For `kind: "stdio"`, supply an absolute `command`, its `executableSha256`, an absolute
+`workingDirectory` and an argument array. Optional `reviewedFiles` map absolute launch/script/input
+paths to SHA-256 values. They are checked again at launch and held read-only during the session;
+reviewed inputs are limited to 64 files and 512 MiB. The executable is capped at 512 MiB. Pin the
+server's launch files and relevant dependencies, not just a generic `dotnet`/Node launcher. These
+hashes cannot attest every dependency or prevent a trusted server changing its own behavior.
+
+Arguments are passed without a shell. Only SystemRoot/WINDIR/TEMP/TMP are inherited automatically;
+`environmentVariables` explicitly map child names to source environment-variable names. Secrets
+are resolved at dispatch, never embedded in the document or review. Environment references require
+a nonsecret `credentialIdentity`, which must change when the granted credential identity changes.
+
+Windows stdio servers are assigned a kill-on-close job with default `processLimits` of
+`maxMemoryMiB: 512`, `maxProcesses: 8` and `maxCpuPercent: 25`. Supported ranges are 64-4,096 MiB,
+1-32 processes and 1-100 percent CPU. Failure to apply the job limits stops startup. Disposal kills
+the owned process tree, and a parent-termination fixture verifies job cleanup even for a server
+that intentionally survives pipe EOF. Assignment occurs immediately after process creation; this
+is lifetime/resource control for a trusted server, not a hostile-code startup/security sandbox.
+The process still has its OS user's filesystem/network authority. Hosted stdio requires Windows;
+other platforms can use HTTP or supply their own reviewed embedding transport.
+
+For `kind: "http"`, supply an exact HTTPS `endpoint` without user info, query or fragment. Only
+explicitly granted loopback servers may use HTTP. The host pins an allowed resolved IP for each
+connection, disables proxies/cookies/redirects and rejects private addresses unless
+`allowPrivateNetwork` is explicitly true. Authentication uses an optional
+`bearerTokenEnvironmentVariable` and required nonsecret `credentialIdentity`; no ambient/default
+credentials or OAuth discovery flow are enabled. Obtain/rotate the scoped bearer externally.
+HTTP session cleanup is bounded. Connection loss never causes automatic transport reconnection.
+
+Every normalized transport option, process limit, reviewed input, credential reference/identity,
+catalog and adapter limit contributes to the tool binding. Tool grants do not sandbox a stdio
+server's internals, measure its billing or authorize extra model calls.
 
 ## Reviewed bindings and permission grants
 
@@ -90,7 +147,7 @@ policy. None of those controls is implied by registering an SDK transport in thi
 ## Validation, limits and returned content
 
 Schemas are validated with [JsonSchema.Net](https://docs.json-everything.net/schema/basics/).
-This slice accepts self-contained Draft 2020-12 object input schemas; output schemas may
+This slice accepts self-contained Draft 7 and Draft 2020-12 object input schemas; output schemas may
 describe other JSON types. References, IDs, custom vocabularies, alternate dialects, `pattern`
 and `patternProperties` are rejected at registration. Schemas are limited to 65,536 UTF-8
 bytes, 16 subschema levels and 1,024 subschemas. Those deliberate restrictions avoid reference
@@ -153,7 +210,9 @@ timeouts, serialized calls, disposal, human approvals, persistent tool budgets, 
 CSharpDB reopen, partial/terminal replay, changed bindings, delegated callers and reconciliation.
 It uses no external connector, network service, provider or credentials.
 
-Still pending for Step 4: reviewed CLI/Desktop connector setup, transport launch/network
-controls and bounds, authentication and secret delivery, external-server interoperability,
-and representative release workflows. This adapter does not establish production connector
-qualification, OS isolation, live-provider quality, cost or latency superiority.
+Host tests also exercise real subprocesses and loopback HTTP peers, bearer delivery, redirect/private
+network rejection, executable/input drift, traffic exhaustion, poisoned connections, process
+disposal and abrupt parent termination. Release bundles run the actual CLI/Desktop executables
+with fresh local state. Third-party production-server interoperability and hosted CI require their
+own observed results; fixture peers do not establish universal connector compatibility, hostile-code
+OS isolation, live-provider quality or cost/latency superiority.

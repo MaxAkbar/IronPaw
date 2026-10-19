@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <Compile Include="..\Shared\LocalReleaseSmoke.cs" Link="LocalReleaseSmoke.cs" />
+    <ProjectReference Include="..\IronPaw.AgentCore.Browser\IronPaw.AgentCore.Browser.csproj" />
+    <ProjectReference Include="..\IronPaw.AgentCore.Mcp\IronPaw.AgentCore.Mcp.csproj" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
   </ItemGroup>
 

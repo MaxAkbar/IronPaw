@@ -4,6 +4,8 @@ using IronPaw.AgentCore.Abstractions;
 using IronPaw.AgentCore.Persistence.CSharpDb;
 using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
+using IronPaw.AgentCore.Mcp;
+using IronPaw.AgentCore.Browser;
 using Microsoft.Extensions.DependencyInjection;
 using System.Security.Cryptography;
 using System.Text;
@@ -56,13 +58,15 @@ internal static class DesktopBootstrapper
 
     private static void ConfigureServices(IServiceCollection services, DesktopPaths paths)
     {
+        services.AddSingleton(new DesktopWorkspace(paths.WorkspaceRoot));
         var skillLoadResult = SkillAddinLoader.LoadFromDirectories(
         [
             Path.Combine(paths.WorkspaceRoot, "addins", "skills"),
             paths.AppSkillsDirectory
         ]);
         services.AddSingleton(skillLoadResult);
-        services.AddSingleton<IWebBrowserService, WebBrowserService>();
+        services.AddSingleton<BrowserRuntime>();
+        services.AddSingleton<IWebBrowserService>(sp => sp.GetRequiredService<BrowserRuntime>());
 
         var applicationStore = new CSharpDbApplicationStore(new CSharpDbApplicationStoreOptions(
             Path.Combine(paths.StateRoot, "application.cdb"), paths.StateRoot));
@@ -185,6 +189,10 @@ internal sealed class DesktopBootstrap : IDisposable
     public IRunHistoryStore RunHistoryStore => _serviceProvider.GetRequiredService<IRunHistoryStore>();
     public IAgentMessageBus MessageBus => _serviceProvider.GetRequiredService<IAgentMessageBus>();
     public IToolRegistry ToolRegistry => _serviceProvider.GetRequiredService<IToolRegistry>();
+    public IToolRegistrar ToolRegistrar => _serviceProvider.GetRequiredService<IToolRegistrar>();
+    public BrowserRuntime? Browser => _serviceProvider.GetService<BrowserRuntime>();
+    public IAgentRegistry AgentRegistry => _serviceProvider.GetRequiredService<IAgentRegistry>();
+    public string? WorkspaceRoot => _serviceProvider.GetService<DesktopWorkspace>()?.Root;
 
     public IronPawSettings Settings => _serviceProvider.GetService<IronPawSettings>() ?? new();
 
@@ -197,6 +205,8 @@ internal sealed class DesktopBootstrap : IDisposable
         Task.Run(_serviceProvider.Dispose).GetAwaiter().GetResult();
     }
 }
+
+internal sealed record DesktopWorkspace(string Root);
 
 internal sealed class DeferredDesktopLlmClient(Func<ILlmClient> factory) : ILlmClient
 {

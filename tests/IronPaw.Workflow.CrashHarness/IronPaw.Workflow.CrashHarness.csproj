@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\IronPaw.AgentCore.Mcp\IronPaw.AgentCore.Mcp.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore\IronPaw.AgentCore.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Tools\IronPaw.AgentCore.Tools.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Persistence\IronPaw.AgentCore.Persistence.csproj" />

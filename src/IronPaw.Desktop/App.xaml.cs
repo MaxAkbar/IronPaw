@@ -9,10 +9,39 @@ namespace IronPaw.Desktop;
 /// </summary>
 public partial class App : Application
 {
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        try { new MainWindow().Show(); }
+        if (e.Args.FirstOrDefault() == "--smoke-test")
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            try
+            {
+                if (e.Args.Length != 2) throw new ArgumentException("--smoke-test requires only a new evidence directory.");
+                await DesktopReleaseSmoke.RunAsync(e.Args[1]);
+                Shutdown(0);
+            }
+            catch (Exception error) { Console.Error.WriteLine("Release smoke failed: " + error); Shutdown(1); }
+            return;
+        }
+        try
+        {
+            string workspace;
+            if (e.Args.Length == 2 && e.Args[0] == "--workspace")
+            {
+                if (!Path.IsPathFullyQualified(e.Args[1]) || !Directory.Exists(e.Args[1])) throw new ArgumentException("--workspace requires an existing absolute directory.");
+                workspace = Path.GetFullPath(e.Args[1]);
+            }
+            else
+            {
+                if (e.Args.Length != 0) throw new ArgumentException("Use --workspace <absolute directory>, or start without arguments to choose a working folder.");
+                var picker = new Microsoft.Win32.OpenFolderDialog { Title = "Choose the folder IronPaw can work in", Multiselect = false };
+                if (picker.ShowDialog() != true) { Shutdown(0); return; }
+                workspace = picker.FolderName;
+            }
+            var bootstrap = await Task.Run(() => DesktopBootstrapper.Build(workspaceRoot: workspace));
+            new MainWindow(bootstrap).Show();
+        }
         catch (Exception error)
         {
             var guidance = error is ArgumentException or System.Text.Json.JsonException or FileNotFoundException

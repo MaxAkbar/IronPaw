@@ -32,6 +32,17 @@
 dotnet run --project src/IronPaw.Desktop
 ```
 
+Choose the working folder when the application starts, or pass
+`--workspace <absolute-folder>` after `--` when launching from a terminal. The selected folder is
+shown in the window and determines the workspace's workflow journal.
+
+The new-workflow settings include plain-language tool access selection, reviewed MCP connector
+configuration and reviewed JavaScript browser sites. These grants are separate from provider
+settings. Connectors always require approval for each operation; browser mutations add mandatory
+navigation approvals. Saved work keeps its accepted grants. See
+[connectors](../../docs/mcp-connectors.md), [browser controls](../../docs/browser-runtime.md) and
+[portable release bundles](../../docs/releases.md).
+
 ## Runtime configuration
 
 Desktop shares the CLI's user settings file at `%LOCALAPPDATA%/IronPaw/settings.json`, or the file
@@ -88,7 +99,7 @@ and journal entries.
   not execute that tool. Confirmed results are reused on resume. A permanently cancelled workflow
   can have an unknown outcome reconciled but cannot resume.
 
-The **New workflow limits and approvals** expander accepts optional total-token and active execution
+The **Workflow settings** tab contains new-workflow limits and approvals, including optional total-token and active execution
 limits (whole seconds), plus comma-separated tool names requiring approval. Limits apply to the
 root and all descendants and persist across restart. Waiting for human input or a paused workflow
 does not consume active execution time. Recovery uses the current Windows user's local-owner

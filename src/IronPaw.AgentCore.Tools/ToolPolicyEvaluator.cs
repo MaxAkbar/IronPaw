@@ -53,6 +53,8 @@ public static class ToolPolicyEvaluator
 
         foreach (var tool in tools)
         {
+            if (tool is IBrowserBoundTool browser && policy.BrowserBinding != browser.BrowserBinding)
+                continue;
             if (tool.Descriptor.OwnerOnly && !policy.SenderIsOwner)
             {
                 continue;

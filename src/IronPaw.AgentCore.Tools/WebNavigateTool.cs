@@ -3,8 +3,9 @@ using IronPaw.AgentCore.Abstractions;
 
 namespace IronPaw.AgentCore.Tools;
 
-public sealed class WebNavigateTool : ITool
+public sealed class WebNavigateTool : IBrowserBoundTool
 {
+    public string? BrowserBinding => (_webBrowser as IBoundWebBrowserService)?.BrowserBinding;
     private readonly IWebBrowserService _webBrowser;
 
     public WebNavigateTool(IWebBrowserService webBrowser)
@@ -35,6 +36,7 @@ public sealed class WebNavigateTool : ITool
                         type = "string",
                         description = "Target URL for action=open. Absolute URL is recommended."
                     },
+                    wait_selector = new { type = "string", description = "With the JavaScript browser, wait for this CSS selector after the action (at most 512 characters)." },
                     link_index = new
                     {
                         type = "integer",
@@ -79,6 +81,8 @@ public sealed class WebNavigateTool : ITool
 
     public async Task<ToolResult> ExecuteAsync(ToolCall call, ToolExecutionContext context, CancellationToken ct)
     {
+        if (context.ToolPolicy is { } policy ? ToolPolicyEvaluator.Apply([this], policy).Count != 1 : BrowserBinding is not null)
+            return ToolResult.Error("The reviewed browser configuration is not granted by this workflow and all its ancestors.");
         if (!TryGetRequiredString(call.Arguments, "action", out var actionRaw))
         {
             return ToolResult.Error("Missing required string parameter: action");
@@ -105,6 +109,7 @@ public sealed class WebNavigateTool : ITool
         }
 
         var sessionId = WebToolSessionId.ResolveOrCreate(TryGetOptionalString(call.Arguments, "session_id"), context);
+        (_webBrowser as IWebBrowserRunScope)?.BindSession(sessionId, context.ScopeRunId);
         var request = new WebNavigationRequest(
             SessionId: sessionId,
             Action: action,
@@ -114,7 +119,8 @@ public sealed class WebNavigateTool : ITool
             LinkSelector: TryGetOptionalString(call.Arguments, "link_selector"),
             FormIndex: formIndex,
             FormSelector: TryGetOptionalString(call.Arguments, "form_selector"),
-            Fields: fields);
+            Fields: fields)
+        { WaitSelector = TryGetOptionalString(call.Arguments, "wait_selector") };
 
         WebNavigationResult result;
         try

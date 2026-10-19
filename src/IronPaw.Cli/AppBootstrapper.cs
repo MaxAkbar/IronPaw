@@ -3,6 +3,8 @@ using IronPaw.AgentCore.Abstractions;
 using IronPaw.AgentCore.Persistence.CSharpDb;
 using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
+using IronPaw.AgentCore.Mcp;
+using IronPaw.AgentCore.Browser;
 using Microsoft.Extensions.DependencyInjection;
 using System.Security.Cryptography;
 using System.Text;
@@ -17,15 +19,21 @@ internal static class AppBootstrapper
         string? stateRoot = null,
         string? workspaceRoot = null,
         IronPawSettings? settings = null,
-        bool legacyEnvironment = false)
+        bool legacyEnvironment = false,
+        string? mcpConfigFile = null,
+        string? browserConfigFile = null)
     {
         settings = (settings ?? (stateRoot is null ? IronPawSettingsLoader.Load() : new IronPawSettings())).RequireValid();
+        var connectors = mcpConfigFile is null ? null : McpHost.Load(mcpConfigFile);
+        var browserConfiguration = browserConfigFile is null ? null : BrowserConfiguration.Load(browserConfigFile);
         var paths = ResolvePaths(stateRoot, workspaceRoot);
         Directory.CreateDirectory(paths.StateRoot);
         Directory.CreateDirectory(paths.AppSkillsDirectory);
 
         var services = new ServiceCollection();
         services.AddSingleton(settings);
+        if (connectors is not null) services.AddSingleton(_ => connectors);
+        services.AddSingleton(_ => { var browser = new BrowserRuntime(); if (browserConfiguration is not null) browser.Enable(browserConfiguration); return browser; });
         llmOptions ??= settings.Llm.ToOverrides();
         ConfigureServices(services, messageTtlDays, llmOptions, paths, legacyEnvironment);
 
@@ -74,7 +82,7 @@ internal static class AppBootstrapper
             paths.AppSkillsDirectory
         ]);
         services.AddSingleton(skillLoadResult);
-        services.AddSingleton<IWebBrowserService, WebBrowserService>();
+        services.AddSingleton<IWebBrowserService>(sp => sp.GetRequiredService<BrowserRuntime>());
 
         services.AddSingleton<InMemoryToolRegistry>(sp =>
         {
@@ -84,7 +92,7 @@ internal static class AppBootstrapper
                 sp.GetRequiredService<IMemoryStore>(),
                 sp.GetRequiredService<IRunHistoryStore>(),
                 sp.GetRequiredService<IWebBrowserService>());
-            return new InMemoryToolRegistry(builtInTools);
+            return new InMemoryToolRegistry(builtInTools.Concat(sp.GetService<McpHost>()?.Tools ?? []));
         });
         services.AddSingleton<IToolRegistry>(sp => sp.GetRequiredService<InMemoryToolRegistry>());
         services.AddSingleton<IToolRegistrar>(sp => sp.GetRequiredService<InMemoryToolRegistry>());
@@ -159,6 +167,7 @@ internal static class AppBootstrapper
 
         toolRegistrar.RegisterTools([new CreateSkillTool(toolRegistrar, appSkillsDirectory)]);
         DefaultAgentCatalog.Register(agentRegistry, services.GetRequiredService<IronPawSettings>());
+        services.GetRequiredService<BrowserRuntime>().GrantSpecialist(agentRegistry);
         if (legacyEnvironment) ApplyLegacyAgentRouting(agentRegistry, Environment.GetEnvironmentVariable);
         toolRegistrar.RegisterTools([
             new SendAgentMessageTool(messageBus, agentRegistry),
@@ -214,6 +223,8 @@ internal sealed class AppBootstrap : IDisposable
     public IWorkflowStore WorkflowStore { get; }
 
     public IronPawSettings Settings => _serviceProvider.GetRequiredService<IronPawSettings>();
+    public McpHost? Connectors => _serviceProvider.GetService<McpHost>();
+    public BrowserRuntime Browser => _serviceProvider.GetRequiredService<BrowserRuntime>();
 
     public IAgentTaskGraphStore TaskGraphStore => (IAgentTaskGraphStore)WorkflowStore;
 

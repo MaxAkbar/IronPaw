@@ -12,14 +12,16 @@
 - shared user settings for CLI/Desktop and a pinned-SDK Windows validation workflow
 - a desktop execution timeline for dependency waits, current work, host acceptance, saved activity and shared budgets
 - optional execution traces/metrics and bounded desktop event delivery that isolates presentation failures
-- an MCP embedding adapter with reviewed tool bindings, explicit permissions and durable replay
+- MCP connectors in CLI/Desktop and embedding hosts with reviewed grants, controlled transports and durable replay
+- optional JavaScript browsing with isolated Chromium contexts and saved site/mutation grants
+- self-contained Windows bundles, published-application smoke checks and dependency maintenance workflows
 
 Both apps read `%LOCALAPPDATA%/IronPaw/settings.json` for new-run defaults; `IRONPAW_CONFIG` selects
 another reviewed file. The CLI also supports `--config` and standalone `--validate-config`.
 See [shared configuration and repeatable validation](docs/runtime-configuration.md). Run
 `./eng/Validate.ps1` for the Release build, full test suite and example-configuration checks used by CI.
-See [MCP connector boundaries and embedding](docs/mcp-connectors.md) for the adapter API and
-remaining CLI/Desktop connector setup work.
+See [MCP connector setup](docs/mcp-connectors.md), [JavaScript browsing](docs/browser-runtime.md),
+[Windows bundles](docs/releases.md) and [delivery qualification](docs/delivery-qualification.md).
 
 Both apps persist sessions, transcripts, memories, run history and agent messages in
 `%LOCALAPPDATA%/IronPaw/state/application.cdb`. Existing JSON data imports once, preserving

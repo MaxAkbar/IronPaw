@@ -41,7 +41,8 @@ public sealed class McpConnector : IAsyncDisposable
             throw new ArgumentException("Connector limits are outside their supported range.");
         if (options.Tools is null || options.Tools.Count is < 1 or > 128)
             throw new ArgumentException("A connector must have 1-128 reviewed tools.");
-        var definitions = options.Tools.Select(definition => {
+        var definitions = options.Tools.Select(definition =>
+        {
             if (definition is null || string.IsNullOrWhiteSpace(definition.Name) || definition.Name.Length > 128 ||
                 definition.Name.Any(char.IsControl) || definition.Description is null || definition.Description.Length > 4096)
                 throw new ArgumentException("Invalid reviewed connector tool definition.");
@@ -74,7 +75,8 @@ public sealed class McpConnector : IAsyncDisposable
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
             if (_faulted) throw new InvalidOperationException("Connector is unavailable after a transport failure; inspect saved effects before configuring a new connection.");
-            _client ??= await McpClient.CreateAsync(_transportFactory(), new McpClientOptions {
+            _client ??= await McpClient.CreateAsync(_transportFactory(), new McpClientOptions
+            {
                 ClientInfo = new() { Name = "IronPaw", Version = "1.0.0" },
                 Capabilities = new(), // No sampling, elicitation, roots, tasks or experimental handlers.
                 ProtocolVersion = "2025-11-25",
@@ -94,16 +96,26 @@ public sealed class McpConnector : IAsyncDisposable
             // A lost/cancelled response may follow an effect. Propagate to ToolExecutor's unknown
             // outcome path and poison this session. Never transparently repeat the request.
             _faulted = true;
+            await CloseFaultedClientAsync().ConfigureAwait(false);
             throw;
         }
         catch (Exception)
         {
             _faulted = true;
+            await CloseFaultedClientAsync().ConfigureAwait(false);
             // Protocol exceptions may contain server-controlled text. Do not promote that text
             // to ToolExecutor's trusted host error or retain an unbounded nested exception.
             throw new IOException("The MCP request did not establish a usable outcome. Inspect saved effects before resuming.");
         }
         finally { _gate.Release(); }
+    }
+
+    private async Task CloseFaultedClientAsync()
+    {
+        if (_client is null) return;
+        try { await _client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false); }
+        catch (Exception) { /* Preserve the original unknown outcome; never retry an effect. */ }
+        _client = null;
     }
 
     private async Task<bool> CatalogMatchesAsync(ConnectorTool requested, CancellationToken ct)
@@ -165,9 +177,12 @@ public sealed class McpConnector : IAsyncDisposable
             return new(true, "Connector returned a result that does not satisfy the reviewed output schema.", ContentTrust.Untrusted, Details());
         return new(result.IsError == true, text.ToString(), ContentTrust.Untrusted, Details());
 
-        IReadOnlyDictionary<string, object?> Details() => new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?> {
-            ["connector_id"] = _options.Id, ["connector_tool"] = tool.Descriptor.Name,
-            ["remote_tool"] = tool.Definition.Name, ["result_truncated"] = truncated
+        IReadOnlyDictionary<string, object?> Details() => new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>
+        {
+            ["connector_id"] = _options.Id,
+            ["connector_tool"] = tool.Descriptor.Name,
+            ["remote_tool"] = tool.Definition.Name,
+            ["result_truncated"] = truncated
         });
     }
 

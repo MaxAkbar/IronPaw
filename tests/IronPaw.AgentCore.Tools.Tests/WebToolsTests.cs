@@ -50,8 +50,8 @@ public sealed class WebToolsTests
         Assert.IsNotNull(browser.LastNavigationRequest);
         Assert.AreEqual(WebNavigationAction.Open, browser.LastNavigationRequest!.Action);
         Assert.AreEqual("https://example.com", browser.LastNavigationRequest.Url);
-        Assert.Contains(context.ScopeRunId.Value, browser.LastNavigationRequest.SessionId, StringComparison.Ordinal);
-        Assert.Contains(context.ScopeSessionKey.Value, browser.LastNavigationRequest.SessionId, StringComparison.Ordinal);
+        Assert.AreEqual(65, browser.LastNavigationRequest.SessionId.Length);
+        Assert.DoesNotContain(context.ScopeSessionKey.Value, browser.LastNavigationRequest.SessionId, StringComparison.Ordinal);
     }
 
     [TestMethod]
@@ -163,6 +163,27 @@ public sealed class WebToolsTests
             AgentId: agentId,
             ParentRunId: new RunId("root-run"),
             ParentSessionKey: new SessionKey("root-session"));
+    }
+
+    [TestMethod]
+    public async Task ExplicitAliasesAndReturnedIdsCannotCrossCallerRootOrAgentScopes()
+    {
+        var browser = new StubWebBrowserService();
+        var tool = new WebNavigateTool(browser);
+        ToolCall Call(string id) => new("call", "web_navigate", JsonSerializer.SerializeToElement(new { action = "open", url = "https://example.com", session_id = id }));
+        var context = CreateContext();
+        await tool.ExecuteAsync(Call("shared"), context, default);
+        var original = browser.LastNavigationRequest!.SessionId;
+        await tool.ExecuteAsync(Call(original), context, default);
+        Assert.AreEqual(original, browser.LastNavigationRequest!.SessionId);
+        foreach (var foreign in new[] { context with { Caller = CallerIdentity.Authenticated("foreign", "Foreign") },
+            context with { RootRunId = RunId.New() }, context with { AgentId = "other-agent" } })
+        {
+            await tool.ExecuteAsync(Call("shared"), foreign, default);
+            Assert.AreNotEqual(original, browser.LastNavigationRequest!.SessionId);
+            await tool.ExecuteAsync(Call(original), foreign, default);
+            Assert.AreNotEqual(original, browser.LastNavigationRequest!.SessionId);
+        }
     }
 
     private sealed class StubWebBrowserService : IWebBrowserService

@@ -24,7 +24,11 @@ public sealed record WebNavigationRequest(
     string? LinkSelector = null,
     int? FormIndex = null,
     string? FormSelector = null,
-    IReadOnlyDictionary<string, string>? Fields = null);
+    IReadOnlyDictionary<string, string>? Fields = null)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? WaitSelector { get; init; }
+}
 
 public sealed record WebStructuredDataRequest(
     string SessionId,
@@ -101,6 +105,19 @@ public interface IWebBrowserService
 
 public sealed class WebBrowserService : IWebBrowserService
 {
+    // Reuse the same bounded presentation/extraction rules for JavaScript-rendered HTML.
+    public static WebNavigationResult DescribeRenderedPage(string sessionId, string url, string html, int statusCode)
+    {
+        var parser = new WebBrowserService();
+        return parser.BuildNavigationResult(sessionId, new(new Uri(url), statusCode, html, DateTimeOffset.UtcNow, "text/html"));
+    }
+
+    public static Task<WebStructuredDataResult> ExtractRenderedPageAsync(WebStructuredDataRequest request, string url, string html, CancellationToken ct)
+    {
+        var parser = new WebBrowserService();
+        parser._sessions[request.SessionId] = new() { CurrentPage = new(new Uri(url), 200, html, DateTimeOffset.UtcNow, "text/html") };
+        return parser.ExtractStructuredDataAsync(request, ct);
+    }
     private const int DefaultPreviewLimit = 25;
     private const int DefaultMaxAttempts = 3;
     private const string BrowserUserAgent = "IronPawWebBrowser/1.0";
@@ -176,6 +193,8 @@ public sealed class WebBrowserService : IWebBrowserService
             ? snapshot
             : null;
     }
+
+    public void ForgetSession(string sessionId) => _sessions.TryRemove(sessionId, out _);
 
     public async Task<WebNavigationResult> NavigateAsync(WebNavigationRequest request, CancellationToken ct)
     {

@@ -79,11 +79,13 @@ TRX results with zero failures/skips, and validates both example settings docume
 provider credentials and runtime defaults within the script process, uses the safe application
 example, then restores that process's environment. It does not run live evaluation campaigns.
 
-The nine test projects use MSTest 4.5.1 with Microsoft's test SDK and adapter. Test classes can run
+The ten test projects use MSTest 4.5.1 with Microsoft's test SDK and adapter. Test classes can run
 concurrently; methods and data rows within each class stay sequential. Execution-diagnostics tests
 run separately because they observe process-wide telemetry. Fixture cleanup uses `TestCleanup`,
 and desktop tests retain their explicit STA dispatcher probes. CSharpDB process-recovery tests
 retain their dedicated subprocess entry point. Coverage uses the existing Coverlet collector.
+The browser suite launches actual Chromium; install its pinned headless runtime using the
+[release instructions](releases.md) before running validation. The CI job performs that setup.
 
 Evidence includes the build/test log, every TRX, selected SDK, source revision, dirty-worktree flag,
 SHA-256 source-file manifest and final summary. Source changes during validation prevent a passing
@@ -98,12 +100,12 @@ and retains validation artifacts even on failure. The pinned SDK is installed th
 [setup-dotnet's global.json support](https://github.com/actions/setup-dotnet#using-the-global-json-file-input).
 Hosted CI execution is established only when the workflow actually runs after publication.
 
-Step 4 also includes the desktop execution timeline and
-[execution diagnostics and resilient live delivery](execution-observability.md). The first
-[MCP adapter slice](mcp-connectors.md) provides reviewed tool bindings and durable execution for
-embedding hosts; CLI/Desktop connector setup and transport controls remain pending. A JavaScript
-browser backend, packaging and a dependency maintenance policy also require their own
-implementation and end-to-end release evidence.
+Step 4 includes the desktop execution timeline, [execution diagnostics](execution-observability.md),
+[reviewed MCP connectors](mcp-connectors.md), [JavaScript browsing](browser-runtime.md),
+[self-contained release bundles](releases.md) and a [dependency maintenance policy](dependency-policy.md).
+The two hosts enable connector/browser configuration only through explicit host controls, separately
+from application settings. Saved workflow grants remain authoritative. Local end-to-end checks and
+package evidence do not substitute for a hosted CI run or the live-model comparison gate.
 
 Application storage is always CSharpDB. The removed `--store` selector fails with a migration
 message before initialization. `--message-ttl-days` controls CLI message retention (default 30);

@@ -201,6 +201,32 @@ public sealed class McpConnectorTests
     }
 
     [TestMethod]
+    [DataRow("http://json-schema.org/draft-07/schema#")]
+    [DataRow("https://json-schema.org/draft/2020-12/schema")]
+    public async Task ExplicitSupportedDialectsValidateBeforeDispatch(string dialect)
+    {
+        var document = System.Text.Json.Nodes.JsonNode.Parse(Schema.GetRawText())!.AsObject();
+        document["$schema"] = dialect;
+        var schema = Json(document.ToJsonString());
+        await using var fixture = new McpFixture(schema);
+        await using var connector = new McpConnector(Options with { Tools = [new("record", "Reviewed", schema)] }, fixture.Transport);
+        Assert.IsTrue((await Invoke(connector, "{\"value\":0}")).IsError);
+        Assert.AreEqual(0, fixture.Connections);
+        Assert.IsFalse((await Invoke(connector)).IsError);
+        Assert.AreEqual(1, fixture.Calls);
+    }
+
+    [TestMethod]
+    [DataRow("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"$ref\":\"https://example.invalid/schema\"}")]
+    [DataRow("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"v\":{\"pattern\":\"(x+)+$\"}}}")]
+    [DataRow("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"v\":{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\"}}}")]
+    [DataRow("{\"$schema\":\"https://example.invalid/dialect\",\"type\":\"object\"}")]
+    [DataRow("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"dependencies\":{\"x\":{\"properties\":{\"v\":{\"pattern\":\"(x+)+$\"}}}}}")]
+    [DataRow("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"definitions\":{\"v\":{\"$ref\":\"https://example.invalid/remote\"}}}")]
+    [DataRow("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"v\":{\"items\":[{}],\"additionalItems\":{\"pattern\":\"(x+)+$\"}}}}")]
+    public void UnsupportedDialectOrUnsafeDraft7SchemaFailsWithoutTransport(string schema) => UnsupportedSchemasFailAtRegistrationWithoutTransport(schema);
+
+    [TestMethod]
     [DataRow("{\"type\":\"object\",\"$ref\":\"https://example.invalid/remote\"}")]
     [DataRow("{\"type\":\"object\",\"$ref\":\"#/$defs/value\"}")]
     [DataRow("{\"type\":\"object\",\"patternProperties\":{\".*\":{}}}")]

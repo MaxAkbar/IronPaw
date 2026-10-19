@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "connectors": [
+    {
+      "id": "reviewed_catalog",
+      "bindingRevision": "reviewed-target-1",
+      "transport": {
+        "kind": "http",
+        "endpoint": "https://example.com/mcp",
+        "allowPrivateNetwork": false,
+        "maxFrameBytes": 1048576,
+        "maxSessionBytes": 16777216,
+        "maxSessionFrames": 4096
+      },
+      "tools": [
+        {
+          "name": "search",
+          "description": "Search the explicitly reviewed catalog",
+          "inputSchema": {
+            "type": "object",
+            "properties": { "query": { "type": "string", "maxLength": 256 } },
+            "required": ["query"],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "timeoutSeconds": 30,
+      "maxArgumentBytes": 65536,
+      "maxResultCharacters": 16384
+    }
+  ]
+}

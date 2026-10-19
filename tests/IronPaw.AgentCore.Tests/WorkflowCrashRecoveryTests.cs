@@ -16,7 +16,7 @@ public sealed class WorkflowCrashRecoveryTests
         using var scope = new CrashScope();
         var runId = await scope.StartAndKillAsync(CrashPoint.AfterReservedModelAttempt);
         var clock = advanceClock ? new RecoveryClock(DateTimeOffset.UtcNow.AddMinutes(2)) : TimeProvider.System;
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root), timeProvider: clock);
+        await using var store = await scope.OpenAfterTerminationAsync(clock);
         var recovered = (await store.GetAsync(new RunId(runId), CancellationToken.None))!;
         var attempt = Assert.ContainsSingle(Assert.ContainsSingle(recovered.ModelCalls!).Attempts!);
         Assert.AreEqual(WorkflowReservationState.Unknown, attempt.State);
@@ -49,7 +49,7 @@ public sealed class WorkflowCrashRecoveryTests
     {
         using var scope = new CrashScope();
         var runId = await scope.StartAndKillAsync(CrashPoint.AfterHumanWait);
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root));
+        await using var store = await scope.OpenAfterTerminationAsync();
         var recovered = Assert.ContainsSingle(await store.ListAsync(CancellationToken.None));
         Assert.AreEqual(runId, recovered.RunId);
         Assert.AreEqual(WorkflowStatus.AwaitingInput, recovered.Status);
@@ -96,7 +96,7 @@ public sealed class WorkflowCrashRecoveryTests
     {
         using var scope = new CrashScope();
         var runId = await scope.StartAndKillAsync(CrashPoint.AfterCompletedTool);
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root));
+        await using var store = await scope.OpenAfterTerminationAsync();
         var recovered = Assert.ContainsSingle(await store.ListAsync(CancellationToken.None));
         Assert.AreEqual(runId, recovered.RunId);
         Assert.AreEqual(WorkflowStatus.Interrupted, recovered.Status);
@@ -133,7 +133,7 @@ public sealed class WorkflowCrashRecoveryTests
     {
         using var scope = new CrashScope();
         var runId = await scope.StartAndKillAsync(CrashPoint.AfterEffectBeforeToolResult);
-        await using var store = await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(scope.Root));
+        await using var store = await scope.OpenAfterTerminationAsync();
         var recovered = Assert.ContainsSingle(await store.ListAsync(CancellationToken.None));
         Assert.AreEqual(WorkflowStatus.NeedsReconciliation, recovered.Status);
         Assert.IsNull(recovered.LeaseOwner);
@@ -169,6 +169,19 @@ public sealed class WorkflowCrashRecoveryTests
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "IronPawCrashTests", Guid.NewGuid().ToString("n"));
         public CrashScope() => Directory.CreateDirectory(Root);
+
+        public async Task<CSharpDbWorkflowStore> OpenAfterTerminationAsync(TimeProvider? clock = null)
+        {
+            // A signaled process does not establish immediate filesystem availability on Windows.
+            // Still require exclusive recovery within a fixed bound; persistent locks fail the test.
+            var elapsed = Stopwatch.StartNew();
+            while (true)
+            {
+                try { return await CSharpDbWorkflowStore.OpenAsync(CrashFixture.DatabasePath(Root), timeProvider: clock); }
+                catch (IOException error) when ((error.HResult & 0xFFFF) is 32 or 33 && elapsed.Elapsed < TimeSpan.FromSeconds(5))
+                { await Task.Delay(25); }
+            }
+        }
 
         public async Task<string> StartAndKillAsync(CrashPoint point)
         {

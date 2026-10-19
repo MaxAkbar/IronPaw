@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace IronPaw.AgentCore.Abstractions;
 
@@ -121,6 +122,9 @@ public sealed record ToolSelectionPolicy(
 {
     // Exact reviewed connector identities. Broad profiles never implicitly grant MCP access.
     public IReadOnlyCollection<string>? AllowedMcpTools { get; init; }
+    // A JavaScript browser's reviewed origin/mutation/resource grant. Saved runs retain it.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BrowserBinding { get; init; }
 }
 
 public sealed record ToolDescriptor(

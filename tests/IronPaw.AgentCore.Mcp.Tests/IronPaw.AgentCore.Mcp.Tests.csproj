@@ -6,6 +6,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\IronPaw.Workflow.CrashHarness\IronPaw.Workflow.CrashHarness.csproj" />
     <PackageReference Include="coverlet.collector" Version="10.1.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
@@ -18,5 +19,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\TestAssemblyConfiguration.cs" Link="TestAssemblyConfiguration.cs" />
+    <Compile Include="..\LoopbackHttpServer.cs" Link="LoopbackHttpServer.cs" />
   </ItemGroup>
 </Project>

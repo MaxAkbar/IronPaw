@@ -7,12 +7,15 @@ using System.Windows.Controls;
 using IronPaw.AgentCore.Abstractions;
 using IronPaw.AgentCore.Providers;
 using IronPaw.AgentCore.Tools;
+using IronPaw.AgentCore.Mcp;
+using IronPaw.AgentCore.Browser;
 
 namespace IronPaw.Desktop;
 
 public partial class MainWindow : Window
 {
     private readonly DesktopBootstrap _bootstrap;
+    private McpHost? _connectors;
     private readonly IResumableAgentOrchestrator _orchestrator;
     private readonly WorkflowRecoveryController _recovery;
     private CancellationTokenSource? _runCancellationTokenSource;
@@ -29,10 +32,12 @@ public partial class MainWindow : Window
 
     internal MainWindow(DesktopBootstrap bootstrap)
     {
+        _bootstrap = bootstrap;
         InitializeComponent();
         Events = new ObservableCollection<string>();
         DataContext = this;
-        _bootstrap = bootstrap;
+        WorkspaceTextBlock.Text = _bootstrap.WorkspaceRoot is { } folder ? "Working folder: " + folder : "Working folder selected by the host";
+        WorkspaceTextBlock.ToolTip = _bootstrap.WorkspaceRoot;
         var defaults = _bootstrap.Settings;
         ProviderComboBox.SelectedItem = ProviderComboBox.Items.OfType<ComboBoxItem>().Single(item => (string)item.Content == defaults.Provider);
         ModelTextBox.Text = defaults.Model ?? ProviderDefaults.DefaultModels[defaults.Provider];
@@ -85,14 +90,19 @@ public partial class MainWindow : Window
         }
         AppendLog($"Run queued. provider={provider}, model={model}");
         var runId = RunId.New();
+        var connectors = EnableConnectorsCheckBox.IsChecked == true ? _connectors : null;
+        var approvalTools = ApprovalToolsTextBox.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var profile = Enum.Parse<ToolProfile>((string)((ComboBoxItem)ToolProfileComboBox.SelectedItem).Tag);
+        var policy = connectors?.Grant(new(Profile: profile)) ?? new ToolSelectionPolicy(Profile: profile);
+        var browser = _bootstrap.Browser;
         var request = new AgentRunRequest(
                 SessionKey: sessionKey,
                 UserInput: prompt,
                 Provider: provider,
                 Model: model,
-                ToolPolicy: new ToolSelectionPolicy(Profile: ToolProfile.Coding),
+                ToolPolicy: browser?.Grant(policy) ?? policy,
                 Caller: CallerIdentity.LocalOwner(), RequestedRunId: runId, Budget: budget,
-                ApprovalRequiredTools: ApprovalToolsTextBox.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+                ApprovalRequiredTools: browser?.RequireApprovals(connectors?.RequireApprovals(approvalTools) ?? approvalTools) ?? connectors?.RequireApprovals(approvalTools) ?? approvalTools);
         await ExecuteRunAsync(runId, async ct => await _orchestrator.RunAsync(request, _eventSink, ct));
     }
 
@@ -117,10 +127,12 @@ public partial class MainWindow : Window
 
     private async Task ExecuteRunCoreAsync(RunId rootRunId, Func<CancellationToken, Task<AgentRunResult?>> action)
     {
+        var retainBrowser = false;
         try
         {
             var token = _runCancellationTokenSource!.Token;
             var result = await Task.Run(() => action(token));
+            retainBrowser = result is null || result.Status is AgentRunStatus.AwaitingInput or AgentRunStatus.Paused;
             if (result is not null)
             {
                 _liveText = false;
@@ -137,6 +149,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            if (!retainBrowser && _bootstrap.Browser is { } browser) await browser.ReleaseRunAsync(rootRunId);
             _liveText = false;
             _activeRootRunId = null;
             _runTask = null;
@@ -164,7 +177,12 @@ public partial class MainWindow : Window
         UpdateControls();
         try
         {
-            if (permanentCancel) await Task.Run(() => _recovery.CancelAsync(rootRunId.Value, CancellationToken.None));
+            if (permanentCancel)
+            {
+                await Task.Run(() => _recovery.CancelAsync(rootRunId.Value, CancellationToken.None));
+                if (_activeRootRunId is null && _bootstrap.Browser is { } browser)
+                    await browser.ReleaseRunAsync(rootRunId.Value);
+            }
             else await Task.Run(() => _recovery.PauseAsync(rootRunId.Value, CancellationToken.None));
             RecoveryStatusTextBlock.Text = permanentCancel ? "Permanent cancellation recorded." : "Pause recorded; active work is settling.";
             await RefreshWorkflowsAsync(rootRunId.Value.Value);
@@ -344,10 +362,14 @@ public partial class MainWindow : Window
 
     private void UpdateControls()
     {
-        if (RunButton is null) return;
+        if (RunButton is null || LoadConnectorsButton is null || LoadBrowserButton is null || ToolProfileComboBox is null) return;
         var running = _activeRootRunId is not null;
         var graphRunning = _activeGraphId is not null;
         RunButton.IsEnabled = !running && !graphRunning && !_controlBusy;
+        LoadConnectorsButton.IsEnabled = _connectors is null && !running && !graphRunning && !_controlBusy;
+        EnableConnectorsCheckBox.IsEnabled = _connectors is not null && !running && !graphRunning && !_controlBusy;
+        LoadBrowserButton.IsEnabled = _bootstrap.Browser?.BrowserBinding is null && _bootstrap.Browser is not null && !running && !graphRunning && !_controlBusy;
+        ToolProfileComboBox.IsEnabled = !running && !graphRunning && !_controlBusy;
         CancelButton.IsEnabled = PauseActiveButton.IsEnabled = running && !_controlBusy;
         var root = _detail?.Root;
         var controllable = root is not null && root.Result is null && root.Control != WorkflowControl.Cancel;
@@ -465,6 +487,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _closing = true;
         StopTimeline();
         StopEventDelivery();
         _runCancellationTokenSource?.Cancel();
@@ -473,7 +496,61 @@ public partial class MainWindow : Window
         _graphCancellationTokenSource?.Cancel();
         _graphCancellationTokenSource?.Dispose();
         _graphCancellationTokenSource = null;
-        _bootstrap.Dispose();
+        try { _connectors?.Dispose(); }
+        finally { _bootstrap.Dispose(); }
         base.OnClosed(e);
+    }
+
+    private void OpenSettings_OnClick(object sender, RoutedEventArgs e) => WorkflowSettingsTab.IsSelected = true;
+
+    private async void LoadConnectors_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_connectors is not null || _activeRootRunId is not null || _activeGraphId is not null || _controlBusy) return;
+        var picker = new Microsoft.Win32.OpenFileDialog { Title = "Review connector configuration", Filter = "Connector configuration (*.json)|*.json" };
+        if (picker.ShowDialog(this) != true) return;
+        _controlBusy = true;
+        UpdateControls();
+        McpHost? host = null;
+        try
+        {
+            host = await Task.Run(() => McpHost.Load(picker.FileName));
+            if (_closePending || _closing) { host.Dispose(); return; }
+            var review = new Window { Title = "Review connector access", Owner = this, Width = 780, Height = 600, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var panel = new DockPanel { Margin = new Thickness(16) };
+            var enable = new Button { Content = "Use this reviewed configuration", Margin = new Thickness(0, 12, 0, 0) };
+            DockPanel.SetDock(enable, Dock.Bottom);
+            panel.Children.Add(enable);
+            panel.Children.Add(new TextBox { Text = host.Review, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+            review.Content = panel;
+            enable.Click += (_, _) => { review.DialogResult = true; };
+            if (review.ShowDialog() != true) { host.Dispose(); return; }
+            _bootstrap.ToolRegistrar.RegisterTools(host.Tools);
+            _connectors = host;
+            EnableConnectorsCheckBox.IsChecked = true;
+            ConnectorsStatusTextBlock.Text = $"{host.ToolNames.Count} reviewed connector tools. Every call requires approval. Restart to change this configuration.";
+        }
+        catch (Exception error) when (error is ArgumentException or System.IO.IOException or UnauthorizedAccessException or JsonException)
+        { host?.Dispose(); ConnectorsStatusTextBlock.Text = "Connector configuration could not be enabled: " + error.Message; }
+        finally { _controlBusy = false; UpdateControls(); }
+    }
+
+    private async void LoadBrowser_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_bootstrap.Browser is not { BrowserBinding: null } browser || _activeRootRunId is not null || _activeGraphId is not null || _controlBusy) return;
+        var picker = new Microsoft.Win32.OpenFileDialog { Title = "Review JavaScript browser sites", Filter = "Browser configuration (*.json)|*.json" };
+        if (picker.ShowDialog(this) != true) return;
+        _controlBusy = true; UpdateControls();
+        try
+        {
+            var configuration = await Task.Run(() => BrowserConfiguration.Load(picker.FileName));
+            if (_closing || _closePending) return;
+            if (MessageBox.Show(this, configuration.Review + "\n\nEnable these browser permissions?", "Review browser sites", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+            browser.Enable(configuration);
+            browser.GrantSpecialist(_bootstrap.AgentRegistry);
+            BrowserStatusTextBlock.Text = "JavaScript browsing enabled for the reviewed sites. Choose web browsing or all available tools. Restart to change these sites.";
+        }
+        catch (Exception error) when (error is ArgumentException or System.IO.IOException or JsonException or UnauthorizedAccessException)
+        { BrowserStatusTextBlock.Text = "Browser configuration could not be enabled: " + error.Message; }
+        finally { _controlBusy = false; UpdateControls(); }
     }
 }
