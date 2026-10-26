@@ -7,6 +7,6 @@
   <ItemGroup>
     <ProjectReference Include="..\IronPaw.AgentCore.Tools\IronPaw.AgentCore.Tools.csproj" />
     <PackageReference Include="Microsoft.Playwright" Version="1.63.0" />
-    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="10.0.13" />
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="10.0.14" />
   </ItemGroup>
 </Project>
