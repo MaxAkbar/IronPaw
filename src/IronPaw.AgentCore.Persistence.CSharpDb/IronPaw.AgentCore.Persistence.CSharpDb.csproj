@@ -8,6 +8,6 @@
     <ProjectReference Include="..\IronPaw.AgentCore.Abstractions\IronPaw.AgentCore.Abstractions.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Domain\IronPaw.AgentCore.Domain.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Persistence\IronPaw.AgentCore.Persistence.csproj" />
-    <PackageReference Include="CSharpDB.Engine" Version="[4.6.6]" />
+    <PackageReference Include="CSharpDB.Engine" Version="[4.7.1]" />
   </ItemGroup>
 </Project>
