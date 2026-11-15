@@ -287,7 +287,7 @@ public sealed class TrustedLocalTaskVerificationWorkerTests
         var source = Directory.CreateDirectory(Path.Combine(_root, "source")).FullName;
         await File.WriteAllBytesAsync(Path.Combine(source, "Fixture.dll"), FixtureBytes.Value);
         await File.WriteAllTextAsync(Path.Combine(source, "Fixture.runtimeconfig.json"),
-            "{\"runtimeOptions\":{\"tfm\":\"net10.0\",\"framework\":{\"name\":\"Microsoft.NETCore.App\",\"version\":\"10.0.0\"}}}");
+            "{\"runtimeOptions\":{\"tfm\":\"net11.0\",\"framework\":{\"name\":\"Microsoft.NETCore.App\",\"version\":\"11.0.0\"}}}");
         await File.WriteAllTextAsync(Path.Combine(source, "source.txt"), "committed");
         if (preexistingReport) await File.WriteAllTextAsync(Path.Combine(source, "results.trx"), "candidate supplied report");
         await GitAsync(source, ["init"]);

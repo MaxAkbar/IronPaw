@@ -18,7 +18,7 @@ At runtime, each skill is registered as a tool named `skill_<skill_name>` in the
 mkdir src/IronPaw.Skills.MyAddin
 cd src/IronPaw.Skills.MyAddin
 
-dotnet new classlib -n IronPaw.Skills.MyAddin --framework net10.0
+dotnet new classlib -n IronPaw.Skills.MyAddin --framework net11.0
 ```
 
 Edit the `.csproj` to reference Abstractions and auto-copy the DLL to the add-ins directory:
@@ -27,7 +27,7 @@ Edit the `.csproj` to reference Abstractions and auto-copy the DLL to the add-in
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>

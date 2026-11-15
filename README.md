@@ -1,6 +1,6 @@
 # IronPaw
 
-IronPaw is a .NET 10 framework for building AI assistants that work with files, browse websites and delegate tasks to specialist agents. Use it through the Windows desktop app, from a terminal, or as a library in your own C# application.
+IronPaw is a .NET 11 framework for building AI assistants that work with files, browse websites and delegate tasks to specialist agents. Use it through the Windows desktop app, from a terminal, or as a library in your own C# application.
 
 You choose the model and the tools it can use. IronPaw coordinates the work, shows what is happening and saves a record you can return to later.
 

@@ -362,6 +362,8 @@ public partial class MainWindow : Window
 
     private void UpdateControls()
     {
+        // Pending asynchronous callbacks can outlive the window and its service provider.
+        if (_closing) return;
         if (RunButton is null || LoadConnectorsButton is null || LoadBrowserButton is null || ToolProfileComboBox is null) return;
         var running = _activeRootRunId is not null;
         var graphRunning = _activeGraphId is not null;

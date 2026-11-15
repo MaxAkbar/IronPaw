@@ -353,6 +353,23 @@ public sealed class TaskGraphDesktopTests
         Assert.AreEqual(0, scope.Client.Calls);
     });
 
+    [TestMethod]
+    public Task ControlRefreshAfterClosingDoesNotAccessDisposedHost() => RunInSta(() =>
+    {
+        using var scope = new Scope();
+        scope.Accept("closed-host-graph");
+        var window = scope.ShowWindow();
+        WaitFor(() => ((ComboBox)window.FindName("GraphTasksComboBox")).Items.Count == 2
+            && ((Button)window.FindName("ResumeGraphButton")).IsEnabled);
+        window.Close();
+        WaitFor(() => !window.IsVisible);
+
+        // An asynchronous graph refresh can deliver control updates after the host closes.
+        ((CheckBox)window.FindName("GraphLocalVerificationCheckBox")).RaiseEvent(new RoutedEventArgs(CheckBox.CheckedEvent));
+        Assert.IsFalse(window.IsVisible);
+        Assert.AreEqual(0, scope.Client.Calls);
+    });
+
     private static TaskVerificationLog EmptyLog() => new("", TaskVerificationIdentity.EmptyLogDigest, 0, false);
 
     private static void SelectGraph(MainWindow window, string graphId)

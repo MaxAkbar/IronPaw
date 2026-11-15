@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -8,14 +8,14 @@
   <ItemGroup>
     <ProjectReference Include="..\IronPaw.Workflow.CrashHarness\IronPaw.Workflow.CrashHarness.csproj" />
     <PackageReference Include="coverlet.collector" Version="10.1.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Mcp\IronPaw.AgentCore.Mcp.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore\IronPaw.AgentCore.csproj" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Persistence.CSharpDb\IronPaw.AgentCore.Persistence.CSharpDb.csproj" />
-    <PackageReference Include="MSTest.TestFramework" Version="4.5.2" />
-    <PackageReference Include="MSTest.TestAdapter" Version="4.5.2" />
-    <PackageReference Include="MSTest.Analyzers" Version="4.5.2" PrivateAssets="all" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.5.3" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.5.3" />
+    <PackageReference Include="MSTest.Analyzers" Version="4.5.3" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\TestAssemblyConfiguration.cs" Link="TestAssemblyConfiguration.cs" />

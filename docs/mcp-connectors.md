@@ -1,7 +1,7 @@
 # MCP connector adapter
 
 IronPaw provides an embedding API and reviewed CLI/Desktop host setup in `IronPaw.AgentCore.Mcp`, using
-[the official C# SDK](https://github.com/modelcontextprotocol/csharp-sdk/tree/v2.2.0).
+[the official C# SDK](https://github.com/modelcontextprotocol/csharp-sdk/tree/v2.4.0).
 It turns explicitly reviewed server tools into ordinary `ITool` instances so the existing
 orchestrator owns tool hooks, approvals, durable intent/results, shared workflow budgets,
 execution events and diagnostic spans. Construction and registry discovery do no transport I/O.

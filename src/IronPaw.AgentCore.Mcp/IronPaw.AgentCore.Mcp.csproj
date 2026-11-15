@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -8,10 +8,8 @@
     <ProjectReference Include="..\IronPaw.AgentCore.Abstractions\IronPaw.AgentCore.Abstractions.csproj" />
     <ProjectReference Include="..\IronPaw.AgentCore.Tools\IronPaw.AgentCore.Tools.csproj" />
     <PackageReference Include="ModelContextProtocol.Core" Version="2.4.0" />
-    <PackageReference Include="JsonSchema.Net" Version="9.6.0" />
-    <!-- The SDK uses minimum versions; pin the current stable abstractions. -->
-    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.11.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
+    <PackageReference Include="JsonSchema.Net" Version="9.7.0" />
+    <!-- The SDK uses minimum versions; pin the current stable AI abstractions. -->
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="11.0.0" />
   </ItemGroup>
 </Project>

@@ -382,7 +382,7 @@ public sealed class TaskCommandVerificationIntegrationTests
             if (withProject)
             {
                 await File.WriteAllTextAsync(Path.Combine(scope.Source, "Fixture.csproj"), """
-                    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup></Project>
+                    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net11.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup></Project>
                     """);
                 await File.WriteAllTextAsync(Path.Combine(scope.Source, "NuGet.Config"), "<configuration><packageSources><clear /></packageSources></configuration>");
                 await File.WriteAllTextAsync(Path.Combine(scope.Source, "Program.cs"), """"

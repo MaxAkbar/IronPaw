@@ -28,7 +28,7 @@ removing browser versions used by other projects. A private cache can be selecte
 ```powershell
 $env:PLAYWRIGHT_SKIP_BROWSER_GC = '1'
 dotnet build src/IronPaw.Cli -c Release -warnaserror
-./src/IronPaw.Cli/bin/Release/net10.0/playwright.ps1 install chromium --only-shell
+./src/IronPaw.Cli/bin/Release/net11.0/playwright.ps1 install chromium --only-shell
 ./eng/Validate.ps1 -OutputDirectory C:\Temp\ironpaw-validation-001
 ./eng/Audit-Dependencies.ps1 -OutputDirectory C:\Temp\ironpaw-dependencies-001
 ./eng/Package.ps1 -ValidationDirectory C:\Temp\ironpaw-validation-001 -OutputDirectory C:\Temp\ironpaw-package-001

@@ -323,7 +323,7 @@ public sealed class LiveEvaluationRunner
             var candidate = Path.Combine(directory, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
             if (File.Exists(candidate)) return Path.GetFullPath(candidate);
         }
-        throw new InvalidOperationException("Live evaluation requires a .NET 10 SDK on PATH.");
+        throw new InvalidOperationException("Live evaluation requires a .NET 11 SDK on PATH.");
     }
     private static string ExecutableDigest(string path) => "sha256:" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
     private static async Task SaveReportAsync(LiveEvaluationCampaignReport report, string output, CancellationToken ct)

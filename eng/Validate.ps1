@@ -68,10 +68,10 @@ try {
         $failed += [int]$counters.failed; $skipped += [int]$counters.notExecuted
     }
     if ($failed -ne 0 -or $skipped -ne 0 -or $total -ne $passed) { throw 'All tests must pass; skipped tests do not satisfy the release check.' }
-    Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net10.0/IronPaw.Cli.dll', '--validate-config', 'docs/examples/settings.example.json')
-    Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net10.0/IronPaw.Cli.dll', '--validate-evaluation-config', 'docs/examples/live-evaluation.example.json')
-    Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net10.0/IronPaw.Cli.dll', '--inspect-mcp-config', 'docs/examples/mcp.example.json')
-    Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net10.0/IronPaw.Cli.dll', '--inspect-browser-config', 'docs/examples/browser.example.json')
+    Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net11.0/IronPaw.Cli.dll', '--validate-config', 'docs/examples/settings.example.json')
+    Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net11.0/IronPaw.Cli.dll', '--validate-evaluation-config', 'docs/examples/live-evaluation.example.json')
+    Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net11.0/IronPaw.Cli.dll', '--inspect-mcp-config', 'docs/examples/mcp.example.json')
+    Invoke-ValidationDotnet -Arguments @('src/IronPaw.Cli/bin/Release/net11.0/IronPaw.Cli.dll', '--inspect-browser-config', 'docs/examples/browser.example.json')
     if ($sourceManifest -cne (@(Get-ValidationSourceManifest) | ConvertTo-Json -Depth 4)) {
         throw 'Source files changed during validation. Preserve this evidence and rerun against a stable source tree.'
     }

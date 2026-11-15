@@ -63,7 +63,7 @@ quality/cost/latency gate remains `NOT_ESTABLISHED`.
 
 ## Repeatable local and CI checks
 
-The repository's `global.json` pins SDK `10.0.402` with SDK roll-forward disabled. Install that SDK
+The repository's `global.json` pins SDK `11.0.100` with SDK roll-forward disabled. Install that SDK
 before building; an unrelated preview SDK is not selected automatically. See Microsoft's
 [SDK selection rules](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json).
 
@@ -79,7 +79,7 @@ TRX results with zero failures/skips, and validates both example settings docume
 provider credentials and runtime defaults within the script process, uses the safe application
 example, then restores that process's environment. It does not run live evaluation campaigns.
 
-The ten test projects use MSTest 4.5.1 with Microsoft's test SDK and adapter. Test classes can run
+The ten test projects use MSTest 4.5.3 with Microsoft's test SDK and adapter. Test classes can run
 concurrently; methods and data rows within each class stay sequential. Execution-diagnostics tests
 run separately because they observe process-wide telemetry. Fixture cleanup uses `TestCleanup`,
 and desktop tests retain their explicit STA dispatcher probes. CSharpDB process-recovery tests

@@ -17,7 +17,7 @@ internal static class LiveEvaluationCorpus
 {
     public const string Protocol = "ironpaw-paired-code-doc/v1";
     public static readonly WorkflowBudget Budget = new(24, 24, 200_000, TimeSpan.FromMinutes(5));
-    private const string Project = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup></Project>";
+    private const string Project = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net11.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup></Project>";
     public static string Method(string caseId) => caseId switch { "addition" => "Add", "subtraction" => "Subtract", "multiplication" => "Multiply", _ => throw new ArgumentException("Unknown corpus case.") };
     private static string Operator(string caseId) => caseId switch { "addition" => "+", "subtraction" => "-", "multiplication" => "*", _ => throw new ArgumentException("Unknown corpus case.") };
     public static string Documentation(string caseId) => $"Calc.{Method(caseId)} uses checked integer {caseId}.";

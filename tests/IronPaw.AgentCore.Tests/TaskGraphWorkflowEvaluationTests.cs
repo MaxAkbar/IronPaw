@@ -292,7 +292,7 @@ public sealed class TaskGraphWorkflowEvaluationTests
 
     private sealed class Scope : IAsyncDisposable
     {
-        private const string Project = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup></Project>";
+        private const string Project = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net11.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup></Project>";
         private const string InitialSource = "public static class Calc { public static int Add(int left, int right) => left - right; }";
         private const string NugetConfig = "<configuration><packageSources><clear /></packageSources></configuration>";
         private const string Program = """
