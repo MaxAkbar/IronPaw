@@ -11,7 +11,7 @@
     <PackageReference Include="MSTest.TestFramework" Version="4.5.3" />
     <PackageReference Include="MSTest.TestAdapter" Version="4.5.3" />
     <PackageReference Include="MSTest.Analyzers" Version="4.5.3" PrivateAssets="all" />
-    <PackageReference Include="coverlet.collector" Version="10.1.0" />
+    <PackageReference Include="coverlet.collector" Version="10.1.1" />
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
     <Compile Include="..\TestAssemblyConfiguration.cs" Link="TestAssemblyConfiguration.cs" />
     <Compile Include="..\LoopbackHttpServer.cs" Link="LoopbackHttpServer.cs" />

@@ -7,7 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\IronPaw.Workflow.CrashHarness\IronPaw.Workflow.CrashHarness.csproj" />
-    <PackageReference Include="coverlet.collector" Version="10.1.0" />
+    <PackageReference Include="coverlet.collector" Version="10.1.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
     <ProjectReference Include="..\..\src\IronPaw.AgentCore.Mcp\IronPaw.AgentCore.Mcp.csproj" />
