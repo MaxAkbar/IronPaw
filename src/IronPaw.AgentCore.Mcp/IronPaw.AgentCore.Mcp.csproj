@@ -10,6 +10,6 @@
     <PackageReference Include="ModelContextProtocol.Core" Version="2.4.0" />
     <PackageReference Include="JsonSchema.Net" Version="9.7.0" />
     <!-- The SDK uses minimum versions; pin the current stable AI abstractions. -->
-    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="11.0.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="11.0.1" />
   </ItemGroup>
 </Project>
